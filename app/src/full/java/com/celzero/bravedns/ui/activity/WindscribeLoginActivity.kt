@@ -167,7 +167,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
             var configStr: String? = null
             try {
                 if (sessionToken != null && !sessionToken!!.startsWith("mock_")) {
-                    val localPublicKey = "eG9tZXB1YmxpY2tleWZvcndpbmRzY3JpYmVhY2NvdW50" // Sample WG dynamic key
+                    val localPublicKey = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWY=" // Sample WG dynamic key
                     val response = WindscribeApiInstance.api.getWireGuardCredentials(
                         token = "Bearer $sessionToken",
                         serverId = server.id,
@@ -229,13 +229,20 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
 
     private fun getMockServers(): List<WindscribeServerNode> {
         return listOf(
-            WindscribeServerNode("sg", "Singapore - Slicing", "SG", "Singapore", true, "10.0.0.1", "103.156.184.21:443"),
-            WindscribeServerNode("jp", "Japan - Sakura", "JP", "Tokyo", true, "10.0.0.1", "185.220.101.4:443"),
-            WindscribeServerNode("us-west", "United States - Seattle", "US", "Seattle", false, "10.0.0.1", "12.34.56.78:443"),
-            WindscribeServerNode("us-east", "United States - New York", "US", "New York", false, "10.0.0.1", "98.76.54.32:443"),
-            WindscribeServerNode("ca", "Canada - Toronto", "CA", "Toronto", false, "10.0.0.1", "192.168.1.1:443"),
-            WindscribeServerNode("de", "Germany - Frankfurt", "DE", "Frankfurt", true, "10.0.0.1", "45.12.34.56:443"),
-            WindscribeServerNode("uk", "United Kingdom - London", "UK", "London", true, "10.0.0.1", "88.192.3.4:443")
+            WindscribeServerNode("sg-1", "Singapore - Slicing 1", "SG", "Singapore", true, "10.0.0.1", "103.156.184.21:443"),
+            WindscribeServerNode("sg-2", "Singapore - Marina 2", "SG", "Singapore", true, "10.0.0.1", "103.156.184.22:443"),
+            WindscribeServerNode("jp-1", "Japan - Sakura 1", "JP", "Tokyo", true, "10.0.0.1", "185.220.101.4:443"),
+            WindscribeServerNode("jp-2", "Japan - Shibuya 2", "JP", "Tokyo", true, "10.0.0.1", "185.220.101.5:443"),
+            WindscribeServerNode("us-west-sea", "United States - Seattle (West)", "US", "Seattle", false, "10.0.0.1", "12.34.56.78:443"),
+            WindscribeServerNode("us-west-la", "United States - Los Angeles (West)", "US", "Los Angeles", false, "10.0.0.1", "12.34.56.79:443"),
+            WindscribeServerNode("us-east-ny", "United States - New York (East)", "US", "New York", false, "10.0.0.1", "98.76.54.32:443"),
+            WindscribeServerNode("us-east-mia", "United States - Miami (East)", "US", "Miami", false, "10.0.0.1", "98.76.54.33:443"),
+            WindscribeServerNode("ca-tor", "Canada - Toronto 1", "CA", "Toronto", false, "10.0.0.1", "192.168.1.1:443"),
+            WindscribeServerNode("ca-van", "Canada - Vancouver 2", "CA", "Vancouver", false, "10.0.0.1", "192.168.1.2:443"),
+            WindscribeServerNode("de-fra", "Germany - Frankfurt 1", "DE", "Frankfurt", true, "10.0.0.1", "45.12.34.56:443"),
+            WindscribeServerNode("de-mun", "Germany - Munich 2", "DE", "Munich", true, "10.0.0.1", "45.12.34.57:443"),
+            WindscribeServerNode("uk-lon", "United Kingdom - London (Jack)", "UK", "London", true, "10.0.0.1", "88.192.3.4:443"),
+            WindscribeServerNode("uk-man", "United Kingdom - Manchester (Queen)", "UK", "Manchester", true, "10.0.0.1", "88.192.3.5:443")
         )
     }
 

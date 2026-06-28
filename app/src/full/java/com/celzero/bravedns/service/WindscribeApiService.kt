@@ -100,12 +100,12 @@ object WindscribeApiInstance {
     fun generateMockupWgConfig(serverName: String, endpoint: String): String {
         return """
             [Interface]
-            PrivateKey = eG9tZXByaXZhdGVrZXlmb3J3aW5kc2NyaWJlYWNjb3VudA==
+            PrivateKey = YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=
             Address = 10.124.0.2/32, fd00::2/128
             DNS = 10.255.255.3
 
             [Peer]
-            PublicKey = d2luZHNjcmliZXNlcnZlcnB1YmxpY2tleWFzaGdhYmFkd2c=
+            PublicKey = QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWY=
             Endpoint = ${endpoint.ifEmpty { "103.156.184.21:443" }}
             AllowedIPs = 0.0.0.0/0, ::/0
             PersistentKeepalive = 25
