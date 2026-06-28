@@ -147,17 +147,22 @@ object TunnelImporter : KoinComponent {
             }
         }
 
-    suspend fun importTunnel(configText: String, messageCallback: (CharSequence) -> Unit) {
+    suspend fun importTunnel(configText: String, name: String = "", messageCallback: (CharSequence) -> Unit) {
         withContext(Dispatchers.IO) {
             try {
-                Logger.d(LOG_TAG_PROXY, "Importing tunnel: $configText")
+                Logger.d(LOG_TAG_PROXY, "Importing tunnel: $configText with name: $name")
                 val config =
                     Config.parse(
                         ByteArrayInputStream(configText.toByteArray(StandardCharsets.UTF_8))
                     )
-                WireguardManager.addConfig(config)
+                WireguardManager.addConfig(config, name)
+                withContext(Dispatchers.Main.immediate) {
+                    onTunnelImportFinished(emptyList(), messageCallback)
+                }
             } catch (e: Throwable) {
-                onTunnelImportFinished(listOf(e), messageCallback)
+                withContext(Dispatchers.Main.immediate) {
+                    onTunnelImportFinished(listOf(e), messageCallback)
+                }
             }
         }
     }

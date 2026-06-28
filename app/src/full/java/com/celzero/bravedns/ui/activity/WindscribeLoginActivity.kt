@@ -200,12 +200,18 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
             }
 
             // Inject the generated WireGuard profile directly into RethinkDNS Room Database
-            TunnelImporter.importTunnel(configStr!!) { resultMessage ->
+            TunnelImporter.importTunnel(configStr!!, "Windscribe - ${server.name}") { resultMessage ->
                 lifecycleScope.launch(Dispatchers.Main) {
                     showLoading(false)
-                    b.tvSubStatus.text = "Connected profile imported: ${server.name}"
-                    Toast.makeText(this@WindscribeLoginActivity, "Profile 'Windscribe - ${server.name}' Berhasil Diimpor!", Toast.LENGTH_LONG).show()
-                    finish() // Close login activity and return to WgMainActivity list
+                    val successMsg = getString(R.string.config_add_success_toast)
+                    if (resultMessage.toString() == successMsg) {
+                        b.tvSubStatus.text = "Connected profile imported: ${server.name}"
+                        Toast.makeText(this@WindscribeLoginActivity, "Profile 'Windscribe - ${server.name}' Berhasil Diimpor!", Toast.LENGTH_LONG).show()
+                        finish() // Close login activity and return to WgMainActivity list
+                    } else {
+                        b.tvSubStatus.text = "Gagal mengimpor: $resultMessage"
+                        Toast.makeText(this@WindscribeLoginActivity, "Gagal mengimpor: $resultMessage", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
