@@ -15,11 +15,14 @@
  */
 package com.celzero.bravedns.ui.activity
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
-import android.security.KeyChain
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.View
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
@@ -35,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
+import java.io.File
 
 /**
  * CertificateSetupActivity handles the generation and user installation of the local
@@ -97,18 +101,28 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
             }
         }
 
-        // Install Certificate button click
+        // Save Certificate button click
         b.btnInstall.setOnClickListener {
             try {
                 val certBytes = CertificateAuthority.exportCaCert()
-                val intent = KeyChain.createInstallIntent()
-                intent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes)
-                intent.putExtra(KeyChain.EXTRA_NAME, "RethinkDNS Plus CA")
-                startActivity(intent)
+                val savedPath = saveCertificateToDownloads(certBytes)
+                if (savedPath != null) {
+                    Toast.makeText(
+                        this,
+                        "CA Certificate saved successfully to: $savedPath",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Failed to save certificate to Downloads folder",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } catch (e: Exception) {
                 Toast.makeText(
                     this,
-                    "Failed to export/install CA certificate: ${e.message}",
+                    "Failed to export CA certificate: ${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -117,6 +131,56 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
         // Enable HTTPS Inspection toggle listener
         b.switchHttpsInspection.setOnCheckedChangeListener { _, isChecked ->
             persistentState.httpsInspectionEnabled = isChecked
+        }
+    }
+
+    private fun saveCertificateToDownloads(certBytes: ByteArray): String? {
+        val filename = "rethinkdns_ca.pem"
+        val mimeType = "application/x-x509-ca-cert"
+
+        val base64Cert = android.util.Base64.encodeToString(certBytes, android.util.Base64.NO_WRAP)
+        val pemString = buildString {
+            appendLine("-----BEGIN CERTIFICATE-----")
+            var index = 0
+            while (index < base64Cert.length) {
+                val end = (index + 64).coerceAtMost(base64Cert.length)
+                appendLine(base64Cert.substring(index, end))
+                index += 64
+            }
+            append("-----END CERTIFICATE-----")
+        }
+        val pemBytes = pemString.toByteArray(Charsets.UTF_8)
+
+        val resolver = contentResolver
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(pemBytes)
+                        outputStream.flush()
+                    }
+                    "Downloads/$filename"
+                } else {
+                    null
+                }
+            } else {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs()
+                }
+                val file = File(downloadsDir, filename)
+                file.writeBytes(pemBytes)
+                file.absolutePath
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 
@@ -147,7 +211,11 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
      * Updates the text, colors, backgrounds, and enabled state of the buttons based on Root CA status.
      */
     private fun updateUiStatus() {
-        val isInstalled = CertificateAuthority.isCaInstalled()
+        val isInstalled = try {
+            CertificateAuthority.isCaInstalled()
+        } catch (e: Exception) {
+            false
+        }
         if (isInstalled) {
             b.tvInstallBadge.text = "✅ INSTALLED"
             b.tvInstallBadge.setTextColor(Color.parseColor("#388E3C")) // Dark green

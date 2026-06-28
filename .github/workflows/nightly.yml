@@ -66,6 +66,9 @@ jobs:
           gpg -d --passphrase "${{ secrets.ALPHA_KS_PASSPHRASE }}" --batch alphaKeystore.jks.asc > app/rdnsAlpha.jks
           wc -wcl alphaKeystore.jks.asc app/rdnsAlpha.jks
 
+      - name: Remove local java.home from gradle.properties
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
       - name: 🏗️ Build & notify
         run: |
           ./gradlew ${ALPHA_BUILD_VARIANT} --info --warning-mode all

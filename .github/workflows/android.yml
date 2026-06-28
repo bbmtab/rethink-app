@@ -22,6 +22,8 @@ jobs:
         cache: gradle
     - name: ⚡️ +x gradlew
       run: chmod +x gradlew
+    - name: Remove local java.home from gradle.properties
+      run: sed -i '/org.gradle.java.home/d' gradle.properties
     - name: 🎪 Secrets
       if: success()
       # TODO: override iff it doesn't exist
