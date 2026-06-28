@@ -33,6 +33,9 @@
         android:name="android.permission.INTERACT_ACROSS_USERS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Required for in-app APK update installation -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- https://github.com/celzero/rethink-app/issues/786 set memtagMode to off -->
     <application
         android:name=".RethinkDnsApplication"

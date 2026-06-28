@@ -591,10 +591,23 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
 
             override fun onUpdateAvailable(installSource: AppUpdater.InstallSource) {
                 runOnUiThread {
+                    val updater = get<NonStoreAppUpdater>()
+                    val latestVer = updater.latestVersionName
+                    val changelog = updater.latestChangelog
+                    val title = if (latestVer != null) {
+                        "Update Available: $latestVer"
+                    } else {
+                        getString(R.string.download_update_dialog_title)
+                    }
+                    val message = if (!changelog.isNullOrEmpty()) {
+                        "A new version is available! Here are the release notes:\n\n$changelog"
+                    } else {
+                        getString(R.string.download_update_dialog_message)
+                    }
                     showDownloadDialog(
                         installSource,
-                        getString(R.string.download_update_dialog_title),
-                        getString(R.string.download_update_dialog_message)
+                        title,
+                        message
                     )
                 }
             }
@@ -640,7 +653,7 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
         builder.setTitle(title)
 
         // Determine dialog type based on title to decide if it should be modal
-        val isUpdateAvailable = title == getString(R.string.download_update_dialog_title)
+        val isUpdateAvailable = title.startsWith("Update Available") || title == getString(R.string.download_update_dialog_title)
         val isUpToDate = message == getString(R.string.download_update_dialog_message_ok)
         val isError = message == getString(R.string.download_update_dialog_failure_message)
         val isQuotaExceeded = message == getString(R.string.download_update_dialog_trylater_message)
@@ -710,18 +723,70 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
     }
 
     private fun initiateDownload() {
-        try {
-            val url = Constants.RETHINK_APP_DOWNLOAD_LINK
-            val uri = url.toUri()
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.data = uri
-            intent.addCategory(Intent.CATEGORY_BROWSABLE)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            showToastUiCentered(this, getString(R.string.no_browser_error), Toast.LENGTH_SHORT)
-            Logger.w(Logger.LOG_TAG_VPN, "err opening rethink download link: ${e.message}", e)
+        val updater = get<NonStoreAppUpdater>()
+        if (updater.downloadUrl != null) {
+            startInAppDownload(updater)
+        } else {
+            try {
+                val url = Constants.RETHINK_APP_DOWNLOAD_LINK
+                val uri = url.toUri()
+                val intent = Intent(Intent.ACTION_VIEW)
+                intent.data = uri
+                intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(intent)
+            } catch (e: ActivityNotFoundException) {
+                showToastUiCentered(this, getString(R.string.no_browser_error), Toast.LENGTH_SHORT)
+                Logger.w(Logger.LOG_TAG_VPN, "err opening rethink download link: ${e.message}", e)
+            }
         }
+    }
+
+    private fun startInAppDownload(updater: NonStoreAppUpdater) {
+        val padding = (24 * resources.displayMetrics.density).toInt()
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, padding)
+        }
+
+        val textView = android.widget.TextView(this).apply {
+            text = "Downloading update... (0%)"
+            textSize = 15f
+            setPadding(0, 0, 0, (16 * resources.displayMetrics.density).toInt())
+        }
+
+        val progressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = false
+            max = 100
+            progress = 0
+        }
+
+        layout.addView(textView)
+        layout.addView(progressBar)
+
+        val progressDialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Downloading RethinkDNS Plus Update")
+            .setView(layout)
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        updater.downloadAndInstallApk(
+            activity = this,
+            onProgress = { progress ->
+                textView.text = "Downloading update... ($progress%)"
+                progressBar.progress = progress
+            },
+            onFailure = { errorMessage ->
+                progressDialog.dismiss()
+                showDownloadDialog(
+                    AppUpdater.InstallSource.OTHER,
+                    getString(R.string.download_update_dialog_failure_title),
+                    "Failed to download update: $errorMessage"
+                )
+            }
+        )
     }
 
     override fun onStop() {
