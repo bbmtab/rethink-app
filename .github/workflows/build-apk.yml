@@ -38,6 +38,9 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: ${{ runner.os }}-gradle-
 
+      - name: Remove local java.home from gradle.properties
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
