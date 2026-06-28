@@ -138,19 +138,6 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
         val filename = "rethinkdns_ca.crt"
         val mimeType = "application/x-x509-ca-cert"
 
-        val base64Cert = android.util.Base64.encodeToString(certBytes, android.util.Base64.NO_WRAP)
-        val pemString = buildString {
-            appendLine("-----BEGIN CERTIFICATE-----")
-            var index = 0
-            while (index < base64Cert.length) {
-                val end = (index + 64).coerceAtMost(base64Cert.length)
-                appendLine(base64Cert.substring(index, end))
-                index += 64
-            }
-            append("-----END CERTIFICATE-----")
-        }
-        val pemBytes = pemString.toByteArray(Charsets.UTF_8)
-
         val resolver = contentResolver
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -162,7 +149,7 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                 if (uri != null) {
                     resolver.openOutputStream(uri)?.use { outputStream ->
-                        outputStream.write(pemBytes)
+                        outputStream.write(certBytes)
                         outputStream.flush()
                     }
                     "Downloads/$filename"
@@ -175,7 +162,7 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
                     downloadsDir.mkdirs()
                 }
                 val file = File(downloadsDir, filename)
-                file.writeBytes(pemBytes)
+                file.writeBytes(certBytes)
                 file.absolutePath
             }
         } catch (e: Exception) {
