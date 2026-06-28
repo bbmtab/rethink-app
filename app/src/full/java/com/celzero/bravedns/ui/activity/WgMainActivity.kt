@@ -361,6 +361,7 @@ class WgMainActivity :
         }
         b.createFab.setOnClickListener { openTunnelEditorActivity() }
         b.deleteAllFab.setOnClickListener { showDeleteAllInterfacesDialog() }
+        b.windscribeFab.setOnClickListener { openWindscribeLoginActivity() }
 
         b.wgGeneralToggleBtn.setOnClickListener {
             if (WireguardManager.oneWireGuardEnabled()) {
@@ -422,6 +423,11 @@ class WgMainActivity :
         startActivity(intent)
     }
 
+    private fun openWindscribeLoginActivity() {
+        val intent = Intent(this, WindscribeLoginActivity::class.java)
+        startActivity(intent)
+    }
+
     private fun showDisableDialog(isOneWgToggle: Boolean) {
         // show alert dialog with don't show again toggle in it
         MaterialAlertDialogBuilder(this, R.style.App_Dialog_NoDim)
@@ -478,10 +484,12 @@ class WgMainActivity :
         b.importFab.visibility = View.VISIBLE
         b.qrCodeFab.visibility = View.VISIBLE
         b.deleteAllFab.visibility = View.VISIBLE
+        b.windscribeFab.visibility = View.VISIBLE
         b.createFab.animate().translationY(-resources.getDimension(R.dimen.standard_55))
         b.importFab.animate().translationY(-resources.getDimension(R.dimen.standard_105))
         b.qrCodeFab.animate().translationY(-resources.getDimension(R.dimen.standard_155))
         b.deleteAllFab.animate().translationY(-resources.getDimension(R.dimen.standard_205))
+        b.windscribeFab.animate().translationY(- (resources.getDimension(R.dimen.standard_55) * 4.6f))
     }
 
     private fun collapseFab() {
@@ -489,10 +497,12 @@ class WgMainActivity :
         b.importFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
         b.qrCodeFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
         b.deleteAllFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
+        b.windscribeFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
         b.createFab.visibility = View.GONE
         b.importFab.visibility = View.GONE
         b.qrCodeFab.visibility = View.GONE
         b.deleteAllFab.visibility = View.GONE
+        b.windscribeFab.visibility = View.GONE
     }
 
     private fun logEvent(msg: String, details: String) {

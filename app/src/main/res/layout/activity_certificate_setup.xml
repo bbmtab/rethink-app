@@ -221,7 +221,7 @@
                     <androidx.appcompat.widget.AppCompatTextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="1. Tap 'Save CA Certificate to Downloads' above to save the file 'rethinkdns_ca.pem'.\n\n2. Open your device's Settings app.\n\n3. In the Settings search bar, search for 'CA certificate'.\n   (Or go to: Settings -> Security -> More security settings (or Encryption &amp; credentials) -> Install a certificate -> CA certificate)\n\n4. Confirm when warned with 'Install anyway' and authenticate.\n\n5. Select the saved file 'rethinkdns_ca.pem' from your Downloads folder."
+                        android:text="1. Tap 'Save CA Certificate to Downloads' above to save the file 'rethinkdns_ca.crt'.\n\n2. Open your device's Settings app.\n\n3. In the Settings search bar, search for 'CA certificate'.\n   (Or go to: Settings -> Security -> More security settings (or Encryption &amp; credentials) -> Install a certificate -> CA certificate)\n\n4. Confirm when warned with 'Install anyway' and authenticate.\n\n5. Select the saved file 'rethinkdns_ca.crt' from your Downloads folder."
                         android:textSize="14sp"
                         android:textColor="?android:attr/textColorSecondary"
                         android:lineSpacingMultiplier="1.2" />

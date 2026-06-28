@@ -107,6 +107,9 @@
             android:name=".ui.activity.WgMainActivity"
             android:finishOnTaskLaunch="true" />
         <activity
+            android:name=".ui.activity.WindscribeLoginActivity"
+            android:finishOnTaskLaunch="true" />
+        <activity
             android:name=".ui.activity.WgConfigEditorActivity"
             android:finishOnTaskLaunch="true" />
         <activity

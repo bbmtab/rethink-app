@@ -135,7 +135,7 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
     }
 
     private fun saveCertificateToDownloads(certBytes: ByteArray): String? {
-        val filename = "rethinkdns_ca.pem"
+        val filename = "rethinkdns_ca.crt"
         val mimeType = "application/x-x509-ca-cert"
 
         val base64Cert = android.util.Base64.encodeToString(certBytes, android.util.Base64.NO_WRAP)
