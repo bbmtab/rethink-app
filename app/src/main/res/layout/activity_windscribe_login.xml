@@ -144,7 +144,7 @@
                     android:textStyle="bold"
                     app:cornerRadius="16dp"
                     android:textColor="?attr/homeScreenHeaderTextColor"
-                    app:backgroundTint="?attr/chipColorBgSelected"/>
+                    app:backgroundTint="?attr/chipColorBgHighlight"/>
             </LinearLayout>
 
             <!-- Servers List Group (Visible when logged in) -->
