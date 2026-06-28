@@ -44,6 +44,7 @@ import org.koin.core.component.KoinComponent
  * ViewModel for Rethink Plus subscription management
  * Handles all business logic and state management for the subscription UI
  */
+@Suppress("VarCouldBeVal")
 class RethinkPlusViewModel(application: Application) : AndroidViewModel(application), KoinComponent {
 
     // UI State
