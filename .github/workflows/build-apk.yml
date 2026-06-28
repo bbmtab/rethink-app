@@ -45,35 +45,48 @@ jobs:
         run: chmod +x gradlew
 
       - name: Decode Keystore
-        if: github.event_name != 'pull_request' && secrets.KEYSTORE_BASE64 != ''
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+          else
+            echo "KEYSTORE_BASE64 is empty, skipping decoding."
+          fi
 
       - name: Build Debug APK (PR only)
         if: github.event_name == 'pull_request'
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Build Signed Release APK
-        if: github.event_name != 'pull_request' && secrets.KEYSTORE_BASE64 != ''
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_PATH: app/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=$KEYSTORE_PATH \
-            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
-            --stacktrace
+          if [ -f "app/release.keystore" ]; then
+            ./gradlew assembleRelease \
+              -Pandroid.injected.signing.store.file=$KEYSTORE_PATH \
+              -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+              -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+              -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
+              --stacktrace
+          else
+            echo "Keystore file not found. Skipping signed release build."
+          fi
 
       - name: Build Fail-Safe Debug-Signed APK (Fallback if secrets missing)
-        if: github.event_name != 'pull_request' && secrets.KEYSTORE_BASE64 == ''
+        if: github.event_name != 'pull_request'
         run: |
-          echo "GitHub Repository Secrets are not configured. Falling back to building a fully functional debug-signed Full build..."
-          ./gradlew assembleFdroidFullDebug --stacktrace
+          if [ ! -f "app/release.keystore" ]; then
+            echo "GitHub Repository Secrets are not configured. Falling back to building a fully functional debug-signed Full build..."
+            ./gradlew assembleFdroidFullDebug --stacktrace
+          else
+            echo "Keystore file exists. Skipping fallback debug build."
+          fi
 
       # Rename APK dengan suffix "plus"
       - name: Rename APK with "plus" suffix
