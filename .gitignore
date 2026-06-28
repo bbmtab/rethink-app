@@ -32,3 +32,9 @@ app/google-services.json
 app/fdroidFull/release
 app/playFull/release
 app/websiteFull/release
+
+# Agent specific / private files
+SKILL.md
+architecture_mapping.md
+*.bak
+

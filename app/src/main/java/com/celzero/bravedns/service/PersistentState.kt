@@ -176,6 +176,13 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // default: false
     var allowBypass by booleanPref("allow_bypass").withDefault<Boolean>(false)
 
+    // whether HTTPS inspection is enabled
+    // default: false
+    var httpsInspectionEnabled by booleanPref("https_inspection_enabled").withDefault<Boolean>(false)
+
+    // comma-separated list of hosts to bypass HTTPS inspection
+    var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
+
     // user set among AppConfig.DnsType enum; RETHINK_REMOTE is default which is Rethink-DoH
     var dnsType by
         intPref("dns_type")

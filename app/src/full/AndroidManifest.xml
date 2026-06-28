@@ -169,6 +169,9 @@
             android:name=".ui.activity.AdvancedSettingActivity"
             android:finishOnTaskLaunch="true" />
         <activity
+            android:name=".ui.activity.CertificateSetupActivity"
+            android:finishOnTaskLaunch="true" />
+        <activity
             android:name=".ui.activity.DomainConnectionsActivity"
             android:finishOnTaskLaunch="true" />
         <activity

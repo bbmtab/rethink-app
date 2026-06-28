@@ -1572,6 +1572,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onCreate() {
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.initialize(this, persistentState)
         connTracer = ConnectionTracer(this)
         VpnController.onVpnCreated(this)
 
@@ -3451,6 +3452,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onDestroy() {
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         if (persistentState.firewallBubbleEnabled) {
             BubbleHelper.dismissBubble(this)
         }
@@ -3685,6 +3687,32 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
 
             s.append("mtu: $mtu\n   has4: $has4\n   has6: $has6\n   noRoutes: $noRoutes\n   dnsMode? $dnsMode\n   firewallMode? $firewallMode")
             builderStats = s.toString()
+
+            if (persistentState.httpsInspectionEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
+                try {
+                    // 1. Start proxy sebelum VPN establish
+                    com.celzero.bravedns.core.proxy.LocalHttpsProxy.start()
+
+                    // 2. Inject browser packages ke proxy whitelist
+                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
+                    val browserPackages = packageManager
+                        .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                        .map { it.activityInfo.packageName }
+                        .toSet()
+                    com.celzero.bravedns.core.proxy.LocalHttpsProxy.setAllowedPackages(browserPackages)
+
+                    // 3. Register system proxy
+                    val proxyInfo = android.net.ProxyInfo.buildDirectProxy("localhost", 8443)
+                    builder.setHttpProxy(proxyInfo)
+                    
+                    Logger.i(LOG_TAG_VPN, "HTTPS Inspection Proxy started and registered with VPN interface")
+                } catch (pe: Exception) {
+                    Logger.e(LOG_TAG_VPN, "Failed to start or register LocalHttpsProxy: ${pe.message}", pe)
+                }
+            } else {
+                // If disabled, ensure proxy is stopped
+                com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
+            }
 
             return builder.establish()
         } catch (e: Exception) {
@@ -6123,6 +6151,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onRevoke() {
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         // System invokes onRevoke when the user takes an explicit action that
         // disables this VPN: (a) toggles RethinkDNS off in Android Settings →
         // Network & internet → VPN, (b) selects a different VPN app, or
