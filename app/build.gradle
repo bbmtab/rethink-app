@@ -84,7 +84,7 @@ android {
     namespace 'com.celzero.bravedns'
 
     defaultConfig {
-        applicationId "com.celzero.bravedns"
+        applicationId "com.celzero.bravedns.plus"
         minSdkVersion(23)
         targetSdkVersion 35
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
