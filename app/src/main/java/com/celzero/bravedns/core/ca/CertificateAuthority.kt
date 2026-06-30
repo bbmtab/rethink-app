@@ -1,14 +1,18 @@
 package com.celzero.bravedns.core.ca
 
+import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.*
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier
+import org.bouncycastle.operator.ContentSigner
+import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import java.math.BigInteger
 import java.security.*
 import java.security.cert.X509Certificate
@@ -25,7 +29,6 @@ object CertificateAuthority {
 
     private const val TAG = "CertificateAuthority"
     private const val ROOT_CA_ALIAS = "RethinkDNSRootCA"
-    private const val KEYSTORE_PROVIDER_ANDROID = "AndroidKeyStore"
     private const val SIGNATURE_ALGORITHM = "SHA256withRSA"
 
     data class KeyAndCert(val privateKey: PrivateKey, val certificate: X509Certificate)
@@ -61,43 +64,80 @@ object CertificateAuthority {
     private var rootCertificate: X509Certificate? = null
 
     init {
-        // Register BouncyCastle Provider dynamically if not already registered
+        // Register BouncyCastle provider if it is not already registered (critical for JVM unit tests and some devices)
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
             Security.addProvider(BouncyCastleProvider())
         }
+    }
+
+    /**
+     * Initializes the Root Certificate Authority with an Android Context for persistent storage.
+     * Call this variant on Android devices.
+     */
+    @Synchronized
+    fun initializeCA(context: Context) {
         initializeCA()
     }
 
     /**
      * Initializes the Root Certificate Authority.
-     * Loads the existing Root CA from the keystore, or generates a new one if it doesn't exist.
+     * Loads the existing Root CA from AndroidKeyStore, or generates a new one.
+     * For unit tests (JVM), falls back to a software keystore since AndroidKeyStore is not available.
      */
     @Synchronized
     fun initializeCA() {
         try {
-            val keyStore = getKeystoreInstance()
-            
+            val keyStore = try {
+                KeyStore.getInstance("AndroidKeyStore")
+            } catch (e: Exception) {
+                // Fallback for JVM unit tests - use PKCS12 software keystore
+                KeyStore.getInstance("PKCS12")
+            }
+            keyStore.load(null)
+
             if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
-                rootPrivateKey = keyStore.getKey(ROOT_CA_ALIAS, null) as? PrivateKey
-                rootCertificate = keyStore.getCertificate(ROOT_CA_ALIAS) as? X509Certificate
+                val key = keyStore.getKey(ROOT_CA_ALIAS, null)
+                val cert = keyStore.getCertificate(ROOT_CA_ALIAS)
+                if (key is PrivateKey && cert is X509Certificate) {
+                    rootPrivateKey = key
+                    rootCertificate = cert
+                    return
+                }
             }
 
-            if (rootPrivateKey == null || rootCertificate == null) {
-                generateAndStoreRootCA(keyStore)
-            }
+            // No valid CA found — generate a new one and persist it in AndroidKeyStore
+            generateAndStoreRootCA(keyStore)
         } catch (e: Exception) {
-            // Log fallback or handle initialization errors
             e.printStackTrace()
         }
     }
 
-    /**
-     * Dynamically generates a domain-specific leaf certificate signed by the Root CA.
-     * If a certificate for the host is already in the cache, it returns it directly.
-     *
-     * @param hostname The target domain (e.g. "google.com")
-     * @return The generated X509Certificate
-     */
+    @Synchronized
+    private fun loadFromKeyStoreOnly(): Boolean {
+        try {
+            val keyStore = try {
+                KeyStore.getInstance("AndroidKeyStore")
+            } catch (e: Exception) {
+                // Fallback for JVM unit tests - use PKCS12 software keystore
+                KeyStore.getInstance("PKCS12")
+            }
+            keyStore.load(null)
+
+            if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
+                val key = keyStore.getKey(ROOT_CA_ALIAS, null)
+                val cert = keyStore.getCertificate(ROOT_CA_ALIAS)
+                if (key is PrivateKey && cert is X509Certificate) {
+                    rootPrivateKey = key
+                    rootCertificate = cert
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return false
+    }
+
     /**
      * Dynamically generates a domain-specific leaf certificate signed by the Root CA.
      * If a certificate for the host is already in the cache, it returns it directly.
@@ -127,6 +167,10 @@ object CertificateAuthority {
                 // Cert has expired, remove from cache and regenerate
                 leafCertCache.remove(hostname)
             }
+        }
+
+        if (rootPrivateKey == null || rootCertificate == null) {
+            loadFromKeyStoreOnly()
         }
 
         val rootPriv = rootPrivateKey ?: throw IllegalStateException("Root CA Private Key is not initialized")
@@ -170,14 +214,12 @@ object CertificateAuthority {
         val san = GeneralNames(GeneralName(GeneralName.dNSName, hostname))
         certBuilder.addExtension(Extension.subjectAlternativeName, false, san)
 
-        // Sign using Root CA Private Key
-        val signer = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-            .build(rootPriv)
-        
+        // Sign using Root CA Private Key via AndroidKeyStore ContentSigner
+        val signer = AndroidKeyStoreContentSigner(rootPriv)
+
         val holder = certBuilder.build(signer)
         val leafCert = JcaX509CertificateConverter()
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+            .setProvider(BouncyCastleProvider())
             .getCertificate(holder)
 
         val keyAndCert = KeyAndCert(keyPair.private, leafCert)
@@ -187,13 +229,134 @@ object CertificateAuthority {
     }
 
     /**
+     * Generates and securely stores the self-signed Root CA.
+     *
+     * On Android: generates keypair directly in AndroidKeyStore (non-extractable, hardware-backed when available)
+     * On JVM (unit tests): uses software keystore (PKCS12)
+     * We use a custom ContentSigner that delegates signing to the keystore's Signature implementation,
+     * allowing BouncyCastle to build certificates without extracting the private key material.
+     */
+    private fun generateAndStoreRootCA(keyStore: KeyStore) {
+        val issuer = X500Name("CN=RethinkDNS Root CA, O=RethinkDNS, C=US")
+        val serial = BigInteger.valueOf(System.currentTimeMillis())
+        val notBefore = Date()
+        val notAfter = Date(notBefore.time + 10L * 365 * 24 * 60 * 60 * 1000) // 10 years validity
+
+        val isAndroidKeyStore = keyStore.provider.name == "AndroidKeyStore"
+        val keyPair: KeyPair
+
+        if (isAndroidKeyStore) {
+            // Generate keypair directly in AndroidKeyStore (non-extractable, hardware-backed when available)
+            val kpg = KeyPairGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_RSA,
+                "AndroidKeyStore"
+            )
+            val start = Calendar.getInstance()
+            val end = Calendar.getInstance().apply {
+                time = start.time
+                add(Calendar.YEAR, 10)
+            }
+            kpg.initialize(
+                KeyGenParameterSpec.Builder(ROOT_CA_ALIAS, KeyProperties.PURPOSE_SIGN)
+                    .setKeySize(2048)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+                    .setCertificateSubject(javax.security.auth.x500.X500Principal("CN=RethinkDNS Root CA, O=RethinkDNS, C=US"))
+                    .setCertificateSerialNumber(serial)
+                    .setCertificateNotBefore(start.time)
+                    .setCertificateNotAfter(end.time)
+                    .build()
+            )
+            keyPair = kpg.generateKeyPair()
+        } else {
+            // Software keystore for JVM unit tests
+            val kpg = KeyPairGenerator.getInstance("RSA")
+            kpg.initialize(2048)
+            keyPair = kpg.generateKeyPair()
+        }
+
+        // Get the public key for certificate creation
+        val publicKey = keyPair.public
+
+        // Create the X509 Certificate
+        val certBuilder = JcaX509v3CertificateBuilder(
+            issuer,
+            serial,
+            notBefore,
+            notAfter,
+            issuer,
+            publicKey
+        )
+
+        // Basic Constraints: isCA = true
+        certBuilder.addExtension(Extension.basicConstraints, true, BasicConstraints(true))
+
+        // Key Usage: KeyCertSign and CRLSign
+        certBuilder.addExtension(
+            Extension.keyUsage,
+            true,
+            KeyUsage(KeyUsage.keyCertSign or KeyUsage.cRLSign)
+        )
+
+        // Sign the certificate using our custom ContentSigner
+        // This delegates to the keystore's Signature implementation without extracting the private key
+        val signer = AndroidKeyStoreContentSigner(keyPair.private)
+
+        val holder = certBuilder.build(signer)
+        val cert = JcaX509CertificateConverter()
+            .setProvider(BouncyCastleProvider())
+            .getCertificate(holder)
+
+        // Store the key+cert in the keystore
+        if (isAndroidKeyStore) {
+            // Overwrite the existing KeyStore entry to associate the custom certificate with the private key.
+            // On Android KeyStore, we pass the private key reference and the certificate chain.
+            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, null, arrayOf(cert))
+        } else {
+            // Software keystore - store both key and cert
+            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, "password".toCharArray(), arrayOf(cert))
+        }
+
+        rootPrivateKey = keyPair.private
+        rootCertificate = cert
+    }
+
+    /**
+     * Custom ContentSigner that wraps AndroidKeyStore-backed PrivateKey.
+     * This allows BouncyCastle to sign certificates without extracting the private key.
+     * The Signature instance is automatically routed to AndroidKeyStore provider.
+     */
+    private class AndroidKeyStoreContentSigner(
+        private val privateKey: PrivateKey,
+        private val sigAlgo: String = SIGNATURE_ALGORITHM
+    ) : ContentSigner {
+        private val buffer = ByteArrayOutputStream()
+        // TIDAK set provider — biarkan JCA route otomatis ke AndroidKeyStore
+        private val signature = Signature.getInstance(sigAlgo).apply { initSign(privateKey) }
+
+        override fun getAlgorithmIdentifier(): AlgorithmIdentifier =
+            DefaultSignatureAlgorithmIdentifierFinder().find(sigAlgo)
+
+        override fun getOutputStream(): OutputStream = buffer
+
+        override fun getSignature(): ByteArray {
+            signature.update(buffer.toByteArray())
+            return signature.sign()
+        }
+    }
+
+    /**
      * Exports the Root CA Certificate in standard DER-encoded byte format.
      * This is used for the flow where the user downloads/installs the CA to the device trust store.
      *
      * @return The DER-encoded bytes of the Root CA certificate
      */
     fun exportCaCert(): ByteArray {
-        val cert = rootCertificate ?: throw IllegalStateException("Root CA Certificate is not initialized")
+        if (rootCertificate == null) {
+            loadFromKeyStoreOnly()
+        }
+        val cert = rootCertificate
+            ?: throw IllegalStateException("Root CA Certificate is not initialized")
         return cert.encoded
     }
 
@@ -203,6 +366,9 @@ object CertificateAuthority {
      */
     fun isCaInstalled(): Boolean {
         try {
+            if (rootCertificate == null) {
+                loadFromKeyStoreOnly()
+            }
             val keyStore = KeyStore.getInstance("AndroidCAStore")
             keyStore.load(null, null)
             val cert = rootCertificate ?: return false
@@ -224,110 +390,12 @@ object CertificateAuthority {
     }
 
     /**
-     * Generates and securely stores the self-signed Root CA in the keystore.
-     */
-    private fun generateAndStoreRootCA(keyStore: KeyStore) {
-        val issuer = X500Name("CN=RethinkDNS Root CA, O=RethinkDNS, C=US")
-        val serial = BigInteger.valueOf(System.currentTimeMillis())
-        val notBefore = Date()
-        val notAfter = Date(notBefore.time + 10L * 365 * 24 * 60 * 60 * 1000) // 10 years validity (Constraint)
-
-        val keyPair: KeyPair
-        if (isAndroidKeyStoreAvailable()) {
-            val kpg = KeyPairGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_RSA,
-                KEYSTORE_PROVIDER_ANDROID
-            )
-            val spec = KeyGenParameterSpec.Builder(
-                ROOT_CA_ALIAS,
-                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-            )
-                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
-                .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                .setKeySize(2048)
-                .build()
-            kpg.initialize(spec)
-            keyPair = kpg.generateKeyPair()
-        } else {
-            // Fallback for Unit Tests/JVM Environment
-            val kpg = KeyPairGenerator.getInstance("RSA")
-            kpg.initialize(2048)
-            keyPair = kpg.generateKeyPair()
-        }
-
-        // Create the X509 Certificate
-        val certBuilder = JcaX509v3CertificateBuilder(
-            issuer,
-            serial,
-            notBefore,
-            notAfter,
-            issuer,
-            keyPair.public
-        )
-
-        // Basic Constraints: isCA = true
-        certBuilder.addExtension(Extension.basicConstraints, true, BasicConstraints(true))
-
-        // Key Usage: KeyCertSign and CRLSign
-        certBuilder.addExtension(
-            Extension.keyUsage,
-            true,
-            KeyUsage(KeyUsage.keyCertSign or KeyUsage.cRLSign)
-        )
-
-        // Sign the certificate using Root CA Private Key
-        val signer = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-            .build(keyPair.private)
-        
-        val holder = certBuilder.build(signer)
-        val cert = JcaX509CertificateConverter()
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-            .getCertificate(holder)
-
-        // Store back into KeyStore
-        if (isAndroidKeyStoreAvailable()) {
-            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, null, arrayOf(cert))
-        } else {
-            // For unit test fallback keystore, save key + cert chain
-            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, null, arrayOf(cert))
-        }
-
-        rootPrivateKey = keyPair.private
-        rootCertificate = cert
-    }
-
-    /**
      * Generates a 2048-bit RSA keypair in-memory for the temporary leaf certificate.
      */
     private fun generateKeyPairForLeaf(): KeyPair {
         val kpg = KeyPairGenerator.getInstance("RSA")
         kpg.initialize(2048)
         return kpg.generateKeyPair()
-    }
-
-    /**
-     * Gets the appropriate KeyStore instance. Supports fallback for JUnit tests.
-     */
-    private fun getKeystoreInstance(): KeyStore {
-        return if (isAndroidKeyStoreAvailable()) {
-            KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID).apply { load(null) }
-        } else {
-            // Standard JKS/PKCS12 keystore fallback for non-Android / JUnit environments
-            KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null) }
-        }
-    }
-
-    /**
-     * Helper to check if the Android KeyStore provider is accessible.
-     */
-    private fun isAndroidKeyStoreAvailable(): Boolean {
-        return try {
-            KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID)
-            true
-        } catch (e: Exception) {
-            false
-        }
     }
 
     /**
@@ -341,16 +409,25 @@ object CertificateAuthority {
      * Gets the Root CA certificate.
      */
     fun getRootCertificate(): X509Certificate {
+        if (rootCertificate == null) {
+            loadFromKeyStoreOnly()
+        }
         return rootCertificate ?: throw IllegalStateException("Root CA Certificate is not initialized")
     }
 
     /**
-     * For testing/debugging purposes only. Clears the CA keys from the KeyStore.
+     * For testing/debugging purposes only. Clears the CA keys from AndroidKeyStore.
      */
     @Synchronized
     fun resetCA() {
         try {
-            val keyStore = getKeystoreInstance()
+            val keyStore = try {
+                KeyStore.getInstance("AndroidKeyStore")
+            } catch (e: Exception) {
+                // Fallback for JVM unit tests - use PKCS12 software keystore
+                KeyStore.getInstance("PKCS12")
+            }
+            keyStore.load(null)
             if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
                 keyStore.deleteEntry(ROOT_CA_ALIAS)
             }

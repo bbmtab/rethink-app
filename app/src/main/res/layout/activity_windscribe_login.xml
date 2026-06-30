@@ -15,18 +15,20 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal">
+            android:layout_height="wrap_content">
 
             <!-- Back & Header -->
             <RelativeLayout
+                android:id="@+id/rl_header"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:layout_marginBottom="24dp">
+                android:layout_marginBottom="24dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
                 <ImageView
                     android:id="@+id/iv_back"
@@ -52,6 +54,7 @@
 
             <!-- Card Logo/Status -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cv_status"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="24dp"
@@ -59,7 +62,10 @@
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp"
                 app:strokeColor="?attr/chipColorBgNormal"
-                app:cardBackgroundColor="?attr/chipColorBgNormal">
+                app:cardBackgroundColor="?attr/chipColorBgNormal"
+                app:layout_constraintTop_toBottomOf="@id/rl_header"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -100,7 +106,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:visibility="visible">
+                android:visibility="visible"
+                app:layout_constraintTop_toBottomOf="@id/cv_status"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
@@ -148,31 +157,39 @@
             </LinearLayout>
 
             <!-- Servers List Group (Visible when logged in) -->
-            <LinearLayout
+            <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/ll_server_group"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
                 android:visibility="gone"
-                tools:visibility="visible">
+                tools:visibility="visible"
+                app:layout_constraintTop_toBottomOf="@id/cv_status"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
 
                 <TextView
+                    android:id="@+id/tv_server_title"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Select Gateway Server Location"
                     android:textSize="15sp"
                     android:textStyle="bold"
                     android:textColor="?attr/primaryTextColor"
-                    android:layout_gravity="start"
-                    android:layout_marginBottom="12dp"/>
+                    android:layout_marginBottom="12dp"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"/>
 
                 <!-- Search Input -->
                 <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_search"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="12dp"
                     android:hint="Search Locations..."
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                    app:layout_constraintTop_toBottomOf="@id/tv_server_title"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/et_search"
@@ -187,9 +204,13 @@
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/rv_servers"
                     android:layout_width="match_parent"
-                    android:layout_height="400dp"
-                    android:nestedScrollingEnabled="true"
-                    tools:listitem="@layout/rpn_country_config_list_item"/>
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    tools:listitem="@layout/rpn_country_config_list_item"
+                    app:layout_constraintTop_toBottomOf="@id/til_search"
+                    app:layout_constraintBottom_toTopOf="@id/btn_logout"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent"/>
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_logout"
@@ -198,20 +219,28 @@
                     android:text="Disconnect / Log Out"
                     android:textSize="13sp"
                     android:layout_marginTop="16dp"
+                    android:layout_marginBottom="24dp"
                     app:cornerRadius="12dp"
                     app:strokeWidth="1dp"
                     app:strokeColor="@color/accentBad"
                     style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:textColor="@color/accentBad"/>
-            </LinearLayout>
+                    android:textColor="@color/accentBad"
+                    app:layout_constraintTop_toBottomOf="@id/rv_servers"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent"/>
+            </androidx.constraintlayout.widget.ConstraintLayout>
 
             <ProgressBar
                 android:id="@+id/pb_loading"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
-                android:visibility="gone"/>
+                android:visibility="gone"
+                app:layout_constraintTop_toBottomOf="@id/ll_server_group"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"/>
 
-        </LinearLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </ScrollView>
 </androidx.constraintlayout.widget.ConstraintLayout>

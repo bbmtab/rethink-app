@@ -37,4 +37,17 @@ app/websiteFull/release
 SKILL.md
 architecture_mapping.md
 *.bak
+/reference_code
 
+# Keystore files - NEVER COMMIT
+keystore.properties
+release.keystore
+*.jks
+*.keystore
+
+# IDE and agent temporary files
+.kotlin/
+.vscode/
+plan.md
+progress_report.md
+windscribe_integration_blueprint.md

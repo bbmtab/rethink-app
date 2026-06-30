@@ -96,41 +96,6 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <androidx.appcompat.widget.AppCompatTextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Security &amp; Privacy Guaranteed"
-                        android:textStyle="bold"
-                        android:textSize="16sp"
-                        android:textColor="?attr/primaryTextColor"
-                        android:layout_marginBottom="8dp" />
-
-                    <androidx.appcompat.widget.AppCompatTextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="• Absolute Local Privacy: The Root CA private key is generated and stored securely in your device's Android Keystore. It NEVER leaves your device.\n\n• Warning Is Normal: When installed, Android (especially Android 11+) may display a 'Network may be monitored' warning. This is NORMAL because you are trusting a user-installed CA to filter your local browsing traffic."
-                        android:textSize="14sp"
-                        android:textColor="?android:attr/textColorSecondary"
-                        android:lineSpacingMultiplier="1.2" />
-
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Certificate Setup / Flow Card -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -142,7 +107,7 @@
                             android:layout_width="0dp"
                             android:layout_weight="1"
                             android:layout_height="wrap_content"
-                            android:text="Certificate Status"
+                            android:text="Security &amp; Privacy Guaranteed"
                             android:textStyle="bold"
                             android:textSize="16sp"
                             android:textColor="?attr/primaryTextColor" />
@@ -178,17 +143,41 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Generate CA Certificate"
-                        android:layout_marginBottom="12dp"
-                        app:cornerRadius="8dp" />
+                        android:layout_marginBottom="4dp"
+                        app:cornerRadius="8dp"
+                        style="@style/Widget.MaterialComponents.Button"
+                        android:textSize="14sp" />
 
-                    <!-- Save CA Certificate Button -->
+                    <androidx.appcompat.widget.AppCompatTextView
+                        android:id="@+id/tv_generate_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Generate first, then Install or Save will be enabled"
+                        android:textSize="12sp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:gravity="center"
+                        android:layout_marginBottom="12dp"
+                        android:visibility="visible" />
+
+                    <!-- Install CA Certificate Button -->
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btn_install"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Save CA Certificate to Downloads"
+                        android:text="Install CA Certificate"
                         android:enabled="false"
                         app:cornerRadius="8dp" />
+
+                    <!-- Save Certificate Button (for manual install) -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_save_cert"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Save Certificate to Downloads"
+                        android:enabled="false"
+                        android:layout_marginTop="8dp"
+                        app:cornerRadius="8dp"
+                        style="@style/Widget.Material3.Button.OutlinedButton" />
 
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -221,7 +210,7 @@
                     <androidx.appcompat.widget.AppCompatTextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="1. Tap 'Save CA Certificate to Downloads' above to save the file 'rethinkdns_ca.crt'.\n\n2. Open your device's Settings app.\n\n3. In the Settings search bar, search for 'CA certificate'.\n   (Or go to: Settings -> Security -> More security settings (or Encryption &amp; credentials) -> Install a certificate -> CA certificate)\n\n4. Confirm when warned with 'Install anyway' and authenticate.\n\n5. Select the saved file 'rethinkdns_ca.crt' from your Downloads folder."
+                        android:text="1. Tap 'Install CA Certificate' above.\n\n2. Accept the confirmation dialog.\n\n3. If prompted, enter your device PIN/pattern.\n\n4. Android may show 'Network may be monitored' warning - this is NORMAL and expected for local HTTPS filtering.\n\nAfter installation, the status badge will show 'INSTALLED' and you can enable HTTPS inspection."
                         android:textSize="14sp"
                         android:textColor="?android:attr/textColorSecondary"
                         android:lineSpacingMultiplier="1.2" />

@@ -202,7 +202,7 @@
         android:clickable="true"
         android:contentDescription="Windscribe Pro"
         android:focusable="true"
-        android:text="Windscribe Login"
+        android:text="Windscribe"
         android:textColor="?attr/primaryTextColor"
         app:backgroundTint="?attr/chipColorBgNormal"
         app:fabSize="mini"

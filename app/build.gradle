@@ -99,11 +99,15 @@ android {
         }
         // archive.is/wlwD8
         alpha {
-            keyAlias System.getenv("ALPHA_KS_ALIAS") // rdnsAlpha
-            keyPassword System.getenv("ALPHA_KS_PASSPHRASE")
-            // https://stackoverflow.com/a/34640602
-            storeFile file(String.valueOf(System.getenv("ALPHA_KS_FILE"))) // rdnsAlpha.jks in app/
-            storePassword System.getenv("ALPHA_KS_STORE_PASSPHRASE")
+            // Use environment variables for CI builds, fallback to keystore.properties for local builds
+            def alphaAlias = System.getenv("ALPHA_KS_ALIAS") ?: keystoreProperties['keyAlias']
+            def alphaKeyPass = System.getenv("ALPHA_KS_PASSPHRASE") ?: keystoreProperties['keyPassword']
+            def alphaStoreFile = System.getenv("ALPHA_KS_FILE") ?: keystoreProperties['storeFile']
+            def alphaStorePass = System.getenv("ALPHA_KS_STORE_PASSPHRASE") ?: keystoreProperties['storePassword']
+            keyAlias alphaAlias
+            keyPassword alphaKeyPass
+            storeFile file(alphaStoreFile)
+            storePassword alphaStorePass
         }
     }
 
@@ -158,6 +162,7 @@ android {
             // the setting to true
             minifyEnabled true
             shrinkResources true
+            signingConfig signingConfigs.config
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             ndk {
                 // Use SYMBOL_TABLE to reduce symbol file size significantly
@@ -366,6 +371,8 @@ dependencies {
     fullImplementation 'com.squareup.retrofit2:converter-gson:3.0.0'
 
     implementation 'com.squareup.okio:okio-jvm:3.16.4'
+    // HTML filtering (Feature 3)
+    implementation 'org.jsoup:jsoup:1.19.1'
     // Glide
     fullImplementation('com.github.bumptech.glide:glide:5.0.7') {
         exclude group: 'glide-parent'
@@ -393,6 +400,9 @@ dependencies {
     // viewBinding without reflection
     fullImplementation 'com.github.kirich1409:viewbindingpropertydelegate:1.5.9'
     fullImplementation 'com.github.kirich1409:viewbindingpropertydelegate-noreflection:1.5.9'
+
+    // HTML filtering with Jsoup
+    implementation 'org.jsoup:jsoup:1.18.3'
 
     // add ":debug" suffix to the dependency to include debug symbols
     download firestackDependency()

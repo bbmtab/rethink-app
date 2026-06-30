@@ -24,6 +24,17 @@ import com.celzero.bravedns.util.handleFrostEffectIfNeeded
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.Log
+
+private const val TAG = "WindscribeLogin"
+
+private fun log(msg: String) {
+    android.util.Log.d(TAG, msg)
+}
+
+private fun log(msg: String, e: Exception) {
+    android.util.Log.e(TAG, msg, e)
+}
 
 class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login) {
 
@@ -73,23 +84,31 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun performLogin(user: String, pass: String) {
+        log("performLogin called with user: $user")
         showLoading(true)
         b.tvSubStatus.text = "Authenticating with Windscribe..."
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Actual API login
+                log("Calling Windscribe API login...")
                 val response = WindscribeApiInstance.api.login(user, pass)
+                log("Login response: isSuccessful=${response.isSuccessful}, code=${response.code()}, body=${response.body()}")
                 if (response.isSuccessful && response.body()?.sessionId != null) {
                     val body = response.body()!!
                     sessionToken = body.sessionId
-                    
+                    log("Got session token: $sessionToken")
+
                     // Fetch real servers list
+                    log("Fetching servers from API...")
                     val serversResponse = WindscribeApiInstance.api.getServers("Bearer $sessionToken")
+                    log("Servers response: isSuccessful=${serversResponse.isSuccessful}, code=${serversResponse.code()}, body=${serversResponse.body()}")
                     if (serversResponse.isSuccessful && serversResponse.body()?.servers != null) {
                         allServers = serversResponse.body()!!.servers!!
+                        log("Got ${allServers.size} servers from API")
                     } else {
                         // Failover with complete high-quality mock servers if backend server list is empty
+                        log("API servers empty or failed, using mock servers")
                         allServers = getMockServers()
                     }
 
@@ -100,6 +119,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
                 } else {
                     // Smart Offline/Trial Failover: Let them use standard mock list if login results in error (e.g. offline/no API key)
                     // This allows user-friendly local testing and immediate evaluation.
+                    log("Login failed or no sessionId, using mock servers")
                     allServers = getMockServers()
                     sessionToken = "mock_session_token_12345"
                     withContext(Dispatchers.Main) {
@@ -109,6 +129,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
                     }
                 }
             } catch (e: Exception) {
+                log("Exception during login: ${e.message}", e)
                 // If completely offline, fall back to simulated credentials so user can test UI
                 allServers = getMockServers()
                 sessionToken = "mock_session_token_12345"
@@ -121,6 +142,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun onLoginSuccess(status: String) {
+        log("onLoginSuccess: status=$status, allServers.size=${allServers.size}")
         b.llLoginGroup.visibility = View.GONE
         b.llServerGroup.visibility = View.VISIBLE
         b.tvSubStatus.text = "Logged in successfully! Tier: ${status.uppercase()}"
@@ -128,6 +150,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun performLogout() {
+        log("performLogout called")
         sessionToken = null
         allServers = emptyList()
         filteredServers = emptyList()
@@ -139,6 +162,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun setupRecyclerView() {
+        log("setupRecyclerView called")
         serverAdapter = ServerAdapter { server ->
             generateAndInstallWireguardConfig(server)
         }
@@ -147,15 +171,17 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun filterServers(query: String) {
+        log("filterServers called with query='$query', allServers.size=${allServers.size}")
         filteredServers = if (query.isEmpty()) {
             allServers
         } else {
             allServers.filter {
-                it.name.contains(query, ignoreCase = true) || 
-                it.city.contains(query, ignoreCase = true) || 
+                it.name.contains(query, ignoreCase = true) ||
+                it.city.contains(query, ignoreCase = true) ||
                 it.countryCode.contains(query, ignoreCase = true)
             }
         }
+        log("filterServers: filteredServers.size=${filteredServers.size}")
         serverAdapter.submitList(filteredServers)
     }
 
@@ -228,6 +254,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     }
 
     private fun getMockServers(): List<WindscribeServerNode> {
+        log("getMockServers called")
         return listOf(
             WindscribeServerNode("sg-1", "Singapore - Slicing 1", "SG", "Singapore", true, "10.0.0.1", "103.156.184.21:443"),
             WindscribeServerNode("sg-2", "Singapore - Marina 2", "SG", "Singapore", true, "10.0.0.1", "103.156.184.22:443"),
@@ -253,27 +280,34 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
         private var list: List<WindscribeServerNode> = emptyList()
 
         fun submitList(newList: List<WindscribeServerNode>) {
+            log("ServerAdapter.submitList called with ${newList.size} items")
             list = newList
             notifyDataSetChanged()
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            log("ServerAdapter.onCreateViewHolder")
             val view = LayoutInflater.from(parent.context).inflate(R.layout.rpn_country_config_list_item, parent, false)
             return ViewHolder(view)
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = list[position]
+            log("ServerAdapter.onBindViewHolder position=$position, item=${item.name}")
             holder.bind(item, onServerClicked)
         }
 
-        override fun getItemCount(): Int = list.size
+        override fun getItemCount(): Int {
+            log("ServerAdapter.getItemCount = ${list.size}")
+            return list.size
+        }
 
         class ViewHolder(v: View) : RecyclerView.ViewHolder(v) {
             private val tvName: TextView = v.findViewById(R.id.rpn_country_name)
             private val tvDetails: TextView = v.findViewById(R.id.rpn_country_desc)
 
             fun bind(server: WindscribeServerNode, onServerClicked: (WindscribeServerNode) -> Unit) {
+                log("ViewHolder.bind: ${server.name}")
                 tvName.text = server.name
                 tvDetails.text = "${server.city} (${server.countryCode}) · WireGuard • " + if (server.isPro) "PRO Tier" else "FREE Tier"
                 itemView.setOnClickListener { onServerClicked(server) }

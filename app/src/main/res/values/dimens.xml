@@ -32,10 +32,12 @@
     <dimen name="snackbar_horizontal_margin">16dp</dimen>
     <dimen name="snackbar_bottom_margin">12dp</dimen>
 
-    <dimen name="standard_0">0dp</dimen>
-    <dimen name="standard_55">70dp</dimen>
-    <dimen name="standard_105">140dp</dimen>
-    <dimen name="standard_155">210dp</dimen>
-    <dimen name="standard_205">280dp</dimen>
+    <!-- FAB expansion dimensions (bottom-up reverse order) -->
+    <dimen name="fab_standard_0">0dp</dimen>
+    <dimen name="fab_standard_55">70dp</dimen>
+    <dimen name="fab_standard_105">140dp</dimen>
+    <dimen name="fab_standard_155">210dp</dimen>
+    <dimen name="fab_standard_205">280dp</dimen>
+    <dimen name="fab_standard_255">350dp</dimen>
 
 </resources>

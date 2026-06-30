@@ -14,7 +14,7 @@ object FilterEngine {
 
     private const val TAG = "FilterEngine"
     private const val CACHE_FILE_NAME = "filter_rules_cache.bin"
-    private const val CACHE_VERSION = 1
+    private const val CACHE_VERSION = 5  // bumped: added htmlFilterRules to cache layout
 
     // Resource type bitmask constants
     object ResourceType {
@@ -53,7 +53,11 @@ object FilterEngine {
         val excludedDomains: Set<String>?,
         val allowedTypes: Int,
         val isImportant: Boolean,
-        val isCosmetic: Boolean
+        val isCosmetic: Boolean,
+        val isCsp: Boolean = false,
+        val isProcedural: Boolean = false,
+        val isScriptlet: Boolean = false,
+        val isHtmlFilter: Boolean = false
     ) : Serializable {
         @Transient
         @Volatile
@@ -130,6 +134,18 @@ object FilterEngine {
     val cosmeticRules = ArrayList<String>()
     val cosmeticExceptions = ArrayList<String>()
 
+    // CSP rules ($csp= modifier) — stored as raw rule lines for CspInjector to parse
+    val cspRules = ArrayList<String>()
+
+    // Procedural cosmetic rules (#?# operator) — stored as raw rule lines for ProceduralFilter
+    val proceduralRules = ArrayList<String>()
+
+    // Scriptlet injection rules (#%#//scriptlet) — stored as raw rule lines for ScriptletFilter
+    val scriptletRules = ArrayList<String>()
+
+    // HTML filtering rules (##^ operator) — stored as raw rule lines for HtmlFilter
+    val htmlFilterRules = ArrayList<String>()
+
     @Volatile
     var isLoaded = false
         private set
@@ -143,6 +159,10 @@ object FilterEngine {
         genericRules.clear()
         cosmeticRules.clear()
         cosmeticExceptions.clear()
+        cspRules.clear()
+        proceduralRules.clear()
+        scriptletRules.clear()
+        htmlFilterRules.clear()
         isLoaded = false
     }
 
@@ -298,17 +318,32 @@ object FilterEngine {
 
     private fun processRuleLine(rawLine: String) {
         val rule = parseRule(rawLine) ?: return
-        if (rule.isCosmetic) {
-            if (rule.isWhitelist) {
-                synchronized(cosmeticExceptions) { cosmeticExceptions.add(rule.rawText) }
-            } else {
-                synchronized(cosmeticRules) { cosmeticRules.add(rule.rawText) }
+        when {
+            rule.isScriptlet -> {
+                synchronized(scriptletRules) { scriptletRules.add(rule.rawText) }
             }
-        } else {
-            if (rule.isDomainExact && rule.targetDomain != null) {
-                domainTrie.insert(rule.targetDomain, rule)
-            } else {
-                synchronized(genericRules) { genericRules.add(rule) }
+            rule.isProcedural -> {
+                synchronized(proceduralRules) { proceduralRules.add(rule.rawText) }
+            }
+            rule.isCosmetic -> {
+                if (rule.isWhitelist) {
+                    synchronized(cosmeticExceptions) { cosmeticExceptions.add(rule.rawText) }
+                } else {
+                    synchronized(cosmeticRules) { cosmeticRules.add(rule.rawText) }
+                }
+            }
+            rule.isCsp -> {
+                synchronized(cspRules) { cspRules.add(rule.rawText) }
+            }
+            rule.isHtmlFilter -> {
+                synchronized(htmlFilterRules) { htmlFilterRules.add(rule.rawText) }
+            }
+            else -> {
+                if (rule.isDomainExact && rule.targetDomain != null) {
+                    domainTrie.insert(rule.targetDomain, rule)
+                } else {
+                    synchronized(genericRules) { genericRules.add(rule) }
+                }
             }
         }
     }
@@ -322,8 +357,77 @@ object FilterEngine {
             return null
         }
 
-        // Detect Cosmetic rules (contain ##, #@#, #?#, #%#)
-        val isCosmetic = line.contains("##") || line.contains("#@#") || line.contains("#?#") || line.contains("#%#")
+        // Detect Scriptlet rules (#%#//scriptlet) — must check before ## to avoid false match
+        val isScriptlet = line.contains("#%#//scriptlet(")
+        if (isScriptlet) {
+            return AdblockRule(
+                rawText = line,
+                isWhitelist = false,
+                pattern = "",
+                isRegex = false,
+                isDomainExact = false,
+                targetDomain = null,
+                isThirdPartyOnly = false,
+                isNotThirdPartyOnly = false,
+                allowedDomains = null,
+                excludedDomains = null,
+                allowedTypes = ResourceType.ALL,
+                isImportant = false,
+                isCosmetic = false,
+                isCsp = false,
+                isProcedural = false,
+                isScriptlet = true
+            )
+        }
+
+        // Detect Procedural cosmetic rules (#?#) — must check before ## to avoid false match
+        val isProcedural = line.contains("#?#")
+        if (isProcedural) {
+            return AdblockRule(
+                rawText = line,
+                isWhitelist = false,
+                pattern = "",
+                isRegex = false,
+                isDomainExact = false,
+                targetDomain = null,
+                isThirdPartyOnly = false,
+                isNotThirdPartyOnly = false,
+                allowedDomains = null,
+                excludedDomains = null,
+                allowedTypes = ResourceType.ALL,
+                isImportant = false,
+                isCosmetic = false,
+                isCsp = false,
+                isProcedural = true
+            )
+        }
+
+        // Detect HTML filtering rules (##^) — must check before ## to avoid false match
+        val isHtmlFilter = line.contains("##^")
+        if (isHtmlFilter) {
+            return AdblockRule(
+                rawText = line,
+                isWhitelist = false,
+                pattern = "",
+                isRegex = false,
+                isDomainExact = false,
+                targetDomain = null,
+                isThirdPartyOnly = false,
+                isNotThirdPartyOnly = false,
+                allowedDomains = null,
+                excludedDomains = null,
+                allowedTypes = ResourceType.ALL,
+                isImportant = false,
+                isCosmetic = false,
+                isCsp = false,
+                isProcedural = false,
+                isScriptlet = false,
+                isHtmlFilter = true
+            )
+        }
+
+        // Detect Cosmetic rules (contain ##, #@#, #%#) — #?# and ##^ already handled above
+        val isCosmetic = line.contains("##") || line.contains("#@#") || line.contains("#%#")
         if (isCosmetic) {
             return AdblockRule(
                 rawText = line,
@@ -370,6 +474,7 @@ object FilterEngine {
         var excludedDomains: MutableSet<String>? = null
         var allowedTypes = 0
         var hasTypeModifier = false
+        var hasCspModifier = false
 
         if (modifierPart != null) {
             val modifiers = modifierPart.split(",")
@@ -381,6 +486,8 @@ object FilterEngine {
                     isThirdPartyOnly = true
                 } else if (trimmedMod == "~third-party") {
                     isNotThirdPartyOnly = true
+                } else if (trimmedMod.startsWith("csp=")) {
+                    hasCspModifier = true
                 } else if (trimmedMod.startsWith("domain=")) {
                     val domains = trimmedMod.substring(7).split("|")
                     for (dom in domains) {
@@ -424,6 +531,26 @@ object FilterEngine {
 
         if (!hasTypeModifier) {
             allowedTypes = ResourceType.ALL
+        }
+
+        // CSP rules don't need pattern matching — route them to CspInjector
+        if (hasCspModifier) {
+            return AdblockRule(
+                rawText = line,
+                isWhitelist = false,
+                pattern = "",
+                isRegex = false,
+                isDomainExact = false,
+                targetDomain = null,
+                isThirdPartyOnly = false,
+                isNotThirdPartyOnly = false,
+                allowedDomains = allowedDomains,
+                excludedDomains = excludedDomains,
+                allowedTypes = ResourceType.ALL,
+                isImportant = false,
+                isCosmetic = false,
+                isCsp = true
+            )
         }
 
         var isRegex = false
@@ -603,6 +730,18 @@ object FilterEngine {
                 // Save Cosmetic rules
                 oos.writeObject(cosmeticRules)
                 oos.writeObject(cosmeticExceptions)
+
+                // Save CSP rules
+                oos.writeObject(cspRules)
+
+                // Save Procedural rules
+                oos.writeObject(proceduralRules)
+
+                // Save Scriptlet rules
+                oos.writeObject(scriptletRules)
+
+                // Save HTML Filter rules
+                oos.writeObject(htmlFilterRules)
             }
         } catch (e: Exception) {
             logError("Failed to write rules cache: ${e.message}", e)
@@ -624,6 +763,16 @@ object FilterEngine {
                 val genRules = ois.readObject() as ArrayList<AdblockRule>
                 val cosRules = ois.readObject() as ArrayList<String>
                 val cosExceptions = ois.readObject() as ArrayList<String>
+                val cspRulesList = ois.readObject() as ArrayList<String>
+                val proceduralRulesList = ois.readObject() as ArrayList<String>
+                val scriptletRulesList = ois.readObject() as ArrayList<String>
+
+                // Version 5+ includes htmlFilterRules
+                val htmlFilterRulesList = if (version >= 5) {
+                    ois.readObject() as ArrayList<String>
+                } else {
+                    ArrayList<String>()
+                }
 
                 clear()
 
@@ -635,6 +784,10 @@ object FilterEngine {
                 genericRules.addAll(genRules)
                 cosmeticRules.addAll(cosRules)
                 cosmeticExceptions.addAll(cosExceptions)
+                cspRules.addAll(cspRulesList)
+                proceduralRules.addAll(proceduralRulesList)
+                scriptletRules.addAll(scriptletRulesList)
+                htmlFilterRules.addAll(htmlFilterRulesList)
 
                 isLoaded = true
                 return true

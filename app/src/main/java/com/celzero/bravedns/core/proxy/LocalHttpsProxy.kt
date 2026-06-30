@@ -2,6 +2,10 @@ package com.celzero.bravedns.core.proxy
 
 import com.celzero.bravedns.core.ca.CertificateAuthority
 import com.celzero.bravedns.core.filter.CosmeticFilter
+import com.celzero.bravedns.core.filter.CspInjector
+import com.celzero.bravedns.core.filter.HtmlFilter
+import com.celzero.bravedns.core.filter.ProceduralFilter
+import com.celzero.bravedns.core.filter.ScriptletFilter
 import kotlinx.coroutines.*
 import java.io.*
 import java.net.InetSocketAddress
@@ -605,17 +609,45 @@ object LocalHttpsProxy {
                     }
                 }
 
+                // Apply HTML filtering (remove elements matching ##^ rules)
+                if (isHtml && decompressedBody != null && HtmlFilter.hasRulesForDomain(host)) {
+                    val filteredBody = HtmlFilter.applyFilters(host, decompressedBody)
+                    if (filteredBody != decompressedBody) {
+                        decompressedBody = filteredBody
+                        // Body was modified, we'll re-encode after all injections
+                    }
+                }
+
                 // Trigger decoupled listener inspection callback
                 proxyListener?.onResponseInspection(url, statusCode, headers, decompressedBody)
 
+                // Check and apply Scriptlet injection JS (runs BEFORE other page scripts)
+                val scriptletJs = if (isHtml) ScriptletFilter.getScriptletCodeForDomain(host, appContext) else null
                 // Check and apply CSS cosmetic filter styling
                 val css = if (isHtml) CosmeticFilter.getCssForDomain(host) else null
+                // Check and apply procedural cosmetic filter JS
+                val proceduralJs = if (isHtml) ProceduralFilter.getScriptForDomain(host) else null
                 var finalBytes = rawBytes
                 var headersModified = false
                 val finalHeaders = headers.toMutableList()
 
-                if (css != null && decompressedBody != null) {
-                    val injection = "<style>$css</style>"
+                val hasAnyInjection = scriptletJs != null || css != null || proceduralJs != null
+                if (hasAnyInjection && decompressedBody != null) {
+                    val injectionBuilder = StringBuilder()
+                    // Scriptlet JS injected FIRST so it runs before page scripts
+                    if (scriptletJs != null) {
+                        injectionBuilder.append("<script>").append(scriptletJs).append("</script>")
+                    }
+                    // Procedural cosmetic JS second
+                    if (proceduralJs != null) {
+                        injectionBuilder.append("<script>").append(proceduralJs).append("</script>")
+                    }
+                    // CSS cosmetic styling last
+                    if (css != null) {
+                        injectionBuilder.append("<style>").append(css).append("</style>")
+                    }
+                    val injection = injectionBuilder.toString()
+
                     val headIndex = decompressedBody.indexOf("</head>", ignoreCase = true)
                     val modifiedBody = if (headIndex != -1) {
                         decompressedBody.substring(0, headIndex) + injection + decompressedBody.substring(headIndex)
@@ -629,8 +661,8 @@ object LocalHttpsProxy {
                     val iterator = finalHeaders.iterator()
                     while (iterator.hasNext()) {
                         val h = iterator.next().lowercase(Locale.US)
-                        if (h.startsWith("content-length:") || 
-                            h.startsWith("content-encoding:") || 
+                        if (h.startsWith("content-length:") ||
+                            h.startsWith("content-encoding:") ||
                             h.startsWith("transfer-encoding:")
                         ) {
                             iterator.remove()
@@ -638,6 +670,22 @@ object LocalHttpsProxy {
                     }
                     finalHeaders.add("Content-Length: ${finalBytes.size}")
                     headersModified = true
+                }
+
+                // Inject or merge Content-Security-Policy header
+                val additionalCsp = CspInjector.getCspForDomain(host)
+                if (additionalCsp != null) {
+                    val cspHeaderPrefix = "content-security-policy:"
+                    val existingIdx = finalHeaders.indexOfFirst {
+                        it.lowercase(Locale.US).startsWith(cspHeaderPrefix)
+                    }
+                    if (existingIdx != -1) {
+                        // Merge with existing CSP — new directives appended only if not present
+                        val merged = CspInjector.mergeWithExistingCsp(finalHeaders[existingIdx], additionalCsp)
+                        finalHeaders[existingIdx] = "Content-Security-Policy: $merged"
+                    } else {
+                        finalHeaders.add("Content-Security-Policy: $additionalCsp")
+                    }
                 }
 
                 // Write status line and headers

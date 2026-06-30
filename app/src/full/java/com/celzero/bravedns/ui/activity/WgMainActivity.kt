@@ -485,19 +485,19 @@ class WgMainActivity :
         b.qrCodeFab.visibility = View.VISIBLE
         b.deleteAllFab.visibility = View.VISIBLE
         b.windscribeFab.visibility = View.VISIBLE
-        b.createFab.animate().translationY(-resources.getDimension(R.dimen.standard_55))
-        b.importFab.animate().translationY(-resources.getDimension(R.dimen.standard_105))
-        b.qrCodeFab.animate().translationY(-resources.getDimension(R.dimen.standard_155))
-        b.deleteAllFab.animate().translationY(-resources.getDimension(R.dimen.standard_205))
-        b.windscribeFab.animate().translationY(- (resources.getDimension(R.dimen.standard_55) * 4.6f))
+        b.createFab.animate().translationY(-resources.getDimension(R.dimen.fab_standard_55))
+        b.importFab.animate().translationY(-resources.getDimension(R.dimen.fab_standard_105))
+        b.qrCodeFab.animate().translationY(-resources.getDimension(R.dimen.fab_standard_155))
+        b.deleteAllFab.animate().translationY(-resources.getDimension(R.dimen.fab_standard_205))
+        b.windscribeFab.animate().translationY(-resources.getDimension(R.dimen.fab_standard_255))
     }
 
     private fun collapseFab() {
-        b.createFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
-        b.importFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
-        b.qrCodeFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
-        b.deleteAllFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
-        b.windscribeFab.animate().translationY(resources.getDimension(R.dimen.standard_0))
+        b.createFab.animate().translationY(resources.getDimension(R.dimen.fab_standard_0))
+        b.importFab.animate().translationY(resources.getDimension(R.dimen.fab_standard_0))
+        b.qrCodeFab.animate().translationY(resources.getDimension(R.dimen.fab_standard_0))
+        b.deleteAllFab.animate().translationY(resources.getDimension(R.dimen.fab_standard_0))
+        b.windscribeFab.animate().translationY(resources.getDimension(R.dimen.fab_standard_0))
         b.createFab.visibility = View.GONE
         b.importFab.visibility = View.GONE
         b.qrCodeFab.visibility = View.GONE
