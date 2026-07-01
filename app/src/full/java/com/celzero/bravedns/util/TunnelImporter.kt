@@ -38,10 +38,87 @@ import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import inet.ipaddr.IPAddressString
 
 object TunnelImporter : KoinComponent {
 
     val context: Context by inject()
+
+    private suspend fun resolveEndpointDomains(configText: String): String {
+        return withContext(Dispatchers.IO) {
+            val lines = configText.lines()
+            val newLines = lines.map { line ->
+                val trimmed = line.trim()
+                if (trimmed.startsWith("Endpoint", ignoreCase = true)) {
+                    val parts = trimmed.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val endpointVal = parts[1].trim()
+                        val lastColon = endpointVal.lastIndexOf(':')
+                        if (lastColon != -1) {
+                            val host = endpointVal.substring(0, lastColon).trim('[', ']')
+                            val port = endpointVal.substring(lastColon + 1)
+                            if (!isIpAddress(host)) {
+                                try {
+                                    Logger.d(LOG_TAG_PROXY, "Resolving endpoint host: $host")
+                                    val resolvedIp = java.net.InetAddress.getByName(host).hostAddress
+                                    Logger.d(LOG_TAG_PROXY, "Resolved $host to $resolvedIp")
+                                    if (resolvedIp != null) {
+                                        val finalIp = if (resolvedIp.contains(':')) "[$resolvedIp]" else resolvedIp
+                                        "Endpoint = $finalIp:$port"
+                                    } else {
+                                        line
+                                    }
+                                } catch (e: Exception) {
+                                    Logger.e(LOG_TAG_PROXY, "Failed to resolve endpoint $host: ${e.message}")
+                                    line
+                                }
+                            } else {
+                                line
+                            }
+                        } else {
+                            line
+                        }
+                    } else {
+                        line
+                    }
+                } else if (trimmed.startsWith("Address", ignoreCase = true)) {
+                    val parts = trimmed.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val key = parts[0].trim()
+                        val addressVal = parts[1].trim()
+                        val formatted = addressVal.split(",")
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .map { ip ->
+                                if (ip.contains("/")) {
+                                    ip
+                                } else if (ip.contains(":")) {
+                                    "$ip/128"
+                                } else {
+                                    "$ip/32"
+                                }
+                            }
+                            .joinToString(", ")
+                        "$key = $formatted"
+                    } else {
+                        line
+                    }
+                } else {
+                    line
+                }
+            }
+            newLines.joinToString("\n")
+        }
+    }
+
+    private fun isIpAddress(host: String): Boolean {
+        return try {
+            val ip = IPAddressString(host)
+            ip.isIPv4 || ip.isIPv6
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     suspend fun importTunnel(
         contentResolver: ContentResolver,
@@ -89,33 +166,35 @@ object TunnelImporter : KoinComponent {
                             context.getString(R.string.import_error, "Cannot open file: $name")
                         )
                     ZipInputStream(inputStream).use { zip ->
-                        val reader = BufferedReader(InputStreamReader(zip, StandardCharsets.UTF_8))
                         var entry: ZipEntry?
                         while (true) {
                             entry = zip.nextEntry ?: break
-                            name = entry.name
-                            idx = name.lastIndexOf('/')
+                            var entryName = entry.name
+                            idx = entryName.lastIndexOf('/')
                             if (idx >= 0) {
-                                if (idx >= name.length - 1) {
+                                if (idx >= entryName.length - 1) {
                                     continue
                                 }
-                                name = name.substring(name.lastIndexOf('/') + 1)
+                                entryName = entryName.substring(entryName.lastIndexOf('/') + 1)
                             }
-                            if (name.lowercase().endsWith(".conf")) {
-                                name = name.dropLast(".conf".length)
+                            if (entryName.lowercase().endsWith(".conf")) {
+                                entryName = entryName.dropLast(".conf".length)
                             } else {
                                 continue
                             }
                             try {
-                                    Config.parse(reader)
-                                } catch (e: Throwable) {
-                                    throwables.add(e)
-                                    null
-                                }
-                                ?.let {
-                                    config = it
-                                    WireguardManager.addConfig(config, name)
-                                }
+                                val bytes = zip.readBytes()
+                                val rawText = String(bytes, StandardCharsets.UTF_8)
+                                val resolvedText = resolveEndpointDomains(rawText)
+                                Config.parse(ByteArrayInputStream(resolvedText.toByteArray(StandardCharsets.UTF_8)))
+                            } catch (e: Throwable) {
+                                throwables.add(e)
+                                null
+                            }
+                            ?.let {
+                                config = it
+                                WireguardManager.addConfig(config, entryName)
+                            }
                         }
                     }
                 } else {
@@ -123,7 +202,9 @@ object TunnelImporter : KoinComponent {
                         contentResolver.openInputStream(uri) ?: throw IllegalArgumentException(
                             context.getString(R.string.import_error, "Cannot open file: $name")
                         )
-                    config = Config.parse(inputStream)
+                    val rawText = inputStream.use { it.bufferedReader(StandardCharsets.UTF_8).readText() }
+                    val resolvedText = resolveEndpointDomains(rawText)
+                    config = Config.parse(ByteArrayInputStream(resolvedText.toByteArray(StandardCharsets.UTF_8)))
                     WireguardManager.addConfig(config, name)
                 }
 
@@ -151,9 +232,10 @@ object TunnelImporter : KoinComponent {
         withContext(Dispatchers.IO) {
             try {
                 Logger.d(LOG_TAG_PROXY, "Importing tunnel: $configText with name: $name")
+                val resolvedConfigText = resolveEndpointDomains(configText)
                 val config =
                     Config.parse(
-                        ByteArrayInputStream(configText.toByteArray(StandardCharsets.UTF_8))
+                        ByteArrayInputStream(resolvedConfigText.toByteArray(StandardCharsets.UTF_8))
                     )
                 WireguardManager.addConfig(config, name)
                 withContext(Dispatchers.Main.immediate) {

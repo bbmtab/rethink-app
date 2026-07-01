@@ -388,7 +388,7 @@ object WireguardManager : KoinComponent {
     }
 
     // pair - first: proxyId, second - can proceed for next check
-    private fun canUseConfig(idStr: String, type: String, usesMobileNw: Boolean, ssid: String): Pair<String, Boolean> {
+    private suspend fun canUseConfig(idStr: String, type: String, usesMobileNw: Boolean, ssid: String): Pair<String, Boolean> {
         val block = Backend.Block
         if (idStr.isEmpty()) {
             return Pair("", true)
@@ -402,6 +402,23 @@ object WireguardManager : KoinComponent {
         }
 
         val lockdown = config.isLockdown
+
+        val isHealthy = if (!config.isActive) {
+            false
+        } else {
+            val statusPair = VpnController.getProxyStatusById(idStr)
+            val status = statusPair.first
+            if (statusPair.second == "vpn service not available") {
+                true
+            } else {
+                status == Backend.TOK || status == Backend.TUP || status == Backend.TZZ
+            }
+        }
+
+        if (lockdown && !isHealthy) {
+            Logger.d(LOG_TAG_PROXY, "lockdown wg for $type is inactive/unhealthy => return $block")
+            return Pair(block, false)
+        }
 
         if (lockdown && isEligibleForNetwork(id, usesMobileNw, ssid, config.useOnlyOnMetered, config.ssidEnabled)) {
             Logger.d(LOG_TAG_PROXY, "lockdown wg for $type => return $idStr")

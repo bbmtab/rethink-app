@@ -145,6 +145,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
         log("onLoginSuccess: status=$status, allServers.size=${allServers.size}")
         b.llLoginGroup.visibility = View.GONE
         b.llServerGroup.visibility = View.VISIBLE
+        b.ivStatusLogo.visibility = View.GONE
         b.tvSubStatus.text = "Logged in successfully! Tier: ${status.uppercase()}"
         filterServers("")
     }
@@ -156,6 +157,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
         filteredServers = emptyList()
         b.llServerGroup.visibility = View.GONE
         b.llLoginGroup.visibility = View.VISIBLE
+        b.ivStatusLogo.visibility = View.VISIBLE
         b.tvSubStatus.text = "Please log in to generate ephemeral WireGuard configs"
         b.etUsername.text?.clear()
         b.etPassword.text?.clear()
@@ -182,7 +184,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
             }
         }
         log("filterServers: filteredServers.size=${filteredServers.size}")
-        serverAdapter.submitList(filteredServers)
+        serverAdapter.submitList(filteredServers, query.isNotEmpty())
     }
 
     private fun generateAndInstallWireguardConfig(server: WindscribeServerNode) {
@@ -275,41 +277,138 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
 
     // Inner ViewHolder Adapter for clean, zero-pollution lists
     class ServerAdapter(private val onServerClicked: (WindscribeServerNode) -> Unit) :
-        RecyclerView.Adapter<ServerAdapter.ViewHolder>() {
+        RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-        private var list: List<WindscribeServerNode> = emptyList()
+        companion object {
+            private const val TYPE_HEADER = 0
+            private const val TYPE_CHILD = 1
+        }
 
-        fun submitList(newList: List<WindscribeServerNode>) {
-            log("ServerAdapter.submitList called with ${newList.size} items")
-            list = newList
+        sealed class ListItem {
+            data class CountryHeader(
+                val countryCode: String,
+                val countryName: String,
+                val totalLocations: Int,
+                val isExpanded: Boolean
+            ) : ListItem()
+
+            data class ServerChild(
+                val server: WindscribeServerNode
+            ) : ListItem()
+        }
+
+        private var rawServers: List<WindscribeServerNode> = emptyList()
+        private var displayItems: List<ListItem> = emptyList()
+        private val expandedCountries = mutableSetOf<String>()
+
+        private fun getCountryName(countryCode: String): String {
+            val code = countryCode.uppercase()
+            val cleanCode = if (code == "UK") "GB" else code
+            val display = java.util.Locale("", cleanCode).displayCountry
+            return if (display.isNullOrBlank() || display == cleanCode) {
+                when (code) {
+                    "SG" -> "Singapore"
+                    "JP" -> "Japan"
+                    "US" -> "United States"
+                    "CA" -> "Canada"
+                    "DE" -> "Germany"
+                    "UK", "GB" -> "United Kingdom"
+                    else -> countryCode
+                }
+            } else {
+                display
+            }
+        }
+
+        fun submitList(newList: List<WindscribeServerNode>, isSearching: Boolean = false) {
+            log("ServerAdapter.submitList called with ${newList.size} items, isSearching=$isSearching")
+            rawServers = newList
+            if (isSearching) {
+                // Auto-expand all matched countries during search
+                val uniqueCountryCodes = newList.map { it.countryCode.uppercase() }
+                expandedCountries.addAll(uniqueCountryCodes)
+            }
+            rebuildDisplayItems()
+        }
+
+        private fun rebuildDisplayItems() {
+            val items = mutableListOf<ListItem>()
+            // Group by country code preserving the order they appear in rawServers
+            val grouped = rawServers.groupBy { it.countryCode.uppercase() }
+
+            for ((countryCode, servers) in grouped) {
+                val countryName = getCountryName(countryCode)
+                val isExpanded = expandedCountries.contains(countryCode)
+                items.add(ListItem.CountryHeader(countryCode, countryName, servers.size, isExpanded))
+                if (isExpanded) {
+                    for (server in servers) {
+                        items.add(ListItem.ServerChild(server))
+                    }
+                }
+            }
+            displayItems = items
             notifyDataSetChanged()
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            log("ServerAdapter.onCreateViewHolder")
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.rpn_country_config_list_item, parent, false)
-            return ViewHolder(view)
+        override fun getItemViewType(position: Int): Int {
+            return when (displayItems[position]) {
+                is ListItem.CountryHeader -> TYPE_HEADER
+                is ListItem.ServerChild -> TYPE_CHILD
+            }
         }
 
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val item = list[position]
-            log("ServerAdapter.onBindViewHolder position=$position, item=${item.name}")
-            holder.bind(item, onServerClicked)
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val inflater = LayoutInflater.from(parent.context)
+            return if (viewType == TYPE_HEADER) {
+                val view = inflater.inflate(R.layout.rpn_country_header_item, parent, false)
+                HeaderViewHolder(view)
+            } else {
+                val view = inflater.inflate(R.layout.rpn_server_child_item, parent, false)
+                ChildViewHolder(view)
+            }
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            val item = displayItems[position]
+            if (holder is HeaderViewHolder && item is ListItem.CountryHeader) {
+                holder.bind(item) { clickedHeader ->
+                    val code = clickedHeader.countryCode.uppercase()
+                    if (expandedCountries.contains(code)) {
+                        expandedCountries.remove(code)
+                    } else {
+                        expandedCountries.add(code)
+                    }
+                    rebuildDisplayItems()
+                }
+            } else if (holder is ChildViewHolder && item is ListItem.ServerChild) {
+                holder.bind(item.server, onServerClicked)
+            }
         }
 
         override fun getItemCount(): Int {
-            log("ServerAdapter.getItemCount = ${list.size}")
-            return list.size
+            return displayItems.size
         }
 
-        class ViewHolder(v: View) : RecyclerView.ViewHolder(v) {
-            private val tvName: TextView = v.findViewById(R.id.rpn_country_name)
-            private val tvDetails: TextView = v.findViewById(R.id.rpn_country_desc)
+        class HeaderViewHolder(v: View) : RecyclerView.ViewHolder(v) {
+            private val tvName: TextView = v.findViewById(R.id.tv_country_name)
+            private val tvDesc: TextView = v.findViewById(R.id.tv_country_desc)
+            private val ivToggle: android.widget.ImageView = v.findViewById(R.id.iv_expand_toggle)
+
+            fun bind(header: ListItem.CountryHeader, onHeaderClicked: (ListItem.CountryHeader) -> Unit) {
+                tvName.text = header.countryName
+                tvDesc.text = "${header.totalLocations} Server Location" + if (header.totalLocations > 1) "s" else ""
+                ivToggle.setImageResource(if (header.isExpanded) R.drawable.ic_minus else R.drawable.ic_plus)
+                itemView.setOnClickListener { onHeaderClicked(header) }
+            }
+        }
+
+        class ChildViewHolder(v: View) : RecyclerView.ViewHolder(v) {
+            private val tvName: TextView = v.findViewById(R.id.tv_server_name)
+            private val tvDesc: TextView = v.findViewById(R.id.tv_server_desc)
 
             fun bind(server: WindscribeServerNode, onServerClicked: (WindscribeServerNode) -> Unit) {
-                log("ViewHolder.bind: ${server.name}")
                 tvName.text = server.name
-                tvDetails.text = "${server.city} (${server.countryCode}) · WireGuard • " + if (server.isPro) "PRO Tier" else "FREE Tier"
+                tvDesc.text = "${server.city} · WireGuard • " + if (server.isPro) "PRO Tier" else "FREE Tier"
                 itemView.setOnClickListener { onServerClicked(server) }
             }
         }

@@ -2715,9 +2715,24 @@ object RpnProxyManager : KoinComponent {
             return Pair("", true)
         }
 
-        Logger.vv(LOG_TAG_PROXY, "$TAG; config-details: $config")
-
         val lockdown = config.lockdown
+
+        val isHealthy = if (!config.isEnabled) {
+            false
+        } else {
+            val statusPair = VpnController.getProxyStatusById(id)
+            val status = statusPair.first
+            if (statusPair.second == "vpn service not available") {
+                true
+            } else {
+                status == Backend.TOK || status == Backend.TUP || status == Backend.TZZ
+            }
+        }
+
+        if (lockdown && !isHealthy) {
+            Logger.d(LOG_TAG_PROXY, "$TAG; lockdown wg for $type is inactive/unhealthy => return $block")
+            return Pair(block, false)
+        }
 
         if (lockdown && isEligibleForNetwork(id, usesMobileNw, ssid, config.mobileOnly, config.ssidBased)) {
             Logger.d(LOG_TAG_PROXY, "$TAG; lockdown wg for $type => return $id")

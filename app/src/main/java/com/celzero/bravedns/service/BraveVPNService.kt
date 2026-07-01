@@ -605,8 +605,8 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     fun protectSocket(socket: Socket) {
-        this.protect(socket)
-        Logger.v(LOG_TAG_VPN, "socket protected")
+        val result = this.protect(socket)
+        Logger.i(LOG_TAG_VPN, "socket protected: $result, bound: ${socket.isBound}, closed: ${socket.isClosed}")
     }
 
     override fun protect(who: String?, fd: Long) = go2kt(protectDispatcher) {
@@ -3452,6 +3452,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onDestroy() {
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         if (persistentState.firewallBubbleEnabled) {
             BubbleHelper.dismissBubble(this)
@@ -3690,18 +3691,90 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
 
             if (persistentState.httpsInspectionEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
                 try {
-                    // 1. Start proxy sebelum VPN establish
+                    // 1. Load rules into FilterEngine
+                    val rulesFile = java.io.File(this.filesDir, "adblock_rules.txt")
+                    if (!rulesFile.exists()) {
+                        try {
+                            rulesFile.createNewFile()
+                        } catch (e: Exception) {
+                            Logger.e(LOG_TAG_VPN, "Failed to create empty adblock_rules.txt: ${e.message}", e)
+                        }
+                    }
+                    try {
+                        com.celzero.bravedns.core.filter.FilterEngine.loadRulesFromFile(rulesFile, this.cacheDir)
+                        Logger.i(LOG_TAG_VPN, "FilterEngine rules loaded successfully from: ${rulesFile.absolutePath}")
+                    } catch (e: Exception) {
+                        Logger.e(LOG_TAG_VPN, "Failed to load rules into FilterEngine: ${e.message}", e)
+                    }
+
+                    // 2. Set the ProxyListener to bind FilterEngine to the LocalHttpsProxy
+                    com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = object : com.celzero.bravedns.core.proxy.LocalHttpsProxy.ProxyListener {
+                        override fun onRequestInspection(
+                            url: String,
+                            host: String,
+                            method: String,
+                            headers: List<String>,
+                            resourceType: Int
+                        ): Boolean {
+                            val referer = headers.find { it.lowercase().startsWith("referer:") }?.substring(8)?.trim()
+                            val refererHost = if (!referer.isNullOrBlank()) {
+                                try {
+                                    java.net.URL(referer).host
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            } else {
+                                null
+                            }
+                            val isThirdParty = com.celzero.bravedns.core.filter.FilterEngine.isThirdPartyRequest(host, refererHost)
+                            val matchResult = com.celzero.bravedns.core.filter.FilterEngine.match(url, host, isThirdParty, resourceType, refererHost)
+                            val allowed = matchResult is com.celzero.bravedns.core.filter.FilterEngine.MatchResult.Allow
+                            Logger.d(LOG_TAG_VPN, "LocalHttpsProxy.onRequestInspection: $host (allowed: $allowed, url: $url)")
+                            return allowed
+                        }
+
+                        override fun onResponseInspection(
+                            url: String,
+                            statusCode: Int,
+                            headers: List<String>,
+                            decompressedBody: String?
+                        ) {
+                            Logger.v(LOG_TAG_VPN, "LocalHttpsProxy.onResponseInspection: $url (status: $statusCode)")
+                        }
+                    }
+
+                    // 3. Start proxy sebelum VPN establish
                     com.celzero.bravedns.core.proxy.LocalHttpsProxy.start()
 
-                    // 2. Inject browser packages ke proxy whitelist
+                    // 4. Inject browser packages ke proxy whitelist
                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
-                    val browserPackages = packageManager
+                    val queriedBrowsers = packageManager
                         .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
                         .map { it.activityInfo.packageName }
                         .toSet()
+                    val commonBrowsers = setOf(
+                        "com.android.chrome",
+                        "org.mozilla.firefox",
+                        "com.microsoft.empath",
+                        "com.opera.browser",
+                        "com.opera.mini.native",
+                        "com.brave.browser",
+                        "com.duckduckgo.mobile.android",
+                        "com.sec.android.app.sbrowser",
+                        "org.torproject.torbrowser",
+                        "com.android.browser",
+                        "com.mi.globalbrowser",
+                        "com.huawei.browser",
+                        "com.coloros.browser",
+                        "com.vivo.browser",
+                        "mark.via.gp",
+                        "com.kiwibrowser.browser",
+                        "com.yandex.browser"
+                    )
+                    val browserPackages = queriedBrowsers + commonBrowsers
                     com.celzero.bravedns.core.proxy.LocalHttpsProxy.setAllowedPackages(browserPackages)
 
-                    // 3. Register system proxy
+                    // 5. Register system proxy
                     val proxyInfo = android.net.ProxyInfo.buildDirectProxy("localhost", 8443)
                     builder.setHttpProxy(proxyInfo)
                     
@@ -3710,7 +3783,8 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                     Logger.e(LOG_TAG_VPN, "Failed to start or register LocalHttpsProxy: ${pe.message}", pe)
                 }
             } else {
-                // If disabled, ensure proxy is stopped
+                // If disabled, ensure proxy and its listener are stopped/cleared
+                com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
                 com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
             }
 
@@ -5649,6 +5723,13 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         }
         logd("flow/inflow: rpn-active? ${RpnProxyManager.isRpnActive()}, rpn-ids: $rpnIds for $connId, $uid, ${connTracker.query}, ${connTracker.destIP}")
 
+        if (rpnIds.contains(Backend.Block)) {
+            connTracker.isBlocked = true
+            connTracker.blockedByRule = FirewallRuleset.RULE17.id
+            logd("flow/inflow: rpn lockdown block, returning Backend.Block for $uid")
+            return persistAndConstructFlowResponse(connTracker, Backend.Block, connId, uid, forUpstreamAnswer)
+        }
+
         if (connTracker.uid == rethinkUid && !rinr) {
             val pid = if (persistentState.autoProxyEnabled) Backend.Auto else Backend.Exit
             logd("flow/inflow: $pid for rethink, $connId, $uid, ${connTracker.query}, ${connTracker.destIP}")
@@ -6151,6 +6232,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onRevoke() {
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         // System invokes onRevoke when the user takes an explicit action that
         // disables this VPN: (a) toggles RethinkDNS off in Android Settings →

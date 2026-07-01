@@ -268,37 +268,43 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
      * Updates the text, colors, backgrounds, and enabled state of the buttons based on Root CA status.
      */
     private fun updateUiStatus() {
-        val isInstalled = try {
-            CertificateAuthority.isCaInstalled()
-        } catch (e: Exception) {
-            false
-        }
-        if (isInstalled) {
-            b.tvInstallBadge.text = "✅ INSTALLED"
-            b.tvInstallBadge.setTextColor(Color.parseColor("#388E3C")) // Dark green
-            b.tvInstallBadge.setBackgroundResource(R.drawable.badge_bg_green)
-
-            b.btnInstall.isEnabled = false // No need to re-install if already installed
-            b.switchHttpsInspection.isEnabled = true
-            b.switchHttpsInspection.isChecked = persistentState.httpsInspectionEnabled
-        } else {
-            b.tvInstallBadge.text = "⚠️ NOT INSTALLED"
-            b.tvInstallBadge.setTextColor(Color.parseColor("#D32F2F")) // Dark red
-            b.tvInstallBadge.setBackgroundResource(R.drawable.badge_bg_red)
-
-            val canExport = try {
-                CertificateAuthority.exportCaCert()
-                true
-            } catch (e: Exception) {
-                false
+        lifecycleScope.launch {
+            val isInstalled = withContext(Dispatchers.IO) {
+                try {
+                    CertificateAuthority.isCaInstalled()
+                } catch (e: Exception) {
+                    false
+                }
             }
-            b.btnInstall.isEnabled = canExport
-            b.btnSaveCert.isEnabled = canExport
-            b.tvGenerateHint.visibility = if (canExport) View.GONE else View.VISIBLE
-            b.switchHttpsInspection.isEnabled = false
-            b.switchHttpsInspection.isChecked = false
-            // Force disable in persistent state if not installed
-            persistentState.httpsInspectionEnabled = false
+            val canExport = withContext(Dispatchers.IO) {
+                try {
+                    CertificateAuthority.exportCaCert()
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            if (isInstalled) {
+                b.tvInstallBadge.text = "✅ INSTALLED"
+                b.tvInstallBadge.setTextColor(Color.parseColor("#388E3C")) // Dark green
+                b.tvInstallBadge.setBackgroundResource(R.drawable.badge_bg_green)
+
+                b.btnInstall.isEnabled = false // No need to re-install if already installed
+                b.switchHttpsInspection.isEnabled = true
+                b.switchHttpsInspection.isChecked = persistentState.httpsInspectionEnabled
+            } else {
+                b.tvInstallBadge.text = "⚠️ NOT INSTALLED"
+                b.tvInstallBadge.setTextColor(Color.parseColor("#D32F2F")) // Dark red
+                b.tvInstallBadge.setBackgroundResource(R.drawable.badge_bg_red)
+
+                b.btnInstall.isEnabled = canExport
+                b.btnSaveCert.isEnabled = canExport
+                b.tvGenerateHint.visibility = if (canExport) View.GONE else View.VISIBLE
+                b.switchHttpsInspection.isEnabled = false
+                b.switchHttpsInspection.isChecked = false
+                // Force disable in persistent state if not installed
+                persistentState.httpsInspectionEnabled = false
+            }
         }
     }
 }

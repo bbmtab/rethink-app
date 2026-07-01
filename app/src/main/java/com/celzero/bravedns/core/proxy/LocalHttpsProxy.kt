@@ -14,6 +14,8 @@ import java.net.Socket
 import java.security.KeyStore
 import java.util.*
 import javax.net.ssl.*
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
  * LocalHttpsProxy is a lightweight, non-blocking HTTP/HTTPS MITM Inspection Proxy server.
@@ -22,7 +24,7 @@ import javax.net.ssl.*
  * It enforces HTTP/1.1 end-to-end to prevent multiplexed HTTP/2 frames from leaking into the decrypted 
  * stream, allowing highly reliable, linear request/response inspection and modification.
  */
-object LocalHttpsProxy {
+object LocalHttpsProxy : KoinComponent {
 
     private const val TAG = "LocalHttpsProxy"
     private const val DEFAULT_PORT = 8443
@@ -34,14 +36,94 @@ object LocalHttpsProxy {
     private var appContext: android.content.Context? = null
     private var persistentState: com.celzero.bravedns.service.PersistentState? = null
 
+    private val appConfig by inject<com.celzero.bravedns.data.AppConfig>()
+
+    /**
+     * Domains that must bypass MITM inspection.
+     *
+     * Two categories:
+     * 1. Certificate-pinned domains — these use cert pinning so our leaf cert will
+     *    always be rejected regardless of CA trust level.
+     * 2. HSTS preloaded + Chrome hardcoded domains — on non-root devices where our CA
+     *    is only in the user store (not system store), Chrome shows a hard "not private"
+     *    error with NO "proceed" option for HSTS domains. Since we cannot MITM these
+     *    reliably without a system CA, we bypass them to avoid breaking the browser UX.
+     *    DNS-level blocking still applies to all of these via the VPN tunnel.
+     *
+     * AdGuard handles this the same way: they bypass cert-pinned and HSTS-strict domains
+     * at the proxy layer and rely on DNS blocking for those domains instead.
+     */
     private val PERSISTENT_BYPASS_SEEDS = setOf(
+        // Cert-pinned / Google infrastructure
         "google.com",
         "googleapis.com",
         "gstatic.com",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "play.google.com",
+        "android.clients.google.com",
+        // High-volume media & video streaming CDNs
+        "googlevideo.com",
+        "gvt1.com",
+        "gvt2.com",
+        "ytimg.com",
+        "ggpht.com",
+        // Apple
         "apple.com",
         "icloud.com",
-        "play.google.com",
-        "android.clients.google.com"
+        // HSTS preloaded — Chrome shows no-proceed error without system CA
+        "facebook.com",
+        "instagram.com",
+        "twitter.com",
+        "x.com",
+        "whatsapp.com",
+        "github.com",
+        "microsoft.com",
+        "live.com",
+        "outlook.com",
+        "office.com",
+        "linkedin.com",
+        "amazon.com",
+        "paypal.com",
+        "bankofamerica.com",
+        "chase.com",
+        "cloudflare.com",
+        "mozilla.org",
+        "firefox.com",
+        "wikipedia.org",
+        "wikimedia.org",
+        "dropbox.com",
+        "slack.com",
+        "zoom.us",
+        "netflix.com",
+        "youtube.com",
+        "tiktok.com",
+        "snapchat.com",
+        "pinterest.com",
+        "reddit.com",
+        "tumblr.com",
+        "twitch.tv",
+        "discord.com",
+        "spotify.com",
+        // Media & Content Delivery Networks (CDNs)
+        "nflxvideo.net",
+        "nflxso.net",
+        "nflximg.net",
+        "vimeocdn.com",
+        "ttvnw.net",
+        "ttwstatic.com",
+        "fbcdn.net",
+        "tiktokv.com",
+        "byteoversea.com",
+        "ibyteimg.com",
+        "ibytedtos.com",
+        "sndcdn.com",
+        "fastly.net",
+        "akamaihd.net",
+        "akamai.net",
+        "edgecastcdn.net",
+        "limelight.com",
+        "cloudfront.net"
     )
 
     private val dynamicBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -54,6 +136,12 @@ object LocalHttpsProxy {
      */
     fun initialize(state: com.celzero.bravedns.service.PersistentState) {
         this.persistentState = state
+        // Explicitly clear the persistent bypass cache at startup to resolve pollution
+        try {
+            state.httpsBypassHosts = ""
+        } catch (e: Exception) {
+            logError("Failed to clear httpsBypassHosts: ${e.message}")
+        }
         loadBypassCacheFromPreferences()
     }
 
@@ -66,6 +154,12 @@ object LocalHttpsProxy {
     fun initialize(context: android.content.Context, state: com.celzero.bravedns.service.PersistentState) {
         this.appContext = context.applicationContext
         this.persistentState = state
+        // Explicitly clear the persistent bypass cache at startup to resolve pollution
+        try {
+            state.httpsBypassHosts = ""
+        } catch (e: Exception) {
+            logError("Failed to clear httpsBypassHosts: ${e.message}")
+        }
         loadBypassCacheFromPreferences()
     }
 
@@ -125,20 +219,108 @@ object LocalHttpsProxy {
     }
 
     private fun persistBypassCache() {
-        val state = persistentState ?: return
-        val serialized = dynamicBypassSet.joinToString(",")
-        state.httpsBypassHosts = serialized
+        // No-op to prevent persisting bypasses to preferences
     }
 
     private fun addToBypassCache(host: String) {
-        val cleanedHost = host.trim().lowercase(Locale.US)
-        if (cleanedHost.isNotEmpty() && !PERSISTENT_BYPASS_SEEDS.contains(cleanedHost)) {
-            if (dynamicBypassSet.add(cleanedHost)) {
-                logInfo("Host '$cleanedHost' added to persistent bypass cache due to handshake failure")
-                persistBypassCache()
+        // NOTE: Do NOT add to dynamicBypassSet on TLS handshake failure.
+        //
+        // Old behavior: auto-add failed hosts to bypass cache, causing cascading bypasses.
+        // With suffix matching, one failed subdomain would bypass the entire parent domain
+        // for all future connections — defeating MITM entirely (root cause of the ipleak.net bug).
+        //
+        // Certificate-pinned domains belong in PERSISTENT_BYPASS_SEEDS, not here.
+        // We log only; next connection will retry MITM normally.
+        logInfo("TLS handshake failed for '$host' — not adding to bypass cache (will retry on next connection)")
+    }
+
+    private fun resolveHostSecurely(host: String): java.net.InetAddress {
+        val context = appContext
+        if (context != null) {
+            try {
+                val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                val activeNetwork = cm?.activeNetwork
+                if (activeNetwork != null) {
+                    val addresses = activeNetwork.getAllByName(host)
+                    if (addresses.isNotEmpty()) {
+                        logInfo("Resolved host '$host' securely on active network: ${addresses.joinToString { it.hostAddress ?: "" }}")
+                        return addresses[0]
+                    }
+                }
+            } catch (e: Exception) {
+                logWarn("Failed to resolve host '$host' securely on active network: ${e.message}. Falling back to system default.")
             }
         }
+        return java.net.InetAddress.getByName(host)
     }
+
+    private suspend fun getUpstreamProxy(): java.net.Proxy? {
+        try {
+            if (appConfig.isCustomSocks5Enabled()) {
+                val details = appConfig.getSocks5ProxyDetails()
+                if (details != null && !details.proxyIP.isNullOrEmpty() && details.proxyPort > 0) {
+                    val proxyHost = details.proxyIP!!
+                    val proxyPort = details.proxyPort
+                    logInfo("Using upstream custom SOCKS5 proxy: $proxyHost:$proxyPort")
+                    return java.net.Proxy(java.net.Proxy.Type.SOCKS, InetSocketAddress(proxyHost, proxyPort))
+                }
+            }
+            
+            if (appConfig.isOrbotProxyEnabled()) {
+                val details = appConfig.getOrbotSocks5Endpoint()
+                if (details != null && !details.proxyIP.isNullOrEmpty() && details.proxyPort > 0) {
+                    val proxyHost = details.proxyIP!!
+                    val proxyPort = details.proxyPort
+                    logInfo("Using upstream Orbot SOCKS5 proxy: $proxyHost:$proxyPort")
+                    return java.net.Proxy(java.net.Proxy.Type.SOCKS, InetSocketAddress(proxyHost, proxyPort))
+                }
+            }
+            
+            if (appConfig.isCustomHttpProxyEnabled()) {
+                val details = appConfig.getConnectedHttpProxy()
+                if (details != null && !details.proxyIP.isNullOrEmpty() && details.proxyPort > 0) {
+                    val proxyHost = details.proxyIP!!
+                    val proxyPort = details.proxyPort
+                    logInfo("Using upstream custom HTTP proxy: $proxyHost:$proxyPort")
+                    return java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress(proxyHost, proxyPort))
+                }
+            }
+        } catch (e: Exception) {
+            logError("Failed to check active proxy configuration: ${e.message}")
+        }
+        return null
+    }
+
+    private suspend fun createAndProtectUpstreamSocket(host: String, port: Int): Pair<Socket, InetSocketAddress> {
+        val proxy = getUpstreamProxy()
+        val socket: Socket
+        val address: InetSocketAddress
+        
+        if (proxy != null) {
+            socket = Socket(proxy)
+            // Use unresolved address to let the proxy resolve DNS and prevent local leaks
+            address = InetSocketAddress.createUnresolved(host, port)
+            logInfo("Upstream connection for $host:$port will route via proxy.")
+        } else {
+            socket = Socket()
+            val resolvedAddress = resolveHostSecurely(host)
+            address = java.net.InetSocketAddress(resolvedAddress, port)
+            logInfo("Upstream connection for $host:$port will route directly via physical interface.")
+        }
+        
+        val context = appContext
+        if (context != null) {
+            // IMPORTANT: Do NOT call activeNetwork.bindSocket() here.
+            // When VPN is active, activeNetwork may resolve to the VPN virtual interface (tun0).
+            // Binding the upstream socket to tun0 THEN calling protectSocket() creates a routing
+            // contradiction (bind to VPN + bypass VPN simultaneously) → ECONNREFUSED.
+            // The correct sequence is: create plain socket → protectSocket() → connect().
+            // protectSocket() alone is sufficient to route the socket outside the VPN tunnel.
+        }
+        com.celzero.bravedns.service.VpnController.protectSocket(socket)
+        return Pair(socket, address)
+    }
+
 
     /**
      * Listener interface to decouple traffic inspection and filtering logic from the network proxy server.
@@ -229,6 +411,7 @@ object LocalHttpsProxy {
     private suspend fun handleClientConnection(clientSocket: Socket) {
         clientSocket.use { client ->
             try {
+                client.soTimeout = 30000
                 val inputStream = client.getInputStream()
                 
                 // Read the first request line byte-by-byte to prevent buffering loss of TLS handshake bytes
@@ -268,9 +451,10 @@ object LocalHttpsProxy {
      * Manages HTTP CONNECT tunneling.
      */
     private suspend fun handleConnectTunnel(clientSocket: Socket, host: String, port: Int) {
-        val upstreamSocket = Socket()
+        val (upstreamSocket, address) = createAndProtectUpstreamSocket(host, port)
         try {
-            upstreamSocket.connect(InetSocketAddress(host, port), 10000)
+            upstreamSocket.soTimeout = 30000
+            upstreamSocket.connect(address, 10000)
         } catch (e: Exception) {
             logError("Failed to connect to upstream $host:$port: ${e.message}")
             try {
@@ -322,6 +506,7 @@ object LocalHttpsProxy {
                 port,
                 true
             ) as SSLSocket
+            upstreamSslSocket.soTimeout = 30000
 
             try {
                 val params = upstreamSslSocket.sslParameters
@@ -343,6 +528,7 @@ object LocalHttpsProxy {
                 clientSocket.port,
                 true
             ) as SSLSocket
+            downstreamSslSocket.soTimeout = 30000
 
             downstreamSslSocket.useClientMode = false
 
@@ -889,8 +1075,8 @@ object LocalHttpsProxy {
                 return
             }
 
-            val upstreamSocket = Socket()
-            upstreamSocket.connect(InetSocketAddress(host, port), 10000)
+            val (upstreamSocket, address) = createAndProtectUpstreamSocket(host, port)
+            upstreamSocket.connect(address, 10000)
 
             upstreamSocket.use { upstream ->
                 val path = if (uri.rawPath.isNullOrEmpty()) "/" else uri.rawPath + (if (uri.rawQuery != null) "?" + uri.rawQuery else "")
