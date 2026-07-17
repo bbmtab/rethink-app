@@ -361,7 +361,12 @@ class WgMainActivity :
         }
         b.createFab.setOnClickListener { openTunnelEditorActivity() }
         b.deleteAllFab.setOnClickListener { showDeleteAllInterfacesDialog() }
-        b.windscribeFab.setOnClickListener { openWindscribeLoginActivity() }
+        // Windscribe kill-switch -- See docs/WINDSCRIBE-KEYGEN-DEFERRED.md
+        if (WindscribeFeatureGate.TEMPORARILY_DISABLED) {
+            b.windscribeFab.visibility = View.GONE
+        } else {
+            b.windscribeFab.setOnClickListener { openWindscribeLoginActivity() }
+        }
 
         b.wgGeneralToggleBtn.setOnClickListener {
             if (WireguardManager.oneWireGuardEnabled()) {
@@ -424,6 +429,8 @@ class WgMainActivity :
     }
 
     private fun openWindscribeLoginActivity() {
+        // Defense in depth -- See docs/WINDSCRIBE-KEYGEN-DEFERRED.md
+        if (WindscribeFeatureGate.TEMPORARILY_DISABLED) return
         val intent = Intent(this, WindscribeLoginActivity::class.java)
         startActivity(intent)
     }
