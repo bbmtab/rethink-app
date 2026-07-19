@@ -51,3 +51,23 @@ release.keystore
 plan.md
 progress_report.md
 windscribe_integration_blueprint.md
+
+# Local-only governance documents and runtime-verification stash.
+# Intentionally excluded from this repo. See project_gitignored_governance_docs
+# in supervisor memories. These patterns intentionally match by basename
+# (no slash), so root + docs/ duplicates of 00|01|02 are caught by ONE pattern each.
+
+# Plan / constraints / threat-model
+00-VISION-AND-PARITY-MATRIX.md
+01-CONSTRAINTS-AND-THREAT-MODEL.md
+02-IMPLEMENTATION-PLAN.md
+
+# Local research / progress artifacts
+MITM_FIX_PROGRESS.md
+MITM_STATUS_REPORT_20260701.md
+progress.md
+rethink-adguard-parity-bundle.zip
+
+# Session-local runtime-verification push directory (REGENERATED each session;
+# don't ship a permanent copy in the repo)
+download/
