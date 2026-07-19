@@ -45,6 +45,7 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
     private lateinit var serverAdapter: ServerAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
         // Defense in depth: this activity must be unreachable while the keygen
         // path is deferred. See docs/WINDSCRIBE-KEYGEN-DEFERRED.md.
         if (WindscribeFeatureGate.TEMPORARILY_DISABLED) {
@@ -55,7 +56,6 @@ class WindscribeLoginActivity : BaseActivity(R.layout.activity_windscribe_login)
         // Theme customization
         val persistentState = com.celzero.bravedns.service.PersistentState(this)
         theme.applyStyle(Themes.getCurrentTheme(isDarkThemeOn(), persistentState.theme), true)
-        super.onCreate(savedInstanceState)
         handleFrostEffectIfNeeded(persistentState.theme)
 
         initUi()
