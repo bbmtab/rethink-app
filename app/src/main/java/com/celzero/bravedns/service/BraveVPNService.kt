@@ -116,6 +116,7 @@ import com.celzero.bravedns.util.NotificationActionType
 import com.celzero.bravedns.util.OrbotHelper
 import com.celzero.bravedns.util.Protocol
 import com.celzero.bravedns.util.ResourceRecordTypes
+import com.celzero.bravedns.util.SettingsRestarter
 import com.celzero.bravedns.util.UIUtils.getAccentColor
 import com.celzero.bravedns.util.Utilities
 import com.celzero.bravedns.util.Utilities.isAtleastO
@@ -2249,6 +2250,17 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
 
             PersistentState.LOCAL_BLOCK_LIST_STAMP -> { // update on local blocklist stamp change
                 spawnLocalBlocklistStampUpdate()
+                // Also reload adblock rules for MITM filtering
+                reloadAdblockRules()
+            }
+
+            PersistentState.HTTPS_INSPECTION_ENABLED -> {
+                // HTTPS Inspection toggle requires app restart (non-hot-pluggable)
+                SettingsRestarter.requestRestart(
+                    context = this,
+                    message = getString(R.string.settings_restart_required_message_https_inspection),
+                    onConfirm = { vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}" }
+                )
             }
 
             PersistentState.REMOTE_BLOCKLIST_UPDATE -> {
@@ -2667,6 +2679,29 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         if (isPlayStoreFlavour()) return
 
         io("dnsStampUpdate") { vpnAdapter?.setRDNSStamp() }
+    }
+
+    /**
+     * Reloads adblock rules from adblock_rules.txt into FilterEngine.
+     * Called when localBlocklistStamp changes (user synced new blocklists).
+     */
+    private fun reloadAdblockRules() {
+        io("reloadAdblockRules") {
+            val rulesFile = java.io.File(this.filesDir, "adblock_rules.txt")
+            if (!rulesFile.exists()) {
+                try {
+                    rulesFile.createNewFile()
+                } catch (e: Exception) {
+                    Logger.e(LOG_TAG_VPN, "Failed to create empty adblock_rules.txt: ${e.message}", e)
+                }
+            }
+            try {
+                com.celzero.bravedns.core.filter.FilterEngine.loadRulesFromFile(rulesFile, this.cacheDir)
+                Logger.i(LOG_TAG_VPN, "FilterEngine rules reloaded from: ${rulesFile.absolutePath}")
+            } catch (e: Exception) {
+                Logger.e(LOG_TAG_VPN, "Failed to reload rules into FilterEngine: ${e.message}", e)
+            }
+        }
     }
 
     // invoked on pref / probe-ip changes, so that the connection monitor can

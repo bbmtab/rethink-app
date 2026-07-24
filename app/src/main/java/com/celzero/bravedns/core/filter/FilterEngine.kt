@@ -147,6 +147,30 @@ object FilterEngine {
     val htmlFilterRules = ArrayList<String>()
 
     @Volatile
+    private var networkRuleCount = 0
+
+    @Volatile
+    var isReloading: Boolean = false
+
+    /**
+     * Aggregated rule statistics for UI feedback.
+     */
+    data class RuleStats(
+        val network: Int,
+        val cosmetic: Int,
+        val cosmeticExceptions: Int,
+        val csp: Int,
+        val procedural: Int,
+        val scriptlet: Int,
+        val htmlFilter: Int
+    ) {
+        val total: Int get() = network + cosmetic + cosmeticExceptions + csp + procedural + scriptlet + htmlFilter
+
+        override fun toString(): String =
+            "Rules: $total | Network: $network | Cosmetic: $cosmetic | Exceptions: $cosmeticExceptions | CSP: $csp | Procedural: $procedural | Scriptlet: $scriptlet | HTML Filter: $htmlFilter"
+    }
+
+    @Volatile
     var isLoaded = false
         private set
 
@@ -163,7 +187,23 @@ object FilterEngine {
         proceduralRules.clear()
         scriptletRules.clear()
         htmlFilterRules.clear()
+        networkRuleCount = 0
         isLoaded = false
+    }
+
+    /**
+     * Returns aggregated rule statistics for UI feedback.
+     */
+    fun getRuleStats(): RuleStats {
+        return RuleStats(
+            network = networkRuleCount,
+            cosmetic = cosmeticRules.size,
+            cosmeticExceptions = cosmeticExceptions.size,
+            csp = cspRules.size,
+            procedural = proceduralRules.size,
+            scriptlet = scriptletRules.size,
+            htmlFilter = htmlFilterRules.size
+        )
     }
 
     /**
@@ -177,6 +217,7 @@ object FilterEngine {
         refererHost: String? = null
     ): MatchResult {
         if (!isLoaded) return MatchResult.Allow
+        if (isReloading) return MatchResult.Allow
 
         // 1. Get all candidate rules
         val candidates = ArrayList<AdblockRule>()
@@ -279,40 +320,45 @@ object FilterEngine {
      */
     @Synchronized
     fun loadRulesFromFile(rawFile: File, cacheDir: File) {
-        val cacheFile = File(cacheDir, CACHE_FILE_NAME)
-        if (cacheFile.exists() && cacheFile.lastModified() >= rawFile.lastModified()) {
-            try {
-                if (loadFromCache(cacheFile)) {
-                    logInfo("Successfully loaded pre-parsed filter list from disk cache.")
-                    return
-                }
-            } catch (e: Exception) {
-                logError("Failed to load rules cache: ${e.message}. Re-parsing raw file...", e)
-            }
-        }
-
-        // Parse raw EasyList file
-        logInfo("Parsing raw filter list file (${rawFile.length() / 1024} KB)...")
-        val startTime = System.currentTimeMillis()
-        clear()
-        
-        rawFile.bufferedReader(Charsets.UTF_8).use { br ->
-            var line: String? = br.readLine()
-            while (line != null) {
-                processRuleLine(line)
-                line = br.readLine()
-            }
-        }
-        
-        isLoaded = true
-        val duration = System.currentTimeMillis() - startTime
-        logInfo("Parsed filter list in ${duration}ms. Saving pre-parsed cache...")
-
-        // Save pre-parsed cache asynchronously
+        isReloading = true
         try {
-            saveToCache(cacheFile)
-        } catch (e: Exception) {
-            logError("Failed to write rules cache: ${e.message}")
+            val cacheFile = File(cacheDir, CACHE_FILE_NAME)
+            if (cacheFile.exists() && cacheFile.lastModified() >= rawFile.lastModified()) {
+                try {
+                    if (loadFromCache(cacheFile)) {
+                        logInfo("Successfully loaded pre-parsed filter list from disk cache.")
+                        return
+                    }
+                } catch (e: Exception) {
+                    logError("Failed to load rules cache: ${e.message}. Re-parsing raw file...", e)
+                }
+            }
+
+            // Parse raw EasyList file
+            logInfo("Parsing raw filter list file (${rawFile.length() / 1024} KB)...")
+            val startTime = System.currentTimeMillis()
+            clear()
+
+            rawFile.bufferedReader(Charsets.UTF_8).use { br ->
+                var line: String? = br.readLine()
+                while (line != null) {
+                    processRuleLine(line)
+                    line = br.readLine()
+                }
+            }
+
+            isLoaded = true
+            val duration = System.currentTimeMillis() - startTime
+            logInfo("Parsed filter list in ${duration}ms. Saving pre-parsed cache...")
+
+            // Save pre-parsed cache asynchronously
+            try {
+                saveToCache(cacheFile)
+            } catch (e: Exception) {
+                logError("Failed to write rules cache: ${e.message}")
+            }
+        } finally {
+            isReloading = false
         }
     }
 
@@ -339,6 +385,7 @@ object FilterEngine {
                 synchronized(htmlFilterRules) { htmlFilterRules.add(rule.rawText) }
             }
             else -> {
+                networkRuleCount++
                 if (rule.isDomainExact && rule.targetDomain != null) {
                     domainTrie.insert(rule.targetDomain, rule)
                 } else {

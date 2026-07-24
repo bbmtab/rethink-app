@@ -70,10 +70,10 @@ class FirewallAppListAdapterTest {
     private lateinit var mockParent: ViewGroup
     private lateinit var lifecycleOwner: LifecycleOwner
 
-    @MockK
+    @MockK(relaxed = true)
     private lateinit var mockAppInfoRepository: AppInfoRepository
 
-    @MockK
+    @MockK(relaxed = true)
     private lateinit var mockPersistentState: PersistentState
 
     @MockK
@@ -137,12 +137,12 @@ class FirewallAppListAdapterTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
-        unmockkAll()
         try {
             stopKoin()
         } catch (e: Exception) {
             // Koin already stopped
         }
+        unmockkAll()
     }
 
     // Test Data Factory

@@ -90,6 +90,9 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
         const val FIREWALL_BUBBLE = "pref_firewall_bubble_enabled"
 
+        // HTTPS Inspection (MITM) toggle
+        const val HTTPS_INSPECTION_ENABLED = "https_inspection_enabled"
+
         // RPN server-side DNS mode (0=Default, 1=AntiAd, 2=Parental, 3=Security)
         const val RPN_DNS_URL = "rpn_dns_mode"
 
@@ -146,24 +149,42 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         booleanPref("block_udp_traffic_other_than_dns").withDefault<Boolean>(false)
 
     // user chosen blocklists stored custom dictionary indexed in base64
-    var localBlocklistStamp by
+    private var _localBlocklistStamp by
         stringPref("local_block_list_stamp")
             .withDefault<String>("")
+    var localBlocklistStamp: String
+        get() = _localBlocklistStamp
+        set(value) {
+            _localBlocklistStamp = value
+            localBlocklistStampLiveData.postValue(value)
+        }
 
     // whether to drop packets when the source app originating the reqs couldn't be determined
     private var _blockUnknownConnections by
         booleanPref("block_unknown_connections").withDefault<Boolean>(false)
 
     // whether user has enable on-device blocklists
-    var blocklistEnabled by
+    private var _blocklistEnabled by
         booleanPref("enable_local_list").withDefault<Boolean>(false)
+    var blocklistEnabled: Boolean
+        get() = _blocklistEnabled
+        set(value) {
+            _blocklistEnabled = value
+            blocklistEnabledLiveData.postValue(value)
+        }
 
     // the version (which is a unix timestamp) of the current rethinkdns+ remote blocklist files
     var remoteBlocklistTimestamp by
         longPref("remote_block_list_downloaded_time").withDefault<Long>(INIT_TIME_MS)
 
     // the version (which is a unix timestamp) of the current on-device blocklist files
-    var localBlocklistTimestamp by longPref("local_block_list_downloaded_time").withDefault<Long>(0)
+    private var _localBlocklistTimestamp by longPref("local_block_list_downloaded_time").withDefault<Long>(0)
+    var localBlocklistTimestamp: Long
+        get() = _localBlocklistTimestamp
+        set(value) {
+            _localBlocklistTimestamp = value
+            localBlocklistTimestampLiveData.postValue(value)
+        }
 
     // user set http proxy port
     var httpProxyPort by intPref("http_proxy_port").withDefault<Int>(INVALID_PORT)
@@ -178,7 +199,13 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
     // whether HTTPS inspection is enabled
     // default: false
-    var httpsInspectionEnabled by booleanPref("https_inspection_enabled").withDefault<Boolean>(false)
+    private var _httpsInspectionEnabled by booleanPref("https_inspection_enabled").withDefault<Boolean>(false)
+    var httpsInspectionEnabled: Boolean
+        get() = _httpsInspectionEnabled
+        set(value) {
+            _httpsInspectionEnabled = value
+            httpsInspectionEnabledLiveData.postValue(value)
+        }
 
     // comma-separated list of hosts to bypass HTTPS inspection
     var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
@@ -477,6 +504,13 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     var dnsCryptRelays: MutableLiveData<DnsCryptRelayDetails> = MutableLiveData()
 
     var remoteBlocklistCount: MutableLiveData<Int> = MutableLiveData()
+
+    var localBlocklistStampLiveData: MutableLiveData<String> = MutableLiveData()
+
+    var localBlocklistTimestampLiveData: MutableLiveData<Long> = MutableLiveData()
+
+    var httpsInspectionEnabledLiveData: MutableLiveData<Boolean> = MutableLiveData()
+    var blocklistEnabledLiveData: MutableLiveData<Boolean> = MutableLiveData()
 
     fun setVpnEnabled(isOn: Boolean) {
         vpnEnabledLiveData.postValue(isOn)

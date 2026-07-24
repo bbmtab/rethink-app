@@ -98,6 +98,11 @@ class FirewallManagerTest : KoinTest {
             // Ignore if Koin wasn't started
         }
 
+        // Purge all MockK state from preceding tests to prevent stale
+        // bytecode instrumentation from corrupting new mockk(relaxed = true)
+        unmockkAll()
+        clearAllMocks()
+
         // Initialize mocks
         mockDb = mockk(relaxed = true)
         mockPersistentState = mockk(relaxed = true)

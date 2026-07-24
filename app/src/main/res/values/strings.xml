@@ -2501,4 +2501,89 @@
 
     <string name="console_log_include_file_trace" translatable="false">Include file trace in logs</string>
 
+    <!-- Settings restart dialog -->
+    <string name="settings_restart_required_title">Restart Required</string>
+    <string name="settings_restart_required_message_https_inspection">App will restart to apply HTTPS Inspection change</string>
+
+    <!-- Plus tab (fdroid) - MITM/Adblock UI -->
+    <string name="plus_section_https_inspection">HTTPS Inspection</string>
+    <string name="plus_section_blocklist_bridge">DNS Blocklist → MITM Bridge</string>
+    <string name="plus_section_advanced_filtering">Advanced Filtering</string>
+    <string name="plus_section_exclusions">Exclusions</string>
+
+    <string name="plus_ca_status_not_installed">CA Certificate: Not Installed</string>
+    <string name="plus_ca_status_installed">CA Certificate: Installed ✓</string>
+    <string name="plus_ca_status_checking">Checking CA status…</string>
+    <string name="plus_ca_status_checking_desc">Verifying certificate in system trust store</string>
+    <string name="plus_ca_status_installed_desc">Tap to re-install or export</string>
+    <string name="plus_ca_status_not_installed_desc">You must install the CA to enable HTTPS inspection</string>
+
+    <string name="plus_ca_action_install">Install CA</string>
+    <string name="plus_ca_action_reinstall">Re-install CA</string>
+    <string name="plus_ca_action_export">Export CA to Downloads</string>
+
+    <string name="plus_https_inspection_desc">Inspect and filter HTTPS traffic using a local root CA. Requires CA installation.</string>
+    <string name="plus_https_inspection_disabled">Enable CA installation first</string>
+
+    <string name="plus_blocklist_bridge_desc">Use your selected DNS blocklists for HTTPS adblocking. Select lists, then tap Sync.</string>
+    <string name="plus_blocklist_bridge_use_dns">Use DNS blocklists for adblock</string>
+    <string name="plus_blocklist_bridge_select_lists">Select Lists…</string>
+    <string name="plus_blocklist_bridge_ready">Ready to sync</string>
+    <string name="plus_blocklist_bridge_sync">Sync Now</string>
+    <string name="plus_blocklist_bridge_syncing">Syncing…</string>
+    <string name="plus_blocklist_bridge_synced" formatted="false">Synced: %d network, %d cosmetic, %d scriptlet rules</string>
+    <string name="plus_blocklist_bridge_never_synced">Never synced</string>
+    <string name="plus_blocklist_bridge_select_first">Select blocklists in DNS settings first</string>
+
+    <string name="plus_advanced_cosmetic_title">Cosmetic CSS Injection</string>
+    <string name="plus_advanced_cosmetic_desc">Hide ad elements via CSS injection (## rules)</string>
+    <string name="plus_advanced_scriptlet_title">Scriptlet Injection</string>
+    <string name="plus_advanced_scriptlet_desc">Run JavaScript to neutralize anti-adblock (#%# rules)</string>
+    <string name="plus_advanced_procedural_title">Procedural Cosmetic Filters</string>
+    <string name="plus_advanced_procedural_desc">Dynamic element removal with :has(), :xpath(), :upward() (#?# rules)</string>
+
+    <string name="plus_exclusions_domains">Domain Exclusions</string>
+    <string name="plus_exclusions_domains_desc">Skip MITM for these domains (certificate pinning, banking, etc.)</string>
+    <string name="plus_exclusions_manage">Manage</string>
+    <string name="plus_exclusions_apps">App Exclusions</string>
+    <string name="plus_exclusions_apps_desc">Skip routing these apps through MITM entirely</string>
+
+    <string name="plus_ca_action_dialog_title">CA Certificate Actions</string>
+    <string name="plus_ca_install_dialog_title">Install RethinkDNS Root CA</string>
+    <string name="plus_ca_install_dialog_message">This will open Android Settings. Tap \"Install\" and name it \"RethinkDNS Root CA\". You must authenticate (PIN/pattern).</string>
+    <string name="plus_ca_install_dialog_open">Open Settings</string>
+
+    <string name="plus_ca_export_dialog_title">Export CA Certificate</string>
+    <string name="plus_ca_export_dialog_message">The CA certificate will be saved to Downloads/RethinkDNS/rethinkdns_root_ca.crt. You can then transfer it to other devices.</string>
+    <string name="plus_ca_export_dialog_ok">Export</string>
+
+    <string name="plus_sync_complete_toast">Blocklists synced: %d rules</string>
+    <string name="plus_sync_error_toast">Sync failed: %s</string>
+    <string name="plus_ca_install_prompt">Please install the CA certificate to enable HTTPS Inspection</string>
+
+    <!-- Additional Plus tab strings for layout references -->
+    <string name="plus_https_inspection_title">HTTPS Inspection</string>
+    <string name="plus_https_inspection_master_toggle">Master Toggle</string>
+    <string name="plus_https_inspection_master_toggle_desc">Enable HTTPS inspection for all allowed apps</string>
+    <string name="plus_ca_install">Install CA</string>
+    <string name="plus_ca_reinstall">Re-install CA</string>
+    <string name="plus_ca_export">Export CA</string>
+
+    <string name="plus_blocklist_bridge_title">DNS Blocklist → MITM Bridge</string>
+    <string name="plus_blocklist_bridge_toggle">Use DNS blocklists for adblock</string>
+    <string name="plus_blocklist_bridge_toggle_desc">Sync selected DNS blocklists to adblock rules for HTTPS filtering</string>
+    <string name="plus_blocklist_bridge_selector_title">Blocklist Selector</string>
+    <string name="plus_blocklist_bridge_selector_desc">Choose which DNS blocklists to use for HTTPS filtering</string>
+    <string name="plus_blocklist_bridge_selector_btn">Select Lists…</string>
+
+    <string name="plus_advanced_filtering_desc">Experimental features - require FilterEngine support</string>
+    <string name="plus_advanced_filtering_title">Advanced Filtering</string>
+    <string name="plus_exclusions_title">Exclusions</string>
+    <string name="plus_exclusions_desc">Configure domains or apps to exclude from HTTPS inspection</string>
+
+    <string name="plus_ca_install_success">CA certificate installed successfully</string>
+    <string name="plus_ca_install_error">Failed to install CA certificate: %s</string>
+    <string name="plus_ca_export_error">Failed to export CA certificate: %s</string>
+    <string name="plus_blocklist_bridge_status">Last sync: %s</string>
+
 </resources>

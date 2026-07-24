@@ -22,6 +22,7 @@ import io.mockk.clearAllMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import io.mockk.unmockkAll
 import io.mockk.unmockkObject
 import io.mockk.verify
 import org.junit.After
@@ -59,6 +60,7 @@ class TempAllowExpiryWorkerTest {
             stopKoin()
         } catch (_: Exception) {
         }
+        unmockkAll()
     }
 
     @Test
