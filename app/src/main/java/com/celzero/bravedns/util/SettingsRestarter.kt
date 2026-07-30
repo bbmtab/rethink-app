@@ -15,17 +15,29 @@
  */
 package com.celzero.bravedns.util
 
-import android.app.Activity
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
-import androidx.appcompat.app.AlertDialog
+import android.widget.Toast
+import com.celzero.bravedns.R
 import com.celzero.bravedns.service.PersistentState
 
 /**
  * Handles app restart for settings that cannot be hot-plugged (e.g., HTTPS Inspection).
- * Per user directive: any non-hot-pluggable setting change must trigger auto-restart
- * with a popup warning ("App will restart to apply change").
+ * Per DECISION-006: any non-hot-pluggable setting change triggers a silent restart
+ * with an informational Toast "Restarting to apply changes…" — no AlertDialog (a dialog
+ * built from a Service context throws AppCompat-theme IllegalStateException).
+ *
+ * Restart mechanism: the relaunch is scheduled via [AlarmManager] + a one-shot
+ * [PendingIntent], then the process is killed. This avoids the race where
+ * [Context.startActivity] from a process that is immediately killed is dropped by
+ * ActivityManager (no pending next-top-activity → no cold restart). The alarm fires
+ * from the system after the process is dead, cold-starting a fresh process via the
+ * standard launcher path.
  */
 object SettingsRestarter {
 
@@ -41,70 +53,94 @@ object SettingsRestarter {
     fun requiresRestart(settingKey: String): Boolean = settingKey in NON_HOT_PLUGGABLE
 
     /**
-     * Shows a confirmation dialog and restarts the app on confirmation.
-     * Call this when a non-hot-pluggable setting is changed by the user.
+     * Persists the new setting value, shows an informational Toast, and schedules a
+     * silent process restart. Safe from any [Context] (Activity or Service).
      *
-     * @param context Current context (Activity or Service)
-     * @param message Message to show in the dialog (e.g., "App will restart to apply HTTPS Inspection change")
-     * @param onConfirm Callback to execute the actual setting change (e.g., toggle the pref)
+     * Per DECISION-006: no AlertDialog is shown — a restart is mandatory for a non-hot-pluggable
+     * setting, and a confirmation dialog adds complexity without adding agency. A Service context
+     * does not carry an Activity theme, so AppCompat dialogs are unsafe to build there.
+     *
+     * The `message` parameter is retained for caller-binary compatibility (was previously the
+     * dialog body text); display is fixed to the canonical Toast string per policy.
+     *
+     * @param context Any context (Activity or Service); Toast + schedule+kill is safe in both.
+     * @param message Kept for caller compat; no longer displayed.
+     * @param onConfirm Side-effect to execute before restart (in-process; dies with the process).
      */
     fun requestRestart(
         context: Context,
         message: String,
         onConfirm: () -> Unit
     ) {
-        val dialogBuilder = AlertDialog.Builder(context)
-            .setTitle("Restart Required")
-            .setMessage(message)
-            .setCancelable(false)
-            .setPositiveButton("Restart Now") { _, _ ->
-                // Execute the setting change
-                onConfirm()
-                // Trigger process restart
-                restartApp(context)
-            }
-            .setNegativeButton("Cancel") { dialog, _ ->
-                dialog.dismiss()
-                // Note: The caller should revert the setting if user cancels
-            }
+        // Execute the setting change (in-process; vestigial but harmless — survives callers).
+        onConfirm()
 
-        val dialog = dialogBuilder.create()
-        // Allow showing dialog from Service context
-        if (context !is Activity) {
-            dialog.window?.setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-        }
-        dialog.show()
+        // Informational Toast — briefly visible before the process is torn down.
+        Toast.makeText(context, R.string.restarting_to_apply_changes, Toast.LENGTH_SHORT).show()
+
+        // Hold the process alive briefly so the Toast is visible, then schedule+kill.
+        Handler(Looper.getMainLooper()).postDelayed({
+            scheduleRelaunchAndKill(context)
+        }, TOAST_VISIBLE_DELAY_MS)
     }
 
     /**
-     * Restarts the app process by killing and relaunching.
-     * Uses a delayed intent to ensure clean shutdown.
+     * Schedules a one-shot AlarmManager relaunch of the launcher activity, then kills the
+     * current process. The alarm fires after the process is dead, so ActivityManager
+     * cold-starts a fresh process for the launch intent — no dropped startActivity race.
      */
-    private fun restartApp(context: Context) {
-        // Get the launch intent for the main activity
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+    private fun scheduleRelaunchAndKill(context: Context) {
+        Logger.d(TAG, "scheduleRelaunchAndKill: entering")
+
+        // Application context resolves the launch intent reliably from any source context.
+        val appContext = context.applicationContext
+        val launchIntent = appContext.packageManager
+            .getLaunchIntentForPackage(appContext.packageName)
             ?.apply {
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra("restart_reason", "settings_restart")
             }
 
-        if (launchIntent != null) {
-            // Schedule the restart after a brief delay to allow dialog dismissal
-            Thread {
-                try {
-                    Thread.sleep(500)
-                } catch (_: InterruptedException) {}
-                context.startActivity(launchIntent)
-                // Kill the current process
-                Thread.sleep(200)
-                Process.killProcess(Process.myPid())
-                System.exit(0)
-            }.start()
-        } else {
-            // Fallback: just kill and let system restart (if auto-start enabled)
-            Logger.w(TAG, "Could not find launch intent; killing process only")
+        if (launchIntent == null) {
+            Logger.w(TAG, "scheduleRelaunchAndKill: no launch intent; killing process only")
             Process.killProcess(Process.myPid())
             System.exit(0)
+            return
         }
+
+        // One-shot, immutable PendingIntent — required form on API 23+ (immutable since 31+).
+        val pendingIntent = PendingIntent.getActivity(
+            appContext,
+            REQUEST_CODE,
+            launchIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val alarmMgr = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val triggerAt = System.currentTimeMillis() + RELAUNCH_DELAY_MS
+        // set() (inexact) needs no permission. Doze is inactive (device interactive, user
+        // just tapped), so the alarm fires close to the requested time. The system fires the
+        // PendingIntent, cold-starting the app via the standard next-top-activity path.
+        alarmMgr.set(AlarmManager.RTC, triggerAt, pendingIntent)
+
+        Logger.d(
+            TAG,
+            "scheduleRelaunchAndKill: scheduled AlarmManager RTC relaunch in " +
+                "${RELAUNCH_DELAY_MS}ms (fires at $triggerAt); killing current process"
+        )
+
+        // Now safe to die — the relaunch is in the system's hands, not ours.
+        Process.killProcess(Process.myPid())
+        // Guard: if killProcess didn't end us (it should), make sure we don't return.
+        System.exit(0)
     }
+
+    /** How long the Toast stays visible before the process is torn down. */
+    private const val TOAST_VISIBLE_DELAY_MS = 400L
+
+    /** How long after the kill the AlarmManager waits before relaunching (must exceed kill/teardown). */
+    private const val RELAUNCH_DELAY_MS = 600L
+
+    /** Pending-intent request code (arbitrary, must be stable across the schedule). */
+    private const val REQUEST_CODE = 0x5265 // 'Re'
 }

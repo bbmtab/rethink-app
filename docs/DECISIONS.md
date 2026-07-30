@@ -284,4 +284,81 @@ Revisit this decision when:
 
 ---
 
+## DECISION-006: NON-HOT-PLUGGABLE SETTINGS RESTART UX
+
+**Date:** 2026-07-30
+**Status:** ACCEPTED (user-authored decision, 2026-07-30)
+**Deciders:** User (author) + Supervisor (records, clarifies acceptance)
+**Refines:** [[feedback_auto_restart_on_setting_change]] — the "pop-up warning" requirement is replaced by an informational Toast (restart is mandatory; no user agency).
+
+### Context
+
+DV4/G4 (device-verify 2026-07-29, Mi A1 A16 serial 3595381c0804, executor relay v3) CONFIRMED FAIL: toggling HTTPS Inspection crashes the app. RAW FATAL `java.lang.IllegalStateException: You need to use a Theme.AppCompat theme (or descendant) with this activity.` at `SettingsRestarter.requestRestart` → `dialog.show()` (SettingsRestarter.kt:76). Root cause: `requestRestart(context=this, ...)` is invoked by `BraveVPNService.onSharedPreferenceChanged` (BraveVPNService.kt:2259); `context` is a **Service**, and `AlertDialog` resolves to `androidx.appcompat.app.AlertDialog` (import SettingsRestarter.kt:22) whose `AppCompatDelegateImpl.createSubDecor()` requires an Activity theme — a Service context has none ⟹ throws before the L73-75 `TYPE_APPLICATION_OVERLAY` workaround is operative. tun1 goes DOWN and is never restored; the intended "Restart Required" AlertDialog + clean `restartApp` (killProcess+launchIntent, SettingsRestarter.kt:83) never fires. Defect introduced by `a88b789d2` ("feat: Phase 1a+1b", 2026-07-24); never exercised until DV4.
+
+Supervisor note: the pre-execution hypothesis that the crash would be `BadTokenException` from the missing `SYSTEM_ALERT_WINDOW` permission at the L73-75 overlay path was WRONG — the theme crash pre-empts it. The overlay/permission concern remains LATENT, not active. Recorded per [[feedback_symptom_not_mechanism]].
+
+### Problem
+
+HTTPS_INSPECTION_ENABLED is a NON-HOT-PLUGGABLE setting: changing it requires an application/process restart for the VPN service to pick up the new state. A restart is mandatory and offers no meaningful user choice. A confirmation dialog adds complexity without adding agency.
+
+### Decision
+
+Remove the restart-confirmation dialog entirely. Non-hot-pluggable settings persist the new value, show a short informational Toast "Restarting to apply changes...", and perform an automatic application restart.
+
+### Policy
+
+1. NON_HOT_PLUGGABLE settings SHALL: persist the new value; show a short Toast ("Restarting to apply changes..."); perform an automatic application restart.
+2. No AlertDialog SHALL be shown.
+3. SettingsRestarter SHALL NOT depend on: Activity context, AppCompat, TYPE_APPLICATION_OVERLAY, SYSTEM_ALERT_WINDOW.
+4. BraveVPNService SHALL remain an observer only (no UI).
+5. Future settings requiring restart SHALL reuse the same silent-restart mechanism.
+
+### Affected settings (initial)
+
+- HTTPS_INSPECTION_ENABLED
+
+### Provenance / affected surface (working-tree anchors — executor re-verify)
+
+- `app/src/main/java/com/celzero/bravedns/util/SettingsRestarter.kt` — object to rewrite: remove AlertDialog building (L22 import, L51-77), keep `restartApp` (L83-108). Introduced by `a88b789d2` (`git log -1 -- SettingsRestarter.kt`).
+- `app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt:2257-2264` — observer branch (stays; `context = this` Service context is now safe because no Activity-themed dialog is built). Introduced by `a88b789d2`.
+- Trigger write-site: `CertificateSetupActivity.kt:156-157`. Other write-sites: `CertificateSetupActivity.kt:306` (reset false), `RethinkPlusFragment` master-toggle (flavor dirs). Ensure none silently miss the restart.
+
+### Supervisor acceptance gate (clarification — binding)
+
+"Perform an automatic application restart" is interpreted to require the **VPN to be restored** after the restart, not merely the process recreated. The motivating defect was "vpn stop, not restarting." Grounds (supervisor investigation 2026-07-30, executor re-verify):
+- `VpnController.state().activationRequested` is sourced from `persistentState.getVpnEnabled()` (VpnController.kt:181-184) — persists across process death (the restart path calls no `signalStopService`). ✔
+- `HomeScreenFragment.maybeAutoStartVpn()` (HomeScreenFragment.kt:1649-1658) runs on `onResume` — comment "this case will happen when the app is updated or crashed" — calls `prepareAndStartVpn()` (:1783) → `startVpnService()` (:1812) = `VpnController.start(ctx, autoAttempt=true)` (VpnController.kt:140) when `isVpnActivated && !VpnController.isOn()`. ✔
+- The existing `restartApp` (killProcess + `getLaunchIntentForPackage` → launcher/HomeScreen) SHOULD auto-resume the VPN via the persisted flag — UNPROVEN on-device; the prior *crash* path masked it (Android crash-recovery restored the TOP activity = CertificateSetupActivity, which has no `maybeAutoStartVpn`, not the launcher/HomeScreen).
+
+Binding DV4 sub-gates:
+- **DV4.a (no crash, no dialog, silent restart):** flip switchHttpsInspection → NO `IllegalStateException`/`BadTokenException`; NO AlertDialog appears; a Toast "Restarting to apply changes..." shows; process restarts (new pid, HomeScreen foreground) cleanly.
+- **DV4.b (VPN restored — the real acceptance):** within seconds post-restart, `tun1` BACK UP (10.111.222.1/24) + `BraveVPNService` IN ServiceRecord + (if toggled ON) MITM golden line `LocalHttpsProxy.kt:546` fires on a real browse. If `tun1` stays DOWN / BraveVPNService absent → the fix is **INCOMPLETE**: the executor must wire VPN auto-restore on the silent restart (leads: `maybeAutoStartVpn` HomeScreenFragment.kt:1650; `prepareAndStartVpn`/`startVpnService` :1783/1812; `VpnController.start(autoAttempt=true)` VpnController.kt:140; persisted `getVpnEnabled()`; confirm relaunch lands on launcher/HomeScreen, not the prior TOP activity). DV4 is NOT PASS until DV4.b holds.
+
+### Executor scope (DECISION-006)
+
+1. Rewrite `SettingsRestarter.requestRestart`: remove AlertDialog + `TYPE_APPLICATION_OVERLAY` path; show `Toast` "Restarting to apply changes..." (add a string resource; do NOT hardcode) + schedule `restartApp` (existing kill+launch, tune delay to ~500-1000 ms so the Toast is visible). Keep the caller callback contract (`onConfirm`); call `onConfirm()` before restart (note: in-process side-effect, dies with the process — vestigial but harmless; do not break callers).
+2. Remove the `androidx.appcompat.app.AlertDialog` import + now-dead dialog code.
+3. Leave the `BraveVPNService` observer branch intact (Service context is now safe for Toast + restart — no Activity-themed dialog).
+4. Build `:app:assembleFdroidFullDebug` arm64-v8a; `install -r` to device 3595381c0804; re-verify DV1-DV5. DV4.a + DV4.b binding. DV4 is HUMAN-DRIVEN (human flips the in-app switch; executor captures logcat). CA install may persist from the prior run; if absent, HUMAN-ONLY wait-gate (no `pm grant`/mount/su/magisk).
+5. Commit ONLY source + this DECISIONS.md entry, ONLY after DV4.a + DV4.b PASS on-device. PUSH requires explicit supervisor/user authorization (relay forbids push).
+
+### Consequences
+
+| Area | Impact |
+|------|--------|
+| UX | Confirmation "Restart Now/Cancel" dialog removed → informational Toast + mandatory auto-restart (no agency lost; restart was always required). |
+| Stability | DV4 `IllegalStateException` (AppCompat theme from Service) eliminated; no new permission (`SYSTEM_ALERT_WINDOW`) needed. |
+| VPN continuity | Requires DV4.b to hold (existing `maybeAutoStartVpn` expected to restore); if not, executor wires restore. |
+| Latent overlay concern | Stays latent (no dialog-from-Service); future re-introduction of a Service-shown dialog re-opens it. |
+| Future settings | Non-hot-pluggable settings reuse the silent restart (policy #5). |
+
+### Review Trigger
+
+Revisit when:
+- A future non-hot-pluggable setting needs a *different* UX (e.g. optional restart) — amend policy #1.
+- DV4.b cannot be satisfied by `maybeAutoStartVpn` and a separate restore mechanism is wired — record it here.
+- A dialog-from-Service is reintroduced → re-opens the latent `SYSTEM_ALERT_WINDOW`/theme concern.
+
+---
+
 **End of Decisions — Append Only**
