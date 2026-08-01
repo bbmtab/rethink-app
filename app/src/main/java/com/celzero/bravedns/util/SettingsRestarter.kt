@@ -85,34 +85,33 @@ object SettingsRestarter {
     }
 
     /**
-     * Schedules a one-shot AlarmManager relaunch of the launcher activity, then kills the
-     * current process. The alarm fires after the process is dead, so ActivityManager
-     * cold-starts a fresh process for the launch intent — no dropped startActivity race.
+     * Schedules a one-shot AlarmManager relaunch into the HTTPS Inspection settings screen
+     * (CertificateSetupActivity), then kills the current process. The alarm fires after the
+     * process is dead, so ActivityManager cold-starts a fresh process for the relaunch intent
+     * — no dropped startActivity race.
      */
     private fun scheduleRelaunchAndKill(context: Context) {
         Logger.d(TAG, "scheduleRelaunchAndKill: entering")
 
-        // Application context resolves the launch intent reliably from any source context.
+        // Application context resolves the relaunch target reliably from any source context.
         val appContext = context.applicationContext
-        val launchIntent = appContext.packageManager
-            .getLaunchIntentForPackage(appContext.packageName)
-            ?.apply {
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                putExtra("restart_reason", "settings_restart")
-            }
 
-        if (launchIntent == null) {
-            Logger.w(TAG, "scheduleRelaunchAndKill: no launch intent; killing process only")
-            Process.killProcess(Process.myPid())
-            System.exit(0)
-            return
+        // Relaunch directly into the HTTPS Inspection settings screen
+        // (CertificateSetupActivity) instead of the default launcher (HomeScreenActivity), so
+        // the user lands back on the screen they were on after the restart. setClassName with
+        // the fully-qualified name avoids importing the flavor-scoped activity (it lives in the
+        // `full` source set, not visible from src/main) into this module-level class.
+        val relaunchIntent = Intent().apply {
+            setClassName(appContext, "com.celzero.bravedns.ui.activity.CertificateSetupActivity")
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra("restart_reason", "settings_restart")
         }
 
         // One-shot, immutable PendingIntent — required form on API 23+ (immutable since 31+).
         val pendingIntent = PendingIntent.getActivity(
             appContext,
             REQUEST_CODE,
-            launchIntent,
+            relaunchIntent,
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -121,6 +120,10 @@ object SettingsRestarter {
         // set() (inexact) needs no permission. Doze is inactive (device interactive, user
         // just tapped), so the alarm fires close to the requested time. The system fires the
         // PendingIntent, cold-starting the app via the standard next-top-activity path.
+        Logger.i(
+            TAG,
+            "scheduleRelaunchAndKill: relaunch target = ${relaunchIntent.component?.className}"
+        )
         alarmMgr.set(AlarmManager.RTC, triggerAt, pendingIntent)
 
         Logger.d(
