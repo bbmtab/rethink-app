@@ -15,135 +15,59 @@
  */
 package com.celzero.bravedns.util
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.os.Handler
-import android.os.Looper
-import android.os.Process
 import android.widget.Toast
 import com.celzero.bravedns.R
 import com.celzero.bravedns.service.PersistentState
 
 /**
- * Handles app restart for settings that cannot be hot-plugged (e.g., HTTPS Inspection).
- * Per DECISION-006: any non-hot-pluggable setting change triggers a silent restart
- * with an informational Toast "Restarting to apply changes…" — no AlertDialog (a dialog
- * built from a Service context throws AppCompat-theme IllegalStateException).
+ * Utility for settings-change notification. Per DECISION-006/D, the kill-process
+ * relaunch (AlarmManager + PendingIntent + Process.killProcess) has been REMOVED
+ * in favour of the hot-plug [com.celzero.bravedns.service.BraveVPNService.vpnRestartTrigger]
+ * MutableStateFlow. The VPN-level restart is now self-contained inside the Service, so
+ * this helper need only show the informational Toast — no process death.
  *
- * Restart mechanism: the relaunch is scheduled via [AlarmManager] + a one-shot
- * [PendingIntent], then the process is killed. This avoids the race where
- * [Context.startActivity] from a process that is immediately killed is dropped by
- * ActivityManager (no pending next-top-activity → no cold restart). The alarm fires
- * from the system after the process is dead, cold-starting a fresh process via the
- * standard launcher path.
+ * Retained for caller-compat: the `onConfirm` side-effect (typically
+ * [PersistentState] value write) still executes. New callers should prefer
+ * writing [PersistentState] directly and letting the BraveVPNService
+ * observer trigger the restart.
  */
 object SettingsRestarter {
 
     private const val TAG = "SettingsRestarter"
 
-    /** Settings keys that require a full process restart to apply */
-    private val NON_HOT_PLUGGABLE = setOf(
-        PersistentState.HTTPS_INSPECTION_ENABLED
-        // Future non-hot-pluggable settings can be added here
-    )
+    // DECISION-006/D: HTTPS Inspection is now hot-pluggable via vpnRestartTrigger.
+    // This set is empty — all known settings are hot-pluggable. Preserved for
+    // future non-hot-pluggable settings that may be added.
+    private val NON_HOT_PLUGGABLE = emptySet<String>()
 
     /** Checks if a setting key requires a full app restart */
     fun requiresRestart(settingKey: String): Boolean = settingKey in NON_HOT_PLUGGABLE
 
     /**
-     * Persists the new setting value, shows an informational Toast, and schedules a
-     * silent process restart. Safe from any [Context] (Activity or Service).
+     * Persists the setting value and shows an informational Toast. Per DECISION-006/D,
+     * the VPN-level restart is now handled by [BraveVPNService.vpnRestartTrigger]; this
+     * method does NOT kill the process.
      *
-     * Per DECISION-006: no AlertDialog is shown — a restart is mandatory for a non-hot-pluggable
-     * setting, and a confirmation dialog adds complexity without adding agency. A Service context
-     * does not carry an Activity theme, so AppCompat dialogs are unsafe to build there.
+     * The `message` parameter is retained for caller-binary-compatibility; it is no longer
+     * displayed (canonical Toast string is used).
      *
-     * The `message` parameter is retained for caller-binary compatibility (was previously the
-     * dialog body text); display is fixed to the canonical Toast string per policy.
-     *
-     * @param context Any context (Activity or Service); Toast + schedule+kill is safe in both.
-     * @param message Kept for caller compat; no longer displayed.
-     * @param onConfirm Side-effect to execute before restart (in-process; dies with the process).
+     * @param context Any context (Activity or Service).
+     * @param message Kept for caller compat (unused).
+     * @param onConfirm Setting-change side-effect (persistentState write).
      */
     fun requestRestart(
         context: Context,
         message: String,
         onConfirm: () -> Unit
     ) {
-        // Execute the setting change (in-process; vestigial but harmless — survives callers).
+        // DECISION-006/D: no process kill — the VPN is restarted via vpnRestartTrigger
+        // in BraveVPNService's PersistentState observer.
         onConfirm()
-
-        // Informational Toast — briefly visible before the process is torn down.
         Toast.makeText(context, R.string.restarting_to_apply_changes, Toast.LENGTH_SHORT).show()
-
-        // Hold the process alive briefly so the Toast is visible, then schedule+kill.
-        Handler(Looper.getMainLooper()).postDelayed({
-            scheduleRelaunchAndKill(context)
-        }, TOAST_VISIBLE_DELAY_MS)
     }
 
-    /**
-     * Schedules a one-shot AlarmManager relaunch into the HTTPS Inspection settings screen
-     * (CertificateSetupActivity), then kills the current process. The alarm fires after the
-     * process is dead, so ActivityManager cold-starts a fresh process for the relaunch intent
-     * — no dropped startActivity race.
-     */
-    private fun scheduleRelaunchAndKill(context: Context) {
-        Logger.d(TAG, "scheduleRelaunchAndKill: entering")
-
-        // Application context resolves the relaunch target reliably from any source context.
-        val appContext = context.applicationContext
-
-        // Relaunch directly into the HTTPS Inspection settings screen
-        // (CertificateSetupActivity) instead of the default launcher (HomeScreenActivity), so
-        // the user lands back on the screen they were on after the restart. setClassName with
-        // the fully-qualified name avoids importing the flavor-scoped activity (it lives in the
-        // `full` source set, not visible from src/main) into this module-level class.
-        val relaunchIntent = Intent().apply {
-            setClassName(appContext, "com.celzero.bravedns.ui.activity.CertificateSetupActivity")
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra("restart_reason", "settings_restart")
-        }
-
-        // One-shot, immutable PendingIntent — required form on API 23+ (immutable since 31+).
-        val pendingIntent = PendingIntent.getActivity(
-            appContext,
-            REQUEST_CODE,
-            relaunchIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val alarmMgr = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val triggerAt = System.currentTimeMillis() + RELAUNCH_DELAY_MS
-        // set() (inexact) needs no permission. Doze is inactive (device interactive, user
-        // just tapped), so the alarm fires close to the requested time. The system fires the
-        // PendingIntent, cold-starting the app via the standard next-top-activity path.
-        Logger.i(
-            TAG,
-            "scheduleRelaunchAndKill: relaunch target = ${relaunchIntent.component?.className}"
-        )
-        alarmMgr.set(AlarmManager.RTC, triggerAt, pendingIntent)
-
-        Logger.d(
-            TAG,
-            "scheduleRelaunchAndKill: scheduled AlarmManager RTC relaunch in " +
-                "${RELAUNCH_DELAY_MS}ms (fires at $triggerAt); killing current process"
-        )
-
-        // Now safe to die — the relaunch is in the system's hands, not ours.
-        Process.killProcess(Process.myPid())
-        // Guard: if killProcess didn't end us (it should), make sure we don't return.
-        System.exit(0)
-    }
-
-    /** How long the Toast stays visible before the process is torn down. */
-    private const val TOAST_VISIBLE_DELAY_MS = 400L
-
-    /** How long after the kill the AlarmManager waits before relaunching (must exceed kill/teardown). */
-    private const val RELAUNCH_DELAY_MS = 600L
-
-    /** Pending-intent request code (arbitrary, must be stable across the schedule). */
-    private const val REQUEST_CODE = 0x5265 // 'Re'
+    // DECISION-006/D: scheduleRelaunchAndKill() and its constants (TOAST_VISIBLE_DELAY_MS,
+    // DELAUNCH_DELAY_MS, REQUEST_CODE) removed — process kill is no longer needed.
+    // The VPN-level restart is handled by BraveVPNService.vpnRestartTrigger.
 }

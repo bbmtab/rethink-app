@@ -2506,6 +2506,7 @@
     <string name="settings_restart_required_message_https_inspection">App will restart to apply HTTPS Inspection change</string>
     <!-- Informational Toast shown before silent restart (DECISION-006: no AlertDialog). -->
     <string name="restarting_to_apply_changes">Restarting to apply changes…</string>
+    <string name="applying_changes">Applying…</string>
 
     <!-- Plus tab (fdroid) - MITM/Adblock UI -->
     <string name="plus_section_https_inspection">HTTPS Inspection</string>

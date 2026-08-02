@@ -35,7 +35,6 @@ import com.celzero.bravedns.service.RethinkBlocklistManager
 import com.celzero.bravedns.service.VpnController
 import Logger
 import Logger.LOG_TAG_UI
-import com.celzero.bravedns.util.SettingsRestarter
 import com.celzero.bravedns.util.Utilities
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.CircularProgressIndicator
@@ -88,23 +87,10 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private fun initHttpsInspectionSection() {
         // Master toggle
         b.switchHttpsInspection.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                // Enable HTTPS inspection - requires restart
-                SettingsRestarter.requestRestart(
-                    requireContext(),
-                    getString(R.string.settings_restart_required_message_https_inspection)
-                ) {
-                    persistentState.httpsInspectionEnabled = true
-                }
-            } else {
-                // Disable HTTPS inspection - requires restart
-                SettingsRestarter.requestRestart(
-                    requireContext(),
-                    getString(R.string.settings_restart_required_message_https_inspection)
-                ) {
-                    persistentState.httpsInspectionEnabled = false
-                }
-            }
+            // DECISION-006/D: HTTPS Inspection is hot-pluggable — setting
+            // persistentState triggers the BraveVPNService observer, which emits
+            // to vpnRestartTrigger and restarts the VPN without killing the process.
+            persistentState.httpsInspectionEnabled = isChecked
         }
 
         // Observe HTTPS inspection enabled state

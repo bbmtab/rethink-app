@@ -116,7 +116,6 @@ import com.celzero.bravedns.util.NotificationActionType
 import com.celzero.bravedns.util.OrbotHelper
 import com.celzero.bravedns.util.Protocol
 import com.celzero.bravedns.util.ResourceRecordTypes
-import com.celzero.bravedns.util.SettingsRestarter
 import com.celzero.bravedns.util.UIUtils.getAccentColor
 import com.celzero.bravedns.util.Utilities
 import com.celzero.bravedns.util.Utilities.isAtleastO
@@ -2255,12 +2254,15 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
             }
 
             PersistentState.HTTPS_INSPECTION_ENABLED -> {
-                // HTTPS Inspection toggle requires app restart (non-hot-pluggable)
-                SettingsRestarter.requestRestart(
-                    context = this,
-                    message = getString(R.string.settings_restart_required_message_https_inspection),
-                    onConfirm = { vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}" }
-                )
+                // DECISION-006/D: hot-plug via vpnRestartTrigger — no process kill, no
+                // AlarmManager PendingIntent -> no A14+ BAL nav gap. The flow collector at
+                // observeVpnRestartRequests() (debounce 3s) calls restartVpnWithNewAppConfig
+                // -> restartVpn -> establishVpn, re-evaluating httpsInspectionEnabled at the
+                // gate and starting/stopping LocalHttpsProxy + setHttpProxy. User stays on the
+                // toggled screen. See docs/DECISIONS.md DECISION-006/D.
+                val ctx: Context = this@BraveVPNService
+                ui { Toast.makeText(ctx, R.string.applying_changes, Toast.LENGTH_SHORT).show() }
+                vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}"
             }
 
             PersistentState.REMOTE_BLOCKLIST_UPDATE -> {
