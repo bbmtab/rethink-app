@@ -361,4 +361,98 @@ Revisit when:
 
 ---
 
+## DECISION-006/D: HOT-PLUG HTTPS-INSPECTION TOGGLE (ux-unchanged background restart; killProcess/alarm retired)
+
+**Date:** 2026-08-01 (reframed), 2026-08-03 (sealed end-to-end on-device)
+**Status:** SEALED end-to-end on Mi A1 A16 (2026-08-03); ledger entry appended 2026-08-04 (specified 2026-08-01, not shipped by `1c62bfd91` which touched no docs). **PENDING-PUSH** — awaits explicit user "Push now".
+**Deciders:** User (reframe 2026-08-01: "restart berlangsung di background tanpa mengubah UX") + Supervisor (records, audited)
+**Refines:** DECISION-006 — the `Process.killProcess` + AlarmManager `PendingIntent` relaunch mechanism is RETIRED; replaced by in-process hot-plug via the existing `vpnRestartTrigger` debounce. The policy intent (mandatory background restart, informational Toast, no AlertDialog) is preserved. [[feedback_auto_restart_on_setting_change]] stays the governing policy.
+
+### Context
+
+The base DECISION-006 (2026-07-30) shipped its first mechanism: write the pref → `SettingsRestarter.requestRestart` (Service context) → show an `AlertDialog` → `restartApp` (`Process.killProcess` + `getLaunchIntentForPackage`). On Android 14+, that mechanism self-inflicts the BAL navigation gap (see [[project_decision006_nav_gap_bal_blocked_20260801]]): post-`killProcess`, the relaunching `PendingIntent` sender is DEAD → the OS-issued Background Activity Launch for the relaunch resolves to `BSP.NONE` → `BAL_BLOCK` → the relaunch is blocked; the user lands on HomeScreen, not the settings surface. The kill is the SURFACE for the gap; removing the kill removes the surface. Separately, `LocalHttpsProxy` is genuinely hot-pluggable (`@Synchronized start/stop`, no JNI/process-startup-bound init — inline-verified gate S3), so process death is NOT required to swap the proxy.
+
+### Problem
+
+The base mechanism makes a NON-HOT-PLUGGABLE setting "require" a process restart, but the only thing that actually needs to re-evaluate is the VPN service's `establishVpn` gate (`httpsInspectionEnabled && isCaInstalled()` at `BraveVPNService.kt:3729`), which already reads `persistentState` FRESH each bounce. Process death (a) destroys UX (navigation gap), (b) isn't needed (proxy is hot-pluggable), (c) relies on an AlarmManager `PendingIntent` relaunch path that A14+ BAL blocks. The kill solves a problem the architecture doesn't have.
+
+### Decision
+
+Drop `Process.killProcess` + the AlarmManager `PendingIntent` relaunch from the HTTPS-Inspection toggle path. Route the toggle directly to the existing `vpnRestartTrigger` (a `MutableStateFlow<String>` in `BraveVPNService`) → its `debounce(3000)` collector → `restartVpnWithNewAppConfig` → `restartVpn` → `establishVpn`, which re-evaluates the gate on the LIVE service. Show a short informational `Toast` "Applying…" (`strings.xml` `applying_changes`) on `Dispatchers.Main` via direct platform `makeText` (NOT the DEBUG-gated / Service-context-rejecting `showToastUiCentered`). No `AlertDialog`. No process death. No AlarmManager. UX unchanged (user stays on the activity the whole time).
+
+### Policy
+
+1. The `HTTPS_INSPECTION_ENABLED` toggle SHALL apply via in-process `vpnRestartTrigger` hot-plug, NOT process kill/alarm relaunch.
+2. `BraveVPNService` SHALL remain an observer only (no UI) — the toggle writes the pref, the observer arms the trigger.
+3. While the apply is in-flight (~3 s debounce), a short `Toast` "Applying…" SHALL surface the pending change (release-visible; not the DEBUG-gated `logAndToastIfNeeded` which is silent in release).
+4. If the VPN service is NOT running at toggle, no trigger arms; the change applies on the NEXT VPN-up via the cold `establishVpn` fresh pref read (matches + improves on the kill path's always-on restore, with no gratuitous death).
+5. `SettingsRestarter` becomes DORMANT for HTTPS (the kill primitive is retained for future genuinely-non-hot-pluggable settings; `NON_HOT_PLUGGABLE` is empty for HTTPS).
+
+### Provenance / affected surface (working-tree anchors — supervisor re-verified 2026-08-04, raw not asserted)
+
+- `app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt:2256-2266` — observer HTTPS branch: direct `Toast.makeText(ctx, R.string.applying_changes, Toast.LENGTH_SHORT).show()` inside `ui{}` (`Dispatchers.Main` launch, builder at `:4245`), then `vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}"`. No `requestRestart` call.
+- `app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt:3729` — the `establishVpn` gate re-evaluated each bounce: `if (persistentState.httpsInspectionEnabled && CertificateAuthority.isCaInstalled())`.
+- `app/src/main/java/com/celzero/bravedns/util/SettingsRestarter.kt` — DORMANT `object`; `requestRestart` (L59-68) = trivial `onConfirm()` + `makeText` passthrough (caller-compat); `scheduleRelaunchAndKill()` + constants REMOVED (L70-72 comment); `NON_HOT_PLUGGABLE = emptySet<String>()`.
+- RethinkPlusFragment.kt (fdroid toggle listener) — collapses to a pref write; observer does the rest.
+- `app/src/main/res/values/strings.xml:2509` — `<string name="applying_changes">Applying…</string>` (the release-visible Toast; L2508 `restarting_to_apply_changes` retained only for the dormant `requestRestart` path).
+- Commit: `1c62bfd91` (40 insertions, 127 deletions across 4 source files; touched NO docs — this ledger entry appended retrospectively 2026-08-04).
+
+### Supervisor acceptance gate (clarification — binding)
+
+"Background restart with UX unchanged" requires: (a) the live process survives the toggle (NO `Process … has died`, NO BAL_BLOCK, NO AppCompat/FATAL for bravedns in the toggle window), (b) the VPN bounces (tun re-established), (c) the proxy swaps correctly both directions, (d) the MITM golden splice fires on a non-bypassed browse when ON (the CA-trust leg), (e) B0 anti-fabrication raw both sides.
+
+### DV-D device-run results (SEALED 2026-08-02 + 2026-08-03, Mi A1 A16 serial 3595381c0804, logcat_Dnav.txt + logcat_DnavMITM_2.txt)
+
+| sub-gate | result | raw evidence |
+|---|---|---|
+| UX unchanged, both directions | SEALED | PID 443 CONSTANT across ON (`httpsInspectionEnabled: true, vpn restarted` @10:23:15.936) + OFF (`false` @10:23:31.908); zero `Process … has died` / FATAL / BAL_BLOCK for bravedns in the toggle window |
+| Toast render | CLOSED (human visual 2026-08-02) | Code path correct (`BraveVPNService.kt:2264` direct `makeText` on Main via `ui{}`); human-confirmed "Applying…" renders + toggle fires (supersedes capture-limited in-device-log UNVERIFIED per [[feedback_symptom_not_mechanism]]) |
+| ON-path proxy bind | SEALED | `LocalHttpsProxy` start port 8443; `HttpProxy: [localhost] 8443` on tun1 `LinkProperties` |
+| OFF-path apply | SEALED | `LocalHttpsProxy: Stopping…`; `ProxyTracker: sending Proxy Broadcast for [] 0 xl=` (empty = no proxy) |
+| tun restored both directions | SEALED | `Established by com.celzero.bravedns.plus on tun1` (ON) / `…on tun0` (OFF; index recycled, invariant 10.111.222.1/24 holds both) |
+
+### DV-D.b MITM-golden — the last open gate (SEALED 2026-08-03)
+
+- Golden splice captured AFTER the D hot-plug apply on a NON-bypassed site:
+  - `08-03 10:46:44.808 443 16752 I LocalHttpsProxy: Established TLS MITM tunnel for example.com` (logcat_DnavMITM_2.txt:2193)
+  - `08-03 10:46:44.809 443 18983 I LocalHttpsProxy: Established TLS MITM tunnel for example.com` (L2194)
+- Corroborating splices (background tabs): `www.detik.com` (L2198), `awscdn.detik.net.id` (L2384), `cdn.detik.net.id` (L2385).
+- Bypass seeds untouched (Raw TCP pass-through, NOT spliced — rules out splice-everything / cache-failure): `accounts.google.com` (L1867), `play-fe.googleapis.com` (L2030/L2076), `www.google.com` (L2201), `fonts.googleapis.com` (L2327). example.com is ABSENT from the bypass list.
+- OFF direction clean: `LocalHttpsProxy: Stopping…` (L12314) → `…on tun0` (L12324) → `RethinkDnsVpn: ---RESTART-OK---` success banner (L12339) → `httpsInspectionEnabled: false, vpn restarted` (L12341) → empty `Proxy Broadcast` (L12354).
+
+### CA-trust seal — by the golden line itself (strong, not absence-of-cert-errors)
+
+The golden `Established TLS MITM tunnel for $host` at **`LocalHttpsProxy.kt:546`** fires ONLY after `downstreamSslSocket.startHandshake()` succeeds at **L543** with `useClientMode = false` (**L533** — proxy ACTS AS TLS SERVER to the browser). `startHandshake()` in server mode is BLOCKING and returns only on a completed TLS Finished message, which REQUIRES the client (Chrome) to validate the presented spoofed leaf (`CertificateAuthority.generateLeafKeyAndCert` L522) against its trust store. Untrusted-CA → browser sends a TLS alert → `startHandshake()` THROWS → catch L549 logs `TLS MITM Handshake failed for $host` + `addToBypassCache(host)` → we'd see `Bypassing example.com`. We see the golden, NOT a bypass ⇒ CA trusted. `badssl.com`-UNEXERCISED is a NON-GAP (the discriminating contrast is INHERENT in the golden-line semantics).
+
+### B0 anti-fabrication (RAW both sides — supervisor cmd-runner re-confirmed, 24 h after first B0)
+
+- `git rev-parse --short HEAD` = `1c62bfd91` == device `versionName=v0.5.11-plus-12-g1c62bfd91`
+- `git status --short` = ONLY `??` untracked → clean tree, zero modified tracked → APK built from clean HEAD
+- Device: `tissot` (Mi A1), `ro.build.version.release=16` (A16), `pidof` = 443 (alive, matches golden-line PID)
+
+### Supervisor-acceptance verdict
+
+ACCEPTED. DECISION-006/D (`1c62bfd91`) is SEALED end-to-end on Mi A1 A16. The load-bearing result is the UX-unchanged hot-plug restart (no kill/alarm/BAL/death, both directions, PID constant); the MITM-golden gate — the last open gate — is SEALED, with CA-trust sealed by golden-line semantics. Toast CLOSED via human visual. B0 raw both sides. Minor notes (`RESTART-OK:false` label-compaction; `ECONNREFUSED` on null-routed `clientservices.googleapis.com`; `No such device` code 19 on tun1 teardown race) are non-fatal record-completeness items, named plainly per [[feedback_plain_explanation_over_story]]. Documentation gap closed: this entry was specified by the inline-verify relay (2026-08-01) but never appended by `1c62bfd91` (which touched no docs); appended retrospectively 2026-08-04. Stale AUDIT-RESULTS.md gate anchor (narrative L3692 → working-tree L3729) updated in the same pass.
+
+### Consequences
+
+| Area | Impact |
+|------|--------|
+| UX | Settings surface stays put across the toggle (no navigation gap, no HomeScreen drop). |
+| Stability | The AppCompat-theme / Service-context crash (base DV4) and the A14+ BAL relaunch gap (B-nav) are both removed at the surface — no kill, no Service-shown dialog. |
+| Latency | Apply is ~3 s debounced (existing cooldown); `Applying…` Toast covers the wait. |
+| VPN continuity | tun re-established on the LIVE service each bounce (no process death, no always-on-restart reliance for this toggle). |
+| Future settings | Genuinely-non-hot-pluggable settings still have the kill primitive (dormant `SettingsRestarter`); HTTPS is now hot-pluggable. |
+| Always-on path | UNCHANGED — relies on `BraveAutoStartReceiver` + Android always-on `VpnService`; NOT exercised by this toggle's hot-plug path (see AdGuard #6084 / open-work map O5 — a separate verify-gap). |
+
+### Review Trigger
+
+Revisit when:
+- A future non-hot-pluggable setting needs a kill-restart → re-arm the dormant `SettingsRestarter` path (re-introduces the BAL / Service-context risks on A14+; reconsider).
+- The `vpnRestartTrigger` debounce latency becomes a UX problem → tune the 3000 ms.
+- An always-on restart path is found NOT to reconcile `httpsInspectionEnabled` state → wire explicit state-reconciliation in `onStartCommand` (O5 / AdGuard #6084).
+- A dialog-from-Service is re-introduced → re-opens the latent AppCompat / `SYSTEM_ALERT_WINDOW` concern.
+
+---
+
 **End of Decisions — Append Only**
