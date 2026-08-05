@@ -453,6 +453,85 @@ Revisit when:
 - An always-on restart path is found NOT to reconcile `httpsInspectionEnabled` state → wire explicit state-reconciliation in `onStartCommand` (O5 / AdGuard #6084).
 - A dialog-from-Service is re-introduced → re-opens the latent AppCompat / `SYSTEM_ALERT_WINDOW` concern.
 
+
+## DV-B nav-gap residual (A14+) — DOCUMENTED LIMITATION, not a fixable gap
+
+**Status:** recorded 2026-08-04. The B-path fix [d28f807bb](retarget PendingIntent → CertificateSetupActivity) is **technically INEFFECTIVE on A14+**: `BACKGROUND_ACTIVITY_LAUNCH_BLOCKED` is target-agnostic post-death — even a correctly-targeted pending-intent relaunch is BAL_BLOCKed. So the B-path could not close the nav-gap on A16 (Mi A1, see `logcat_Dnav.txt`).
+
+**Resolved in practice by DECISION-006/D (`1c62bfd91`):** the D-fix retired the entire `killProcess` → process-death → PendingIntent → BAL chain. With no kill, the process never dies (PID constant), no post-death relaunch/PI fires, so there is no BAL and **no navigation to restore** — the user stays on CertificateSetupActivity throughout (DV-D.a/c/d SEALED). The nav-gap is therefore OPERATIVELY RESOLVED by construction: the mechanism that created it no longer runs.
+
+**Residual classification:** a documented limitation of the (now-superseded) B-path, **not** a defect of the shipped D-fix. No action required. Re-arms ONLY if a future genuinely-non-hot-pluggable setting re-introduces a kill-restart (see DECISION-006/D review-trigger above) — at which point the A14+ BAL target-agnostic block re-applies and the nav-gap re-opens. The HTTPS-inspection toggle itself is hot-pluggable, so this residual is presently inert.
+
+---
+
+## O5: ALWAYS-ON/REBOOT STATE-RECONCILIATION (AdGuard #6084 verify-gap)
+
+**Raised:** 2026-08-03 (supervisor). **Closed:** 2026-08-04 (static / architectural — mechanism traced in source, anchors re-verified against working-tree HEAD `1c62bfd91`).
+**Decision:** NO GAP. Always-on `httpsInspectionEnabled` state-reconciliation on cold reboot is guaranteed; AdGuard #6084 does not apply to this fork's architecture.
+
+### Finding
+
+Cold always-on reboot and in-process hot-plug converge at a single gate that freshly reads disk-backed / KeyStore-backed state and synchronously loads all five MITM components.
+
+**The gate** — [BraveVPNService.kt:3729](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3729):
+`if (persistentState.httpsInspectionEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled())`
+
+freshly reads `httpsInspectionEnabled` (SharedPreferences → disk-backed → survives reboot) and `isCaInstalled()` (AndroidKeyStore → survives reboot) on every `establishVpn`. True-branch body, synchronous (sequence inside one `if`):
+1. `FilterEngine.loadRulesFromFile(rulesFile, cacheDir)` — [L3741](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3741) (disk rules file)
+2. `LocalHttpsProxy.proxyListener = object …` (binds `FilterEngine.match` to proxy) — [L3748](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3748)
+3. `LocalHttpsProxy.start()` — [L3784](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3784)
+4. `LocalHttpsProxy.setAllowedPackages(browserPackages)` — [L3812](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3812)
+5. `builder.setHttpProxy(ProxyInfo.buildDirectProxy("localhost", 8443))` — [L3815-3816](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3815-L3816)
+False-branch teardown (else) — [L3824-3825](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3824-L3825): `LocalHttpsProxy.proxyListener = null; LocalHttpsProxy.stop()` — disabled / CA-missing cold reboot removes the proxy cleanly; no stale-proxy leak.
+
+**Convergence — both reach the gate through `establishVpn` ([L2815](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L2815)):**
+- Hot-plug: `vpnRestartTrigger` → `restartVpnWithNewAppConfig` ([L2748](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L2748)) → `restartVpn` ([L2753](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L2753)/[L2786](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L2786)) → `establishVpn` → gate L3729.
+- Cold always-on reboot: Android restarts `VpnService` (null intent) → `onStartCommand` ([L1898](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1898)) → `connectionMonitor.onVpnStart()` ([L1943](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1943)) → isNewVpn branch ([L1972](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1972)) → `restartVpn(this, opts, "startVpn")` ([L1976](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1976)) → `establishVpn` → gate L3729.
+- Auto-start (non-always-on boot): `BraveAutoStartReceiver` ([BraveAutoStartReceiver.kt:54](../app/src/full/java/com/celzero/bravedns/receiver/BraveAutoStartReceiver.kt#L54) — `VpnController.state().activationRequested && !VpnController.isAlwaysOn(context)`) → `VpnController.start` → `onStartCommand` → gate as above.
+
+**Why `isNewVpn` is reliably `true` on cold reboot** — [ConnectionMonitor.kt:670-671](../app/src/main/java/com/celzero/bravedns/service/ConnectionMonitor.kt#L670-L671):
+`val isNewVpn = !::cm.isInitialized`
+`cm` is a late-init instance field of `ConnectionMonitor`, itself a fresh instance field of `BraveVPNService` ([L195](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L195)). After OS reboot the `VpnService` process is recreated → fresh `ConnectionMonitor` → `cm` uninitialized → `isNewVpn = true` → the `restartVpn`/gate branch runs. `isNewVpn = false` only on a warm in-process restart (network change, app-config update), where the tunnel was already gate-verified at establish time and is merely updated by `updateTun` ([L2192](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L2192)) — correct-by-construction, not a stale read.
+
+### Related — firewall + manager rehydration on cold start (6th leg)
+
+The cold `isNewVpn` branch rehydrates firewall and all rule-manager state from DB **before** `restartVpn` touches the gate. At [BraveVPNService.kt:1972-1976](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1972-L1976) the `else { io("startVpn") { rdb.refresh(ACTION_REFRESH_AUTO) { restartVpn … } } }` block runs `rdb.refresh` with `restartVpn` as its callback. In [RefreshDatabase.kt](../app/src/main/java/com/celzero/bravedns/database/RefreshDatabase.kt) `process()`, the callback `a.cb()` runs in the **`finally`** block ([L235-236](../app/src/main/java/com/celzero/bravedns/database/RefreshDatabase.kt#L235-L236)) — i.e. strictly after the manager loads [L155-162](../app/src/main/java/com/celzero/bravedns/database/RefreshDatabase.kt#L155-L162): `FirewallManager.load()`, `IpRulesManager.load()`, `DomainRulesManager.load()`, `ProxyManager.load()`, `WireguardManager.load()`, `WgHopManager.load()`, `RpnProxyManager.load()`. So on cold start: managers rehydrate from DB → `restartVpn` → `establishVpn` → gate (MITM 5-step) → `builder.establish()`. The comment at [L1973](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L1973) ("refresh should happen before restartVpn, otherwise the new vpn will not have app, ip, domain rules") is enforced by the `finally`-callback mechanism, not just convention.
+
+**Honesty note on the AUTO-refresh no-op guard** ([RefreshDatabase.kt:137-144](../app/src/main/java/com/celzero/bravedns/database/RefreshDatabase.kt#L137-L144)): the manager loads are skipped when `latestRefreshTime > 0 && current - latestRefreshTime < FULL_REFRESH_INTERVAL` (1 min) for an AUTO/INTERACTIVE action. This does NOT create a gap: (a) `a.cb()` lives in `finally`, so `restartVpn` fires regardless — the gate still runs; (b) on a *warm* within-interval skip the managers are already in-memory in the same process (so skipping is correct); (c) on *cold* reboot `latestRefreshTime` is a fresh `0L` instance field ([L101](../app/src/main/java/com/celzero/bravedns/database/RefreshDatabase.kt#L101)) → `latestRefreshTime > 0` is false → guard bypassed → loads run. No path skips the gate.
+
+### Why AdGuard #6084 does NOT apply
+
+AdGuard #6084 posits that after OS-restart `onStartCommand` might silently drop protection state unless the service explicitly re-reads preferences. Two assumptions make that real; both are false here:
+
+1. _"onStartCommand might early-return / skip the re-read on a null intent."_ Always-on restart passes a null `Intent`. In this fork `intent` is never dereferenced before the gate: L1898→L1943→L1976 uses `intent` for nothing (only rethinkUid, pid, `VpnController.onConnectionStateChanged`, `startForegroundService`, `setVpnEnabled`, `onVpnStart`). A null intent is harmless; the gate is reached. ✓
+2. _"State might be read from a stale in-memory cache that does not survive reboot."_ The gate reads `persistentState.httpsInspectionEnabled`, backed by `SharedPreferences` — Android reloads it from disk on process start. No in-memory sticky flag survives reboot. The gate is one-shot: every `restartVpn → establishVpn` fires it fresh. ✓
+
+The warm `updateTun` path (isNewVpn=false) BY DESIGN does not re-read, but only runs when an existing gate-verified tunnel is updated in-process — there is no stale-config opportunity (the live tunnel was built by a fresh gate pass; any inter-establish `httpsInspectionEnabled` change is itself hot-pluggable via `vpnRestartTrigger`, which re-fires the gate).
+
+### Adversarial refute (3 lenses) — ALL PASS
+
+**LENS 1 (correctness — isNewVpn branching):** isNewVpn=true → gate fires fresh → state correct. isNewVpn=false → an existing tunnel established by a prior gate-pass is merely updated; the prior pass already scrubbed state, and inter-establish changes are hot-pluggable (re-fire the gate). No branch carries stale `httpsInspection` state. ✓
+
+**LENS 2 (completeness — gate-body coverage):** the true-branch synchronously and unconditionally performs all 5 MITM steps inside the same `if`; any step failure is caught ([L3819](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3819)) and logged, not silently dropped. The false-branch (else, L3824-3825) explicitly nulls the listener and stops the proxy — a disabled or CA-missing cold reboot does not leak a stale proxy. Both branches reconcile. The 6th leg (firewall/manager rehydration) runs pre-gate on the same cold path, so rule state is also fresh. ✓
+
+**LENS 3 (mechanism — is the gate actually reached, or can onStartCommand bypass it?):**
+- intent never dereferenced pre-gate → null-intent safe.
+- `cm` uninitialized on every fresh process (verified at source, L670-671) → isNewVpn=true on every cold start.
+- startForeground failure (L1924 / L1934) stops the service entirely (no VPN up → nothing to protect → no gap).
+- the only path that skips the gate (warm `updateTun`) presupposes a gate-verified tunnel already exists.
+⇒ Every path that establishes a VPN tunnel reaches the gate; every path that doesn't reach it establishes no tunnel. ✓
+
+### Provenance
+
+- Re-verified against working-tree HEAD `1c62bfd91`; all anchors checked by direct Read/Grep (the adversarial workflow stalled 3×6 attempts over 36 min and returned null — discarded; direct verification used per [[feedback-symptom-not-mechanism]]).
+- The prior relay draft named a class `BraveAutomaticStartReceiver` — **fabricated**; the real class is `BraveAutoStartReceiver` ([L30](../app/src/full/java/com/celzero/bravedns/receiver/BraveAutoStartReceiver.kt#L30)). This entry uses the real name.
+- Closes the open-work item O5 / DECISION-006/D review-trigger (above: "An always-on restart path is found NOT to reconcile …").
+- Closes the AdGuard issue-tracker dossier item O5 (see `docs/REFERENCE-ADGUARD-ISSUES.md`, cluster map O1-O8; O5 = always-on/reboot).
+
+### Limitation noted (honest)
+
+`establishVpn` catches the `start()` exception ([L3819](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3819)) and logs it but does NOT stop the VPN — a partial-start failure (e.g. rules unreadable, CA present) leaves the tunnel up with a proxy that failed its setup. This is a pre-existing edge posture, NOT introduced by DECISION-006/D and NOT the AdGuard #6084 concern; recorded for completeness, not an O5 gap.
+
 ---
 
 **End of Decisions — Append Only**
