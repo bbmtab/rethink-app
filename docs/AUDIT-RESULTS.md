@@ -245,3 +245,35 @@ ratio = N_parsed / N_total
 - ~~**R4-screenshot** (human): Chrome/Brave cert viewer → issuer = RethinkDNS Root CA + page render under MITM.~~ **DONE**
 - ~~**R1-hardening** (optional): force-stop + relaunch + re-export, compare to `21EAD98D…` (two-export identity already serves this).~~ **COMPLETE** — Evidence chain: (1) two exports byte-identical `21EAD98D…`; (2) force-stop + VPN toggle → proxy starts → MITM works (proves KeyStore survives process death); (3) R2 full removal/reinstall cycle → MITM restored. KeyStore alias deterministic across process lifecycle.
 - Executor-driven (no human gate): R3 coverage table completion, R5a test output, R5b.
+
+---
+
+## O5: Always-on/reboot state-reconciliation (2026-08-04) — SEALED NO-GAP
+
+**Question**: Does the fork's cold always-on reboot path (onCreate → onStartCommand → restartVpn → establishVpn) properly reconcile `httpsInspectionEnabled` and protection/firewall state after an OS-triggered VpnService restart, or does it silently drop state like AdGuard #6084?
+
+**Verdict: NO GAP — SEALED 2026-08-04.** The `establishVpn` gate (`BraveVPNService.kt:3729`) is the single choke-point for both the hot-plug D path AND the cold always-on reboot path.
+
+**Convergence trace** (verified against working tree @ `1c62bfd91`):
+
+- Hot-plug D: `vpnRestartTrigger` → `restartVpnWithNewAppConfig` (`:2753`) → `restartVpn` (`:2815`) → `establishVpn` → gate
+- Cold always-on: `onStartCommand` isNewVpn=true (`:1971`) → `rdb.refresh(ACTION_REFRESH_AUTO)` (`:1975`) → `restartVpn` (`:1976`/`:2815`) → `establishVpn` → gate
+- Warm: isNewVpn=false (`:1961`) → `updateTun` (`:1967`) preserves existing gate-scrubbed tunnel
+- Boot-complete: `BraveAutoStartReceiver` (`app/src/full/.../receiver/BraveAutoStartReceiver.kt:30`) backs off at `:54` when always-on IS on → Android self-restarts → cold path
+
+**Gate body** (`:3729`): `if (persistentState.httpsInspectionEnabled && CertificateAuthority.isCaInstalled())` then synchronously — (1) FilterEngine.loadRulesFromFile (`:3741`, disk file), (2) ProxyListener set (`:3748`), (3) LocalHttpsProxy.start() (`:3784`), (4) browser whitelist (`:3812`), (5) builder.setHttpProxy (`:3815`). All fresh each fire.
+
+**Firewall/protection also reconciles**: cold-path `rdb.refresh` rehydrates FirewallManager (et al.) from DB at `RefreshDatabase.kt:155` *before* `restartVpn` fires the gate.
+
+**3-lens adversarial refute — ALL PASS**:
+1. CORRECTNESS (isNewVpn branching): cold→gate fresh; warm→preserved valid tunnel. ✅
+2. COMPLETENESS (gate body): all 5 MITM components synchronous, no deferred init. ✅
+3. EDGE/DEGRADE (gate failure post-proxy-start): orphaned proxy, no tun routing → harmless. ✅
+
+**Why AdGuard #6084 does NOT apply**: fork moves the state surface DOWN into the `establishVpn` gate (fresh SharedPreferences/disk read each fire), not UP to `onStartCommand` cached memory. No path can skip the gate.
+
+**O5 CLOSED 2026-08-04.** No code change (verified-by-construction). No device verify needed (cold path converges at the same `establishVpn` gate verified hot in DV-D/DV-D.b).
+
+### DV-B residual (2026-08-04)
+
+DECISION-006/B nav-gap (`d28f807bb`) on Mi A1 A16: restart-on-PI path entered but PI BAL-blocked post-death (A14+ background-activity-launch guard, target-agnostic). Nav gap NOT closed on A14+ — documented platform limitation, NOT a fork defect. No code action.
