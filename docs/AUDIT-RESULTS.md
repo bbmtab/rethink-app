@@ -277,3 +277,46 @@ ratio = N_parsed / N_total
 ### DV-B residual (2026-08-04)
 
 DECISION-006/B nav-gap (`d28f807bb`) on Mi A1 A16: restart-on-PI path entered but PI BAL-blocked post-death (A14+ background-activity-launch guard, target-agnostic). Nav gap NOT closed on A14+ — documented platform limitation, NOT a fork defect. No code action.
+
+---
+
+## O7: Phase-1b firewall test-regression — RE-CONFIRMED GONE at HEAD `892a28182` (2026-08-06)
+
+**Question**: Is the +15 `FirewallManagerTest` cascade regression (Phase-1b) still present at the published HEAD, or does the `a88b789d2` fix hold?
+
+**Verdict: O7 GONE — RE-CONFIRMED at HEAD `892a28182`.** A fresh serial-lowRAM full-suite run at the published tip returns `FirewallManagerTest` **45 / 0 / 0** inside a cascade-capable single-JVM full-suite context — the +15 "no answer found" cascade is absent. **Fix-Forward wins; Clean-Rewrite not needed.**
+
+### Mechanism (forensically established — corrects the stale REFERENCE attribution)
+
+The earlier `docs/REFERENCE-ADGUARD-ISSUES.md` line mis-attributed the polluter to `EasyListRatioTest`. That is wrong: `EasyListRatioTest` was *added inside* the fix commit `a88b789d2`, so it cannot pre-date the regression it was blamed for.
+
+Actual polluter = **`FirewallAppListAdapterTest` MockK relaxed-flag cascade**. Strict `@MockK` on `AppInfoRepository`/`PersistentState`, registered in Koin, then in `@After` ran `unmockkAll()` **before** `stopKoin()` → MockK's relaxed-flag registry corrupted while Koin still held references → the next suite's `mockk(relaxed = true)` loses the relaxed flag → "no answer found".
+
+**Fix (present at working-tree HEAD `892a28182`):**
+- `FirewallAppListAdapterTest.kt` — `:73`/`:76` `@MockK(relaxed = true)` on the two repo mocks; `@After` (`:137-146`) now `:141 stopKoin()` **then** `:145 unmockkAll()` (Koin released first).
+- `FirewallManagerTest.kt` (victim, defensive hygiene) — `@Before` (`:90`) purges stale state: `:103 unmockkAll()` + `:104 clearAllMocks()` before `:107-109 mockk(relaxed = true)`; `@After` (`:145-152`) `:148 stopKoin()` → `:149 unmockkAll()` → `:151 clearAllMocks()`.
+
+### Confirm-run evidence (serial-lowRAM full-suite, HEAD `892a28182`, 2026-08-06)
+
+Command: `./gradlew :app:testFdroidFullDebugUnitTest --rerun-tasks --console=plain --no-configuration-cache --max-workers=1 -Dorg.gradle.parallel=false` — single JVM (polluter + victim share it, so the cascade is exercisable). Elapsed 1107 s (< 1500 s watchdog); `BUILD FAILED` = exit-1 from pre-existing test failures, **not** a crash/hang; 30 test XMLs / 852 tests all produced.
+
+| Suite | tests | fail | err | Verdict |
+|---|---|---|---|---|
+| `service.FirewallManagerTest` (O7 load-bearing) | 45 | **0** | 0 | **+15 cascade ABSENT** ✓ |
+| `wireguard.WgHopManagerTest` (O6 env-health sentinel) | 84 | 0 | 0 | env healthy ✓ |
+
+**Non-fabrication check:** the 30 per-suite counts cross-foot exactly — **852 tests**, **45 failures** — both match the totals line. All failures are confined to the known pre-existing set `{RpnProxy, LocalHttpsProxy, SubscriptionStateMachineV2, WireguardManager}`; **no new suite failing**. Stable pre-existing (this run): `RpnProxyManagerTest` 96/40, `LocalHttpsProxyTest` 3/2, `SubscriptionStateMachineV2Test` 79/2, `WireguardManagerTest` 105/1.
+
+**Heap-verify gap — honest caveat, NON-O7.** The serial-lowRAM recipe edits `gradle.properties:41` (`4g/2g` → `2g/1g`) to defeat parallel-Robolectric RAM exhaustion (Phase-2 H1). This run's daemon-opts verification line was **absent** — the recipe has no `--stop` before the run, so a hot daemon was reused rather than a fresh 2g one. This does not undermine O7:
+1. The run completed cleanly (no watchdog, no OOM/crash/hang) — 30 XMLs/852 tests produced.
+2. The cascade is a **MockK bytecode/relaxed-flag** interaction — **heap-independent**; a 2g vs 4g daemon does not change whether `unmockkAll`-before-`stopKoin` corrupts the registry, so the +15 would appear regardless of heap. It did not.
+3. A dirtier env would push `FirewallManagerTest` *upward*; the clean 45/0/0 is therefore a stronger, not weaker, signal.
+
+*Recipe latent bug (for future confirm runs):* insert `./gradlew --stop` before the temp edit so a fresh 2g/1g daemon is forced and the heap-verify line is captured.
+
+### Closure
+
+- **O7 GONE at HEAD `892a28182`** — the `a88b789d2` fix is effective and in published history; **no source change required**.
+- Deferred sub-decision (Clean-Rewrite vs Fix-Forward, 2026-07-23) → **Fix-Forward wins** (45/0/0 decisive).
+- `docs/REFERENCE-ADGUARD-ISSUES.md` O7 line corrected in the local working doc (stale EasyListRatioTest/deferred attribution removed).
+- **NOT pushed** — local commit only (PUSH FORBIDDEN holds).
