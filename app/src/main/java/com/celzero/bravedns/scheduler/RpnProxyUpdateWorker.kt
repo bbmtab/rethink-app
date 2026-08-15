@@ -139,8 +139,8 @@ class RpnProxyUpdateWorker(
             }
 
             try {
-                // TODO: Duplicate implementation exists in RpnProxyUpdateWorker and
-                // SubscriptionCheckWorker. Extract this into a shared utility or manager.
+                // Note: Previously duplicated in SubscriptionCheckWorker, which has been
+                // retired with the RPN UI pivot. Retained here as the single implementation.
                 checkAndRegisterDeviceIfNeeded()
 
                 val updated = RpnProxyManager.updateWinProxy()

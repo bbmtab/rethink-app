@@ -58,7 +58,7 @@ import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
- * Adapter for the list of currently-selected (active) VPN servers shown in ServerSelectionFragment
+ * Adapter for the list of currently-selected (active) VPN servers shown in the Plus / Filters tab
  */
 class VpnServerAdapter(
     private val context: Context,

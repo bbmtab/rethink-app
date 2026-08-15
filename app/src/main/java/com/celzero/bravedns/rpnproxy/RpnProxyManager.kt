@@ -1078,7 +1078,6 @@ object RpnProxyManager : KoinComponent {
                     // Notify about removed servers if any were selected
                     if (removedSelectedIds.isNotEmpty()) {
                         Logger.w(LOG_TAG_PROXY, "$TAG; ${removedSelectedIds.size} selected servers were removed from the list")
-                        // Notification will be shown by ServerSelectionFragment when it detects the change
                     }
                 }
                 return ok
@@ -1148,8 +1147,6 @@ object RpnProxyManager : KoinComponent {
             Logger.w(LOG_TAG_PROXY, "$TAG; getWinServers: tunnel returned no servers (win props null/empty)")
         }
         // Return whatever is now in the cache (may still be AUTO-only if tunnel failed).
-        // The caller (ServerSelectionFragment) will detect the absence of real servers
-        // and show an appropriate error to the user.
         return winCacheMutex.withLock { winServersCache.toList() }
     }
 
@@ -1808,7 +1805,7 @@ object RpnProxyManager : KoinComponent {
 
             if (removedConfigs.isNotEmpty()) {
                 Logger.w(LOG_TAG_PROXY, "$TAG; updateWinProxy: emitting removal event for ${removedConfigs.size} server(s)")
-                // Emit on the shared-flow so any active ServerSelectionFragment shows the sheet
+                // Emit on the shared-flow so any active observer shows the sheet
                 _serverRemovedEvent.tryEmit(removedConfigs)
             }
         }
@@ -2563,7 +2560,7 @@ object RpnProxyManager : KoinComponent {
              // Return the cache populated by syncWinServers (read from DB) instead of the
              // freshly-constructed API objects.  API objects are built with default field values
              // (e.g. isFavourite = false), so returning them would silently clear every country's
-             // favourite flag in the in-memory allServers list inside ServerSelectionFragment.
+             // favourite flag in the in-memory allServers list.
              val freshList = winCacheMutex.withLock { winServersCache.toList() }
              return Pair(freshList, removedServers)
          } catch (e: Exception) {

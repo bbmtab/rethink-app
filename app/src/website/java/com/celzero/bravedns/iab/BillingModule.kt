@@ -19,16 +19,10 @@ import org.koin.core.module.Module
 import org.koin.dsl.module
 
 /**
- * Koin module that wires [BillingBackendClient] for the **play** (and website) flavor.
+ * fdroid flavor stub for [BillingModule].
  *
- * [BillingBackendClient] depends on [SecureIdentityStore] which is registered in
- * [ServiceModule] (main). Both are singletons so they
- * share a single instance across [InAppBillingHandler] and [SubscriptionCheckWorker].
- *
- * This module is added to [AppModules] via [ServiceModuleProvider]
- * in the `full` source set, which is shared by `play`, `website`, and `fdroid` builds.
- * The `fdroid` flavor does not use [BillingBackendClient] but including it in the
- * DI graph is harmless because it is only injected by play/website code paths.
+ * Registers a no-op [BillingBackendClient] stub so that `main` source-set services
+ * The fdroid flavor does not have billing module as of now v055v
  */
 object BillingModule {
     val billingModules: Module = module {

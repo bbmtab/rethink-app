@@ -62,8 +62,6 @@ import com.celzero.bravedns.service.WireguardManager
 import com.celzero.bravedns.service.WireguardManager.WG_UPTIME_THRESHOLD
 import com.celzero.bravedns.ui.BaseActivity
 import com.celzero.bravedns.ui.bottomsheet.OrbotBottomSheet
-import com.celzero.bravedns.ui.fragment.RethinkPlusFragment
-import com.celzero.bravedns.ui.fragment.ServerSelectionFragment
 import com.celzero.bravedns.util.Constants
 import com.celzero.bravedns.util.OrbotHelper
 import com.celzero.bravedns.util.SnackbarHelper.capitalizeWords
@@ -543,22 +541,13 @@ class ProxySettingsActivity : BaseActivity(R.layout.fragment_proxy_configure) {
     }
 
     /**
-     * Navigates to the appropriate RPN screen:
-     * - If the user has an active/valid subscription → open [ServerSelectionFragment] so they can
-     *   manage which countries to proxy through.
-     * - Otherwise → open [RethinkPlusFragment] (the purchase / sign-up flow).
+     * RPN screen target retired (Phase-1c pivot, O8). Both the legacy server-selection
+     * destination and the premium RethinkPlusFragment variant have been removed from
+     * the user-facing destination set. Become a no-op so settings-side clicks remain
+     * safe after the retire.
      */
     private fun openRpnScreen() {
-        val fragmentClass: Class<out androidx.fragment.app.Fragment> =
-            if (RpnProxyManager.isRpnEnabled() || RpnProxyManager.hasValidSubscription()) {
-                ServerSelectionFragment::class.java
-            } else {
-                RethinkPlusFragment::class.java
-            }
-
-        val intent =
-            FragmentHostActivity.createIntent(context = this, fragmentClass = fragmentClass)
-        startActivity(intent)
+        finish()
     }
 
     private fun displayWireguardUi() {

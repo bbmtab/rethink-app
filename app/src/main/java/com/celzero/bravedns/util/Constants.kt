@@ -226,7 +226,7 @@ class Constants {
         const val NOTIF_WG_PERMISSION_NAME = "WG_PERMISSION" // wireguard permission name
         const val NOTIF_WG_PERMISSION_VALUE = "WG_PERMISSION_NOTIFY" // wireguard permission
 
-        // IAB purchase conflict (HTTP 409) notification tapping opens PurchaseConflictBottomSheet
+        // IAB purchase conflict (HTTP 409) notification tapping opens conflict-resolution UI
         const val NOTIF_INTENT_EXTRA_IAB_CONFLICT_NAME  = "IAB_CONFLICT"
         const val NOTIF_INTENT_EXTRA_IAB_CONFLICT_VALUE = "IAB_CONFLICT_409"
         // Stable notification ID for the 409 conflict alert (only one at a time)

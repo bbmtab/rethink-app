@@ -379,12 +379,8 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
 
         b.fhsSponsor.setOnClickListener {
             Logger.v(LOG_TAG_UI, "$TAG: click event on sponsor card")
-            if (RpnProxyManager.isRpnEnabled()) {
-                Logger.d(LOG_TAG_UI, "RPlus is enabled, not showing sponsor dialog")
-                // load rethink plus dashboard
-                openRpnDashboardScreen()
-                return@setOnClickListener
-            }
+            // Phase-1c pivot, O8: RPN user-facing destination retired. Always route to the
+            // RethinkDNS sponsor dialog regardless of proxy state.
             promptForAppSponsorship()
             logEvent(
                 EventType.UI_NAVIGATION,
@@ -395,12 +391,8 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
 
         b.fhsSponsorBottom.setOnClickListener {
             Logger.v(LOG_TAG_UI, "$TAG: click event on sponsor card")
-            if (RpnProxyManager.isRpnEnabled()) {
-                Logger.d(LOG_TAG_UI, "RPlus is enabled, not showing sponsor dialog")
-                // load rethink plus dashboard
-                openRpnDashboardScreen()
-                return@setOnClickListener
-            }
+            // Phase-1c pivot, O8: RPN user-facing destination retired. Always route to the
+            // RethinkDNS sponsor dialog regardless of proxy state.
             promptForAppSponsorship()
             logEvent(
                 EventType.UI_NAVIGATION,
@@ -411,12 +403,8 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
 
         b.fhsTitleRethink.setOnClickListener {
             Logger.v(LOG_TAG_UI, "$TAG: click event on rethink card")
-            if (RpnProxyManager.isRpnEnabled()) {
-                Logger.d(LOG_TAG_UI, "RPlus is enabled, not showing sponsor dialog")
-                // load rethink plus dashboard
-                openRpnDashboardScreen()
-                return@setOnClickListener
-            }
+            // Phase-1c pivot, O8: RPN user-facing destination retired. Always route to the
+            // RethinkDNS sponsor dialog regardless of proxy state.
 
             promptForAppSponsorship()
             logEvent(
@@ -430,16 +418,8 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
         // b.fhsCardAlertsLl.setOnClickListener { startActivity(ScreenType.ALERTS) }
     }
 
-    private fun openRpnDashboardScreen() {
-        val args = Bundle().apply { putString("ARG_KEY", "Launch_Rethink_Support_Dashboard") }
-        startActivity(
-            FragmentHostActivity.createIntent(
-                context = requireContext(),
-                fragmentClass = RethinkPlusDashboardFragment::class.java,
-                args = args
-            )
-        )
-    }
+    // openRpnDashboardScreen() removed under Phase-1c pivot, O8 — see AboutFragment.kt
+    // migration comment for the retention-payer rationale.
 
     private fun logEvent(type: EventType, msg: String, details: String) {
         io {

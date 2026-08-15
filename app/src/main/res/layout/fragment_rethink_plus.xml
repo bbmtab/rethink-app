@@ -6,11 +6,16 @@
 
     <androidx.core.widget.NestedScrollView
         android:id="@+id/scrollView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         android:fillViewport="true"
-        android:layout_marginBottom="24dp"
-        android:scrollbars="none">
+        android:scrollbars="none"
+        android:clipToPadding="false"
+        android:paddingBottom="80dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -19,7 +24,7 @@
             android:paddingStart="16dp"
             android:paddingTop="24dp"
             android:paddingEnd="16dp"
-            android:paddingBottom="24dp">
+            android:paddingBottom="0dp">
 
                 <!-- Hero Banner -->
             <LinearLayout
@@ -52,7 +57,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:alpha="0.85"
-                        android:text="@string/rpn_title" />
+                        android:text="@string/plus_title" />
                 </LinearLayout>
 
                 <androidx.appcompat.widget.AppCompatTextView
@@ -129,6 +134,7 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
                             android:id="@+id/switchHttpsInspection"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -180,51 +186,68 @@
                                     android:textColor="?attr/colorOnSurfaceVariant"
                                     android:layout_marginTop="2dp"/>
                             </LinearLayout>
-
-                            <androidx.appcompat.widget.AppCompatButton
-                                android:id="@+id/btnCaAction"
-                                android:layout_width="wrap_content"
-                                android:layout_height="36dp"
-                                android:text="@string/plus_ca_install"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:textSize="13sp"
-                                android:paddingStart="16dp"
-                                android:paddingEnd="16dp"/>
                         </LinearLayout>
                     </androidx.cardview.widget.CardView>
 
-                    <!-- CA Actions Row -->
+                    <!-- CA Setup Actions (Generate / Progress / Hint / Install / Save) -->
                     <LinearLayout
-                        android:id="@+id/layoutCaActions"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center"
-                        android:visibility="gone"
-                        android:layout_marginTop="8dp">
+                        android:orientation="vertical"
+                        android:layout_marginTop="12dp">
+
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/progressGen"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:indeterminate="true"
+                            android:visibility="gone"
+                            android:layout_marginBottom="16dp"/>
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCaReinstall"
-                            style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
+                            android:id="@+id/btnGenerate"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/plus_ca_reinstall"
-                            android:layout_marginEnd="8dp"
-                            android:textSize="13sp"/>
+                            android:text="Generate CA Certificate"
+                            android:layout_marginBottom="4dp"
+                            app:cornerRadius="8dp"
+                            style="@style/Widget.MaterialComponents.Button"
+                            android:textSize="14sp"/>
+
+                        <TextView
+                            android:id="@+id/tvGenerateHint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Generate first then Install or Save enabled"
+                            android:textSize="12sp"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:gravity="center"
+                            android:layout_marginBottom="12dp"
+                            android:visibility="visible"/>
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCaExport"
-                            style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
+                            android:id="@+id/btnInstall"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/plus_ca_export"
-                            android:textSize="13sp"/>
+                            android:text="Install CA Certificate"
+                            android:enabled="false"
+                            app:cornerRadius="8dp"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSaveCert"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Save Certificate to Downloads"
+                            android:enabled="false"
+                            android:layout_marginTop="8dp"
+                            app:cornerRadius="8dp"
+                            style="@style/Widget.Material3.Button.OutlinedButton"/>
                     </LinearLayout>
 
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- DNS Blocklist → MITM Bridge Section -->
+            <!-- DNS Blocklist → HTTPS Filtering Section -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/cardBlocklistBridge"
                 style="@style/Widget.Rethink.MaterialCardView"
@@ -261,7 +284,8 @@
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="12dp"
+                        android:minHeight="56dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -287,21 +311,21 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
                             android:id="@+id/switchBlocklistBridge"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:enabled="false"/>
+                            android:enabled="true"/>
                     </LinearLayout>
 
-                    <!-- List Selector Row -->
+                    <!-- Selected DNS Lists Summary Row -->
                     <LinearLayout
                         android:id="@+id/layoutBlocklistSelector"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp"
-                        android:visibility="gone">
+                        android:layout_marginBottom="12dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -310,15 +334,17 @@
                             android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tvBlocklistSelectorTitle"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/plus_blocklist_bridge_selector_title"
+                                android:text="@string/plus_blocklist_selected_title"
                                 style="@style/TextAppearance.Material3.BodyLarge"/>
 
                             <TextView
+                                android:id="@+id/tvSelectedDnsCount"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/plus_blocklist_bridge_selector_desc"
+                                android:text="@string/plus_blocklist_selected_count_none"
                                 style="@style/TextAppearance.Material3.BodySmall"
                                 android:textColor="?attr/colorOnSurfaceVariant"
                                 android:layout_marginTop="2dp"/>
@@ -329,7 +355,7 @@
                             style="@style/Widget.Material3.Button.OutlinedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="36dp"
-                            android:text="@string/plus_blocklist_bridge_selector_btn"
+                            android:text="@string/plus_blocklist_manage_dns_lists"
                             android:textSize="13sp"
                             android:paddingStart="16dp"
                             android:paddingEnd="16dp"/>
@@ -342,8 +368,7 @@
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp"
-                        android:visibility="gone">
+                        android:layout_marginBottom="12dp">
 
                         <TextView
                             android:id="@+id/tvSyncStatus"
@@ -394,15 +419,14 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Advanced Filtering Section (placeholder for future) -->
+            <!-- Advanced Filtering Section -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/cardAdvancedFiltering"
                 style="@style/Widget.Rethink.MaterialCardView"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                app:cardCornerRadius="12dp"
-                android:visibility="gone">
+                app:cardCornerRadius="12dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -426,6 +450,59 @@
                         android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginBottom="16dp"/>
 
+                    <!-- Filter Sources Card -->
+                    <androidx.cardview.widget.CardView
+                        android:id="@+id/cardFilterSources"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:cardCornerRadius="8dp"
+                        app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                        android:layout_marginBottom="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:padding="12dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tvFilterSourcesTitle"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/plus_filter_sources_title"
+                                    style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                                <TextView
+                                    android:id="@+id/tvFilterSourcesCount"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/plus_filter_sources_empty"
+                                    style="@style/TextAppearance.Material3.BodySmall"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:layout_marginTop="2dp"/>
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnManageFilterSources"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:text="@string/plus_filter_sources_manage"
+                                android:textSize="13sp"
+                                android:paddingStart="16dp"
+                                android:paddingEnd="16dp"
+                                android:enabled="false"/>
+                        </LinearLayout>
+                    </androidx.cardview.widget.CardView>
+
+                    <!-- Cosmetic CSS Filtering Switch -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -455,12 +532,14 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
                             android:id="@+id/switchCosmeticFiltering"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:enabled="false"/>
                     </LinearLayout>
 
+                    <!-- Scriptlets Filtering Switch -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -490,17 +569,20 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
                             android:id="@+id/switchScriptletFiltering"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:enabled="false"/>
                     </LinearLayout>
 
+                    <!-- Procedural Filtering Switch -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -524,7 +606,81 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
                             android:id="@+id/switchProceduralFiltering"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:enabled="false"/>
+                    </LinearLayout>
+
+                    <!-- CSP Filtering Switch -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_advanced_csp_title"
+                                style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_advanced_csp_desc"
+                                style="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp"/>
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
+                            android:id="@+id/switchCspFiltering"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:enabled="false"/>
+                    </LinearLayout>
+
+                    <!-- HTML Filtering Switch -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_advanced_html_title"
+                                style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_advanced_html_desc"
+                                style="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp"/>
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            style="@style/PlusMaterialSwitchFix"
+                            android:id="@+id/switchHtmlFiltering"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:enabled="false"/>

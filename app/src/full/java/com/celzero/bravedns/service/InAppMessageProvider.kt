@@ -26,9 +26,8 @@ import android.app.Activity
  * subscription-canceled alerts, etc.) are surfaced to the user at the right
  * moment without requiring them to navigate to the subscription screen.
  *
- * The `play` flavor provides PlayInAppMessageProvider which delegates to
- * InAppBillingHandler.enableInAppMessaging().
- * All other flavors use NoOpInAppMessageProvider.
+ * No flavor currently provides a PlayInAppMessageProvider; all flavors use
+ * NoOpInAppMessageProvider.
  */
 interface InAppMessageProvider {
     /**

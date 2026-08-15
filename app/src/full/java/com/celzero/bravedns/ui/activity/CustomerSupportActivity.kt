@@ -35,7 +35,6 @@ import com.celzero.bravedns.database.SubscriptionStateHistoryDao
 import com.celzero.bravedns.database.SubscriptionStatus
 import com.celzero.bravedns.database.SubscriptionStatusDao
 import com.celzero.bravedns.databinding.ActivityCustomerSupportBinding
-import com.celzero.bravedns.iab.InAppBillingHandler
 import com.celzero.bravedns.rpnproxy.RpnProxyManager
 import com.celzero.bravedns.scheduler.BugReportZipper
 import com.celzero.bravedns.scheduler.EnhancedBugReport
@@ -145,7 +144,7 @@ class CustomerSupportActivity : BaseActivity(R.layout.activity_customer_support)
                 Logger.e(LOG_TAG_UI, "$TAG loadSubscriptionSummary error: ${e.message}", e)
                 null
             }
-            val deviceId = InAppBillingHandler.getObfuscatedDeviceId()
+            val deviceId = ""
             withContext(Dispatchers.Main) {
                 updateHeroSubtitle(sub, deviceId)
             }

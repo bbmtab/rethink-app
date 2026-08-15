@@ -174,7 +174,8 @@ class AutoExcludeCountriesBottomSheet : BottomSheetDialogFragment() {
         }
 
         // Snapshot the persisted exclusion CSV before any user edits so onDismiss can
-        // detect a real change (mirrors the snapshot pattern in ServerSettingsBottomSheet).
+        // detect a real change (previously mirrored the snapshot pattern in
+        // ServerSettingsBottomSheet, now retired with the RPN UI pivot).
         snapshotExcludedCcs = persistentState.rpnAutoExcludedCcs
 
         setupRecyclerView()

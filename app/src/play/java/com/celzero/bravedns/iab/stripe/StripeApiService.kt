@@ -66,5 +66,3 @@ interface StripeCustomerService {
         @Body params: CustomerCreateParams
     ): Call<RetrofitInstance.CustomerResponse>
 }
-
-

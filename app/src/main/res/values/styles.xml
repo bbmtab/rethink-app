@@ -719,6 +719,33 @@
         <item name="materialThemeOverlay">@style/CustomSwitchThemeOverlay</item>
     </style>
 
+    <!-- Plus-tab A16 inflate fix (Track D). Root cause (confirmed by raw Track-C
+         logcat InheritanceMap): the theme's materialSwitchStyle=CustomMaterialSwitch
+         resolves via defStyleAttr and injects materialThemeOverlay=CustomSwitchThemeOverlay
+         even when the element sets an explicit style= (Track B's stock Widget.Material3
+         style does NOT set materialThemeOverlay, so the defStyleAttr path fills it from
+         the theme; InheritanceMap listed CustomSwitchThemeOverlay forced at line #136).
+         CustomSwitchThemeOverlay routes color slots to bare ?attr (accentGood/
+         switchNormal) -> Android 16 TextView.readTextAppearance -> loadComplexColorForCookie
+         rejects TYPE_ATTRIBUTE 0x2. Fix: an element style that explicitly sets
+         materialThemeOverlay to an overlay whose color slots are LITERAL @color
+         (the pattern proven safe by CustomSwitchThemeOverlayLight at styles L740-745).
+         No android:textAppearance: Track C added one with a framework parent
+         (@android:style/TextAppearance) and tripped AppCompat ThemeEnforcement
+         IllegalArgumentException at line #137; this style pins colors via the overlay,
+         not textAppearance. Applied on the 5 disabled master-toggle switches. -->
+    <style name="PlusMaterialSwitchFix" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="materialThemeOverlay">@style/PlusSwitchOverlayFix</item>
+    </style>
+    <style name="PlusSwitchOverlayFix">
+        <item name="colorPrimary">@color/accentGood</item>
+        <item name="colorSurfaceVariant">@color/colorSurface</item>
+        <item name="colorSurface">@color/colorSurface</item>
+        <item name="colorOutline">@color/switchNormal</item>
+        <item name="colorOnSurface">@color/primaryText</item>
+        <item name="colorOnSurfaceVariant">@color/primaryLightColorText</item>
+    </style>
+
     <!-- Theme overlay to force switch colors -->
     <style name="CustomSwitchThemeOverlay">
         <item name="colorPrimary">?attr/accentGood</item>

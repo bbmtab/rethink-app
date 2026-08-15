@@ -39,7 +39,7 @@ private val rootModule = module { single<ContentResolver> { androidContext().con
 private val updaterModule = module {
     single { NonStoreAppUpdater(Constants.RETHINK_APP_UPDATE_CHECK, get()) }
     single<AppUpdater> { get<NonStoreAppUpdater>() }
-    // Default no-op provider; the play flavor overrides this with PlayInAppMessageProvider.
+    // Default no-op provider; no flavor currently overrides this.
     single<InAppMessageProvider> { NoOpInAppMessageProvider() }
 }
 

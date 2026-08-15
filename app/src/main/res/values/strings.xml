@@ -2033,6 +2033,8 @@
     <string name="vpn_not_active_dialog_desc" translatable="false">Rethink is not started. Please start to use this feature.</string>
 
     <string name="rpn_title" translatable="false">RPN</string>
+    <!-- Phase-1c: bottom-nav Plus-tab label (NOT a blanket rename — rpn_title stays for the ~11 other RPN-network sites). -->
+    <string name="plus_title" translatable="false">Plus</string>
 
     <string name="rpn_troubleshoot_title" translatable="false">troubleshoot</string>
 
@@ -2342,7 +2344,7 @@
     <string name="billing_sub_cancel" translatable="false">Recurring \u2022 Cancel anytime</string>
     <string name="trial_days_format" translatable="false">%1$d days free trial</string>
 
-    <!-- RethinkPlusDashboardFragment hero banner -->
+    <!-- Plus / Filters hero banner -->
     <string name="hero_plan_and_account" translatable="false">%1$s • %2$s</string>
     <string name="placeholder_dash" translatable="false">\u2014</string>
 
@@ -2527,10 +2529,6 @@
 
     <string name="plus_https_inspection_desc">Inspect and filter HTTPS traffic using a local root CA. Requires CA installation.</string>
     <string name="plus_https_inspection_disabled">Enable CA installation first</string>
-
-    <string name="plus_blocklist_bridge_desc">Use your selected DNS blocklists for HTTPS adblocking. Select lists, then tap Sync.</string>
-    <string name="plus_blocklist_bridge_use_dns">Use DNS blocklists for adblock</string>
-    <string name="plus_blocklist_bridge_select_lists">Select Lists…</string>
     <string name="plus_blocklist_bridge_ready">Ready to sync</string>
     <string name="plus_blocklist_bridge_sync">Sync Now</string>
     <string name="plus_blocklist_bridge_syncing">Syncing…</string>
@@ -2544,6 +2542,11 @@
     <string name="plus_advanced_scriptlet_desc">Run JavaScript to neutralize anti-adblock (#%# rules)</string>
     <string name="plus_advanced_procedural_title">Procedural Cosmetic Filters</string>
     <string name="plus_advanced_procedural_desc">Dynamic element removal with :has(), :xpath(), :upward() (#?# rules)</string>
+    <string name="plus_advanced_csp_title">Content Security Policy (CSP) Injection</string>
+    <string name="plus_advanced_csp_desc">Inject CSP headers to restrict script execution (pending backend binding)</string>
+    <string name="plus_advanced_html_title">HTML Filtering</string>
+    <string name="plus_advanced_html_desc">Remove/collapse page elements via HTML rules (pending backend binding)</string>
+    <string name="plus_advanced_filtering_unavailable">Pending FilterEngine toggle-key binding — switches disabled until the backend preference keys exist</string>
 
     <string name="plus_exclusions_domains">Domain Exclusions</string>
     <string name="plus_exclusions_domains_desc">Skip MITM for these domains (certificate pinning, banking, etc.)</string>
@@ -2571,13 +2574,32 @@
     <string name="plus_ca_install">Install CA</string>
     <string name="plus_ca_reinstall">Re-install CA</string>
     <string name="plus_ca_export">Export CA</string>
+    <string name="plus_ca_generate">Generate CA Certificate</string>
+    <string name="plus_ca_generate_hint">Generate first, then Install or Save will be enabled</string>
+    <string name="plus_ca_save_to_downloads">Save Certificate to Downloads</string>
 
-    <string name="plus_blocklist_bridge_title">DNS Blocklist → MITM Bridge</string>
-    <string name="plus_blocklist_bridge_toggle">Use DNS blocklists for adblock</string>
+    <string name="plus_blocklist_bridge_title">DNS Blocklist → HTTPS Filtering</string>
+    <string name="plus_blocklist_bridge_desc">Bridge selected Rethink DNS blocklists into compiled HTTPS filtering rules</string>
+    <string name="plus_blocklist_bridge_toggle">Use selected DNS blocklists for HTTPS filtering</string>
     <string name="plus_blocklist_bridge_toggle_desc">Sync selected DNS blocklists to adblock rules for HTTPS filtering</string>
-    <string name="plus_blocklist_bridge_selector_title">Blocklist Selector</string>
-    <string name="plus_blocklist_bridge_selector_desc">Choose which DNS blocklists to use for HTTPS filtering</string>
-    <string name="plus_blocklist_bridge_selector_btn">Select Lists…</string>
+    <string name="plus_blocklist_bridge_selector_title">Selected DNS lists</string>
+    <string name="plus_blocklist_bridge_selector_desc">0 lists selected</string>
+    <string name="plus_blocklist_bridge_selector_btn">Manage DNS Lists</string>
+    <string name="plus_blocklist_selected_title">Selected DNS lists</string>
+    <string name="plus_blocklist_selected_count_format">%d lists selected</string>
+    <string name="plus_blocklist_selected_count_single">1 list selected</string>
+    <string name="plus_blocklist_selected_count_none">0 lists selected</string>
+    <string name="plus_blocklist_manage_dns_lists">Manage DNS Lists</string>
+
+    <string name="plus_blocklist_dns_lists_title">Selected DNS lists</string>
+    <string name="plus_blocklist_dns_lists_desc">0 lists selected</string>
+    <string name="plus_blocklist_ad_blocking_title">Use DNS blocklists for ad blocking</string>
+    <string name="plus_blocklist_ad_blocking_desc">Enable HTTPS-level ad blocking using your DNS blocklists</string>
+    <string name="plus_filter_sources_title">Filter Sources</string>
+    <string name="plus_filter_sources_desc">Advanced filter source manager is not available yet</string>
+    <string name="plus_filter_sources_manage">Manage Sources</string>
+    <string name="plus_filter_sources_empty">Advanced filter source manager not configured</string>
+    <string name="plus_filter_sources_coming_soon">Advanced filter sources coming soon</string>
 
     <string name="plus_advanced_filtering_desc">Experimental features - require FilterEngine support</string>
     <string name="plus_advanced_filtering_title">Advanced Filtering</string>

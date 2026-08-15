@@ -534,4 +534,307 @@ The warm `updateTun` path (isNewVpn=false) BY DESIGN does not re-read, but only 
 
 ---
 
+## DECISION-007: RETIRE RPN USER-FACING UI; PLUS = FILTERS UX ACROSS ALL FLAVORS
+
+### Rationale (2026-08-13 — supervisor directive)
+The Plus tab in the canonical fork is the MITM/adblock Filters surface. The previous Phase-1 architecture that split Plus by flavor (fdroid = MITM-only, full/play/website = MITM + RPN subscription) is superseded by a unified, flavor-agnostic Filters surface. RPN as a backend-enabled proxy protocol continues to live in `Configure → VPN / Proxy` (TunnelSettingsActivity, RpnProxyManager), but the Plus-tab user-facing RPN subscription, purchase, account-state, and server-selection UI is retired/deferred. This is a product/UX decision, not an execution drift: the RPN UI removal aligns with the current working tree (HEAD `4db1b48f6` — the executed pivot RETIRE-RPN + HOIST fdroid→full). The Plus UX is rebuilt as `Filters`, not as `RPN + MITM`.
+
+### Scope (final — applies to fdroid / full / play / website)
+All four flavors expose the same Plus tab content (Filters):
+
+| Section | Sub-features | Source file |
+|---------|--------------|-------------|
+| 1. HTTPS Inspection | Master toggle; CA status badge; CA Install / Re-install / Export CA; Per-app HTTPS filtering (`HttpsFilteredAppsFragment` pattern) | `styles.xml` PlusMaterialSwitchFix / `fragment_rethink_plus.xml` |
+| 2. Advanced Filtering | Manage Filters (category-oriented source selector: Ads, Privacy, Social, Annoyances, Security, Language-specific, Other Filters, Custom Filters) with source enable/disable toggles + enabled-source summary (`X lists enabled • N rules`); presets EasyList, AdGuard Base, AdGuard Annoyances, Custom URL | Added to Plus design (reuses FilterEngine cosmetic/scriptlet/procedural/CSP/HTML rules automatically; per-engine rule-type toggles retired per DECISION-009 — rule types handled automatically, subtype counts kept in diagnostics) |
+| 3. Exclusions | Domain exclusions; App exclusions | `fragment_rethink_plus.xml` L385+ area |
+
+**DNS Blocklist → MITM bridge: OBSOLETE per DECISION-008.** Domain-level DNS blocking propagates automatically via `activeNetwork.getAllByName()` → Rethink DNS resolver → `0.0.0.0` sinkhole. No DNS-to-Plus bridge UI exists.
+
+The `Plus` bottom-nav label and hero label (`plus_title` = "Plus") survive; the `rpn_title` label ("RPN") stays preserved for the RPN-feature/protocol sites elsewhere (no blanket rename). The Plus nav item (`bottom_nav_menu.xml:17`) uses `plus_title`. The layout hero (`fragment_rethink_plus.xml:55`) uses `plus_title`.
+
+### Flavor result (all flavors = same Plus/Filters surface)
+- fdroid: Plus → Filters (MITM/adblock) — no RPN UI
+- full: Plus → Filters (MITM/adblock) — no RPN UI
+- play: Plus → Filters (MITM/adblock) — no RPN UI; Play billing/IAB files (`InAppBillingHandler` / `BillingListener` / `SubscriptionCheckWorker` / `GooglePlaySubsAdapter` / `SubscriptionPurchaseProcessor` / etc.) are out of Plus UX scope (some retained in `play/` flavor if needed for non-Plus purchase flows; Plus surface itself is MITM-only).
+- website: Plus → Filters (MITM/adblock) — no RPN UI; Stripe billing/IAB files out of Plus UX scope.
+
+### Deleted / out of Plus UX scope (accepted as executed — NO restoration)
+These files were deleted from the working tree at the executed pivot (`project_phase1c_pivot_20260809.md` — supervisor-audited APPROVE 2026-08-10):
+- `RethinkPlusDashboardFragment.kt` (the RPN+MITM dashboard; full flavor)
+- `ServerSelectionFragment.kt` (RPN server picker; full flavor)
+- `ManageRpnPurchaseBtmSht.kt` (RPN purchase bottom sheet; full flavor)
+- `RethinkPlusFragment.kt` in `play/` and `website/` flavors (RPN/purchase UI; deprecated in play/website flavors)
+- `InAppBillingHandler.kt` / `SubscriptionCheckWorker.kt` / `GooglePlaySubsAdapter.kt` / `BillingListener.kt` (play billing layer; full flavor / play flavor copies — out of Plus UX; some fdroid copies kept for non-Plus billing if needed)
+- `fragment_rethink_plus_premium.xml`, `fragment_server_selection.xml`, `activity_rethink_plus_dashboard.xml`, `nav_rethink_plus.xml`
+The `RethinkPlusFragment.kt` in `full/` is the hoisted fdroid MITM-only fragment (from R100 `fdroid→full` rename); it remains the canonical Filters surface.
+
+### Supersedes
+- DECISION-001 L52 (`docs/DECISIONS.md`:52): the "fdroid gets free MITM/adblock; **play/website gets RPN + MITM**" flavor-gating for Plus is superseded by "All flavors get Plus/Filters; RPN UI is retired/deferred". The RPN subscription/management portion is no longer a Plus-tab feature; the MITM/adblock portion remains the canonical Plus-tab feature (unchanged from Phase-1b fdroid work, sealed by Track-D 2026-08-13).
+- `docs/UNIFIED_UI_ARCHITECTURE.md` §Plus (L15, L47-89, L206-208, L396) — updated in the same session to the unified Filters surface.
+- Active Phase-1c relay `project_phase1c_pivot_20260809.md` / `project_phase1c_relay1_pivot_verdict_20260810.md`: the RETIRE-RPN-UI + HOIST fdroid→full pivot is ratified by this decision.
+
+### References (source-of-truth anchors — working tree HEAD `4db1b48f6`)
+- Plus hero label: `app/src/main/res/layout/fragment_rethink_plus.xml:55` — `android:text="@string/plus_title"` (reads "Plus")
+- Plus bottom-nav label: `app/src/main/res/menu/bottom_nav_menu.xml:17` — `android:title="@string/plus_title"`
+- Filters sections layout: `app/src/main/res/layout/fragment_rethink_plus.xml` (line 68+: HTTPS Inspection card; blocklist bridge section; exclusions section; hero banner L36-56 with `plus_title`)
+- SwitchMaterial crash fix (Track-D): [styles.xml:737-745](docs/unified_ui_architecture.md) (`PlusMaterialSwitchFix` / `PlusSwitchOverlayFix` overlay with literal `@color` values, zero `?attr` refs); 5 `MaterialSwitch` elements at [fragment_rethink_plus.xml:131/290/459/495/530](app/src/main/res/layout/fragment_rethink_plus.xml#L131)
+- Filters backend machinery (unchanged): `PersistentState.httpsInspectionEnabled` (L15 in arch doc), `CertificateAuthority`, `RethinkBlocklistManager`, `FilterEngine`, `LocalHttpsProxy` — observed, toggled, NOT edited by this UX phase (DECISION-006/D hot-plug verified 2026-08-04/2026-08-03).
+- Auto-restart / always-on: DECISION-006/D (`killProcess`/`PendingIntent` retired; `vpnRestartTrigger` hot-plug; no BAL, no crash) — sealed 2026-08-04; O7 `WgHop` 84/0/0; `FirewallManagerTest` 45/0/0.
+
+### Status
+**GOVERNING** — supersedes the Phase-1c plan-file `plans/zippy-snuggling-brook.md` (scope B supervisor-approved 2026-08-07) only where it conflicts with the RETIRE-RPN + HOIST fdroid→full pivot. The plan-file's scope B constraints (no engine edits, no new MITM mechanism, flavor-gated nav graph, `plus_title` relabel, build + serial-lowRAM test, device verify no-crash) remain intact and are satisfied by the Track-D fix + relabel execution. The pivot replaces "merge RPN + MITM" with "Plus = Filters (single surface, all flavors)". No new RPN UI is to be introduced. No restoration of `RethinkPlusDashboardFragment` or the billing/IAB layer into Plus is permitted.
+
+### Wait-gate / deferred gates
+- DV5 (cert-swap / MITM engine end-to-end): NOT a Phase-1c gate; remains a separately-verified, separately-closed subsystem (DECISION-006/D DV-D.b MITM golden sealed 2026-08-03; CA-trust sealed by `LocalHttpsProxy.kt:543` `useClientMode=false` semantics; `badssl-UNEXERCISED` is a documented non-gap per 2026-08-03 entry — not reopened).
+- CA install: remains HUMAN-ONLY (no automation); remains out of plus-tab automation scope.
+- Play/website billing/IAB layer: deferred/retired from Plus; any future billing UI is outside Phase-1c/this decision.
+- RPN subscription UI: deferred; only restored if a NEW product decision supersedes DECISION-007.
+
+### Honesty / residual notes
+- `InAppBillingHandler` hub deleted (working-tree `D`) with ~26 surviving references (`BillingResponse`, `PricingPhase`, `SubscriptionPurchaseProcessor`, etc. across `play/` and `website/`) — these references are currently masked by the `google-services` build gap (play/website APK assembly depends on `google-services` which is missing in the fdroid build); if `google-services` is restored, these dangling references become active compile-breaks. Closing them (delete or redirect) is deferred to a follow-on executor relay (NOT bundled in this supervisor-audited audit); the supervisor's audit notes them for future tracking.
+- `RpnWinProxyDetailsActivity.kt` (win proxy detail screen) still exists in `full/` — it is not part of the Plus UI; remains out of scope.
+- `RethinkPlusViewModel.kt` (full / play / website copies) and `SubscriptionStateMachineV2.kt` / `SubscriptionStatus.kt` (main) survive — these are backend subscription-state machinery, not Plus-UI surface; no action required unless a future decision revives subscription UI.
+- The `action_switch_to_rethinkPlusDashboardFragment` nav action (and `rethinkPlusDashboardFragment` nav destination in `app/src/full/res/navigation/app_navigation.xml`) remains in the graph; since `ServerSelectionFragment` is deleted from tree, the nav dest resolves to a non-existent class. This is a known residual: the nav graph was not fully cleaned at the pivot; the action is unreachable via Plus-tab navigation (since Plus lands on RethinkPlusFragment), but references in `HomeScreenActivity.kt` L819/865/888 (back press / highlight) and `play/website` RethinkPlusFragment L294 (`FragmentHostActivity` pop-back) still reference it. Cleaning the nav graph (removing dead actions/dests or redirecting to `RethinkPlusFragment`) is deferred to executor relay #2b / #2c (not included in this supervisor audit).
+
+---
+
+---
+
+## DECISION-008: DNS POLICY OWNERSHIP — TWO INDEPENDENT SUBSYSTEMS
+
+**Date:** 2026-08-15
+**Status:** FINAL
+**Deciders:** User + Supervisor
+**Origin:** Phase-1D-A3 MITM DNS/Policy Path Audit + A2 STOP-P2 (empirical device proof on Xiaomi Mi A1 A16)
+
+### Context
+
+Phase-1D-A3 was commissioned to answer: **Does LocalHttpsProxy inherit Rethink DNS blocklist policy, or bypass it?**
+
+The initial static-source hypothesis (Phase-1D-A3 relay #1) claimed "LIVE-B" — that `resolveHostSecurely()` bypasses the VPN DNS resolver and connects to real IPs. **This was conclusively disproven by empirical device testing on Mi A1 A16 (serial 3595381c0804).**
+
+Simultaneously, **A2 STOP-P2** proved the manual DNS→MITM bridge (`syncBlocklistToAdblockRules`) is **unimplementable** — selected tag 54 existed, but the implementation expected raw text unavailable from Rethink's compiled DNS artifacts.
+
+### Decision
+
+**Original Rethink DNS subsystem is the sole source-of-truth for DNS blocklist selection and DNS blocking policy.**
+
+**HTTPS Inspection does not expose a separate DNS bridge UI.**
+
+**Rethink DNS blocklists are NOT FilterEngine source material.**
+
+**Advanced Filter Sources are a separate independent subsystem** supplying FilterEngine with dedicated filter syntax (EasyList, AdGuard, Custom URL).
+
+**Legacy `syncBlocklistToAdblockRules()` is obsolete pending source cleanup.**
+
+### Two Independent Systems (Locked Final Architecture)
+
+```
+A. ORIGINAL RETHINK DNS POLICY
+
+Configure
+  └── DNS
+      └── Rethink Blocklists
+          └── Original Rethink DNS policy
+              ├── domain-level DNS blocking
+              ├── sinkhole behavior
+              └── original Rethink DNS list selection
+```
+
+```
+B. ADVANCED FILTERING (NEXT/PLANNED — independent subsystem)
+
+Plus
+  └── Advanced Filtering
+      └── Filter Sources (Manage Sources)
+          ├── EasyList
+          ├── AdGuard Base
+          ├── AdGuard Annoyances
+          └── Custom URL
+              ↓
+          FilterEngine
+              ├── network HTTP rules
+              ├── cosmetic rules
+              ├── scriptlets
+              ├── procedural rules
+              ├── CSP rules
+              └── HTML filtering rules
+```
+
+**There is NO documented source-flow: `Rethink DNS blocklists → FilterEngine`**
+
+### Implementation Consequences
+
+| Area | Change |
+|------|--------|
+| **Plus Tab UI** | NO DNS blocklist section. Sections: HTTPS Inspection, Advanced Filtering, Exclusions only. |
+| **Configure → DNS** | Remains sole DNS blocklist manager (RethinkBlocklistFragment, LocalBlocklistsBottomSheet). |
+| **Plus UX** | No manual DNS→HTTPS bridge, no "Sync Now", no DNS list selector. |
+| **FilterEngine** | Receives rules ONLY from dedicated Advanced Filter Sources (EasyList/AdGuard/Custom URL), NOT from Rethink DNS blocklists. |
+| **Legacy syncBlocklistToAdblockRules** | OBSOLETE pending source cleanup. Not repurposed for advanced filters. |
+| **adblock_rules.txt** | OBSOLETE — no current production role. |
+
+### A2 STOP-P2 (Preserved)
+
+**A2 result (2026-08-14):** `syncBlocklistToAdblockRules()` was implemented but failed — selected tag 54 existed, but implementation expected raw rule text unavailable from Rethink's compiled DNS artifacts. **STOP-P2 issued.** Bridge not completed.
+
+### A3 Sinkhole Inheritance (Preserved)
+
+**A3 result (2026-08-15):** Phase-1D-A3 live device audit (Xiaomi Mi A1 A16) proved domain-level blocking propagates automatically via DNS sinkhole inheritance:
+- `resolveHostSecurely()` uses `ConnectivityManager.activeNetwork.getAllByName(host)`
+- Active network = VPN interface → DNS resolved by Rethink DNS engine
+- Blocked domains → `0.0.0.0` sinkhole → `ECONNREFUSED` → `502 Bad Gateway`
+- Allowed domains → real IPs → `VpnController.protectSocket()` → TLS MITM / Raw TCP
+
+**Manual DNS raw-list bridge is obsolete** — not retained for cosmetic/scriptlet extraction.
+
+### Advanced Filter Source Ownership (NEXT/PLANNED)
+
+Advanced Filter Sources are a **new independent subsystem** NOT yet implemented:
+
+```
+FilterSource (entity/model)
+├── id
+├── name
+├── url
+├── enabled
+├── update metadata
+├── parsed count
+├── unsupported count
+├── invalid count
+└── subtype counts
+
+Storage:
+├── Room → metadata only
+└── Filesystem → raw source content → staged compiled content
+
+Pipeline:
+download.tmp → validate → parse → compatibility stats → compile staged output → sanity checks → atomic swap → FilterEngine reload
+Failure: retain last-known-good active source
+```
+
+**Status: NEXT/PLANNED — not implemented.**
+
+### Verification
+
+- [x] A2 STOP-P2 preserved: bridge failed, stopped, not repurposed
+- [x] A3 sinkhole inheritance verified: 6 live device tests on Mi A1 A16
+- [x] Full logcat captured (6,118 lines)
+- [x] Zero source edits required (architecture already correct)
+- [x] HEAD `4db1b48f6` intact; commit=FORBIDDEN; push=FORBIDDEN
+
+### Review Trigger
+
+Revisit only if:
+- Android API changes break `activeNetwork.getAllByName()` VPN routing behavior
+- A new use case requires domain-level blocking inside MITM *before* DNS resolution
+- Upstream (if ever) adds competing MITM stack with different DNS integration
+- Advanced Filter Source Foundation (Phase-1D-B) is implemented
+
+---
+
+## DECISION-009: ADVANCED FILTER UX OWNERSHIP — SOURCE/CATEGORY-ORIENTED, NOT ENGINE-CAPABILITY-ORIENTED
+
+**Date:** 2026-08-15
+**Status:** FINAL
+**Deciders:** User + Supervisor
+**Origin:** Phase-1D-DOC4 UX taxonomy re-seal; supersedes the legacy Plus-tab "capability toggle" framing
+
+### Context
+
+The pre-DECISION-008 Plus-tab architecture exposed a flat list of rule-family
+"feature" toggles to normal users:
+
+```
+Advanced Filtering
+├── Cosmetic CSS injection toggle
+├── Scriptlet injection toggle
+├── Procedural cosmetic toggle
+├── CSP (Content Security Policy) toggle
+└── HTML filtering toggle
+```
+
+These are **FilterEngine implementation capabilities** (parser rule-type subtypes), not
+intuitive user-facing filter features. Presenting them as normal user toggles causes:
+
+1. **Confusion** — users do not know whether to enable "Cosmetic CSS" for adblocking;
+2. **Mis-aligned mental model** — users think they are choosing techniques rather than
+   filter *content*;
+3. **Category ambiguity** — a single source such as "AdGuard Annoyances" spans multiple
+   rule subtypes, so per-subtype toggles are the wrong decomposition.
+
+### Decision
+
+```
+Advanced Filtering
+│
+├── enabled filter/source summary
+└── Manage Filters
+        ├── Ads
+        ├── Privacy
+        ├── Social
+        ├── Annoyances
+        ├── Security
+        ├── Language-specific
+        ├── Other Filters
+        └── Custom Filters
+```
+
+Plus is **source/category-oriented**, **not** engine-capability-oriented:
+
+1. Normal users select *what filter content* to enable — filter **sources** grouped by
+   purpose (Ads, Privacy, Social, Annoyances, Security, Language-specific, Other Filters,
+   Custom Filters).
+2. Users toggle **sources**, never individual engine rule-type techniques.
+3. **Network / Cosmetic / Scriptlet / Procedural / CSP / HTML handling is automatic**
+   inside `FilterEngine`: it inspects compiled rule subtypes and applies each supported
+   injection path without a per-type user toggle.
+4. **Subtype support and per-source rule-type counts remain available in diagnostics
+   only** (per-source detail screen), so users can audit coverage without gating engine
+   behavior.
+
+> A `category` attached to a `FilterSource` is **organizational metadata**. It does
+> **not** restrict the parser — `FilterSourceCompiler` auto-detects every rule subtype
+> present in the fetched list regardless of category.
+
+### What changed (documentation only)
+
+| Before (retired) | After |
+|------------------|-------|
+| "Cosmetic CSS toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Scriptlet toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Procedural toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "CSP toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "HTML Filtering toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Manage Filter Sources" label | "Manage Filters" (category-oriented) |
+| — | Category taxonomy: Ads / Privacy / Social / Annoyances / Security / Language-specific / Other Filters / Custom Filters |
+
+### What did NOT change
+
+- **DECISION-008 remains intact:** Original Rethink DNS policy and Advanced Filter
+  Sources are two independent subsystems. There is **NO documented source-flow**:
+  `Rethink DNS blocklists → FilterEngine`. The legacy `syncBlocklistToAdblockRules()`
+  bridge is **obsolete pending source cleanup** (A2 STOP-P2) — not repurposed.
+- **FilterEngine sub-engines are unchanged:** `FilterEngine` (network rules),
+  `CosmeticFilter`, `ProceduralFilter`, `ScriptletFilter`, `CspInjector`, `HtmlFilter`
+  all remain; only their *UX exposure* changes (automatic, not user-toggled).
+- **`adblock_rules.txt` ownership** remains EXCLUSIVE to Advanced Filter Source
+  compilation (Documented in docs/DECISIONS.md §DECISION-008 L675,
+  docs/PLAN-FILTER-SOURCE-MANAGER.md §5 NOTE + §Phase 3).
+- **No code behavior changes.** This is a UX/documentation decision only.
+
+### Implementation consequence (Phase-1D-B)
+
+- 1D-B5 (Manage Filters UI) must render the category taxonomy and per-source
+  diagnostics; it must **not** render per-engine-capability toggles as normal controls.
+- `FilterSourcesBottomSheet` / `FilterSourceActivity` expose `Manage Filters`; each
+  source item shows enable/disable (source-level) + subtype badge diagnostics.
+- Any residual `switchCosmeticFilter` / `switchProceduralFilter` / `switchScriptletFilter`
+  / `switchCspFiltering` / `switchHtmlFiltering` flags in the proxy layer are
+  **engine-level / internal** and surfaced only via diagnostics, never as Plus-tab UI.
+
+### Status: GOVERNING
+
+---
+
 **End of Decisions — Append Only**

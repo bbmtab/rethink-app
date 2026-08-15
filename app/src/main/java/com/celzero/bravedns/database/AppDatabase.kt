@@ -50,11 +50,12 @@ import com.celzero.bravedns.util.Constants
         ODoHEndpoint::class,
         RpnProxy::class,
         WgHopMap::class,
+        FilterSource::class,
         SubscriptionStatus::class,
         SubscriptionStateHistory::class,
         CountryConfig::class
     ],
-    version = 30,
+    version = 31,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -105,6 +106,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_27_28)
                 .addMigrations(MIGRATION_28_29)
                 .addMigrations(MIGRATION_29_30)
+                .addMigrations(MIGRATION_30_31)
                 .build()
 
         private val roomCallback: Callback =
@@ -1209,7 +1211,62 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
-        private val MIGRATION_29_30: Migration =
+        private val MIGRATION_30_31: Migration =
+    object : Migration(30, 31) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Non-destructive: create FilterSource table only, no existing data touched.
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS FilterSource (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    name TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    isPreset INTEGER NOT NULL DEFAULT 0,
+                    lastUpdated INTEGER NOT NULL DEFAULT 0,
+                    lastUpdateStatus TEXT NOT NULL DEFAULT 'IDLE',
+                    errorMessage TEXT,
+                    etag TEXT,
+                    lastModified TEXT,
+                    checksum TEXT,
+                    totalLineCount INTEGER NOT NULL DEFAULT 0,
+                    parsedRuleCount INTEGER NOT NULL DEFAULT 0,
+                    unsupportedRuleCount INTEGER NOT NULL DEFAULT 0,
+                    invalidRuleCount INTEGER NOT NULL DEFAULT 0,
+                    networkRuleCount INTEGER NOT NULL DEFAULT 0,
+                    cosmeticRuleCount INTEGER NOT NULL DEFAULT 0,
+                    proceduralRuleCount INTEGER NOT NULL DEFAULT 0,
+                    scriptletRuleCount INTEGER NOT NULL DEFAULT 0,
+                    cspRuleCount INTEGER NOT NULL DEFAULT 0,
+                    htmlFilterRuleCount INTEGER NOT NULL DEFAULT 0,
+                    relativeFilePath TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_category ON FilterSource(category)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_enabled ON FilterSource(enabled)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_url ON FilterSource(url)")
+            // Seed approved presets idempotently (matching FilterSourceCatalog).
+            // Ids 1-7 mirror the runtime catalog; later ensurePresets() is a no-op.
+            db.execSQL(
+                """
+                INSERT OR REPLACE INTO FilterSource
+                    (id, name, url, category, enabled, isPreset, relativeFilePath)
+                VALUES
+                    (1, 'AdGuard Base Filter', 'https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt', '${FilterSourceCategory.ADS}', 1, 1, '${FilterSourceFileStore.relativeFilePathFor(1)}'),
+                    (2, 'Peter Lowe''s Blocklist', 'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext', '${FilterSourceCategory.ADS}', 1, 1, '${FilterSourceFileStore.relativeFilePathFor(2)}'),
+                    (3, 'EasyList', 'https://easylist.to/easylist/easylist.txt', '${FilterSourceCategory.ADS}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(3)}'),
+                    (4, 'AdGuard Tracking Protection', 'https://filters.adtidy.org/extension/ublock/filters/3.txt', '${FilterSourceCategory.PRIVACY}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(4)}'),
+                    (5, 'EasyPrivacy', 'https://easylist.to/easylist/easyprivacy.txt', '${FilterSourceCategory.PRIVACY}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(5)}'),
+                    (6, 'AdGuard Annoyances Filter', 'https://filters.adtidy.org/extension/ublock/filters/14.txt', '${FilterSourceCategory.ANNOYANCES}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(6)}'),
+                    (7, 'Fanboy''s Annoyance List', 'https://easylist.to/easylist/fanboy-annoyance.txt', '${FilterSourceCategory.ANNOYANCES}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(7)}')
+                """.trimIndent()
+            )
+        }
+    }
+
+    private val MIGRATION_29_30: Migration =
             object : Migration(29, 30) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     try {
@@ -1303,6 +1360,8 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun countryConfigDAO(): CountryConfigDAO
 
+    abstract fun filterSourceDao(): FilterSourceDao
+
     fun appInfoRepository() = AppInfoRepository(appInfoDAO())
 
     fun dohEndpointRepository() = DoHEndpointRepository(dohEndpointsDAO())
@@ -1350,4 +1409,4 @@ abstract class AppDatabase : RoomDatabase() {
 
     fun subscriptionStatusRepository() = SubscriptionStatusRepository(subscriptionStatusDao())
 
-}
+    }
