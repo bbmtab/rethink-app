@@ -465,7 +465,255 @@ MANAGE FILTERS
 - Implement streaming HTTP download client with ETag and Last-Modified support.
 - Stream directly to `filesDir/filter_sources/<id>/download.tmp`.
 - SHA-256 calculation and 25 MB size cap enforcement.
-- WorkManager `FilterUpdateWorker` background scheduler (24h, Wi-Fi only).
+- WorkManager `FilterUpdateWorker` background scheduler (24h, Wi-Fi/unmetered only).
+
+### Phase 2 Evidence Contract (G0–G9)
+
+Every gate below must produce a named artifact before B2 is sealed. Artifacts are
+textual logs, Room queries, or file-system evidence — no UI screenshots, no
+device-visible production changes solely for testing.
+
+**Validation boundary (locked, cannot change without reopening B2 scope):**
+```
+B2 validates:
+  - HTTP success (200 or 304)
+  - response size <= 25 MB
+  - non-empty content
+  - not an obvious HTML/error payload
+  - file I/O integrity
+  - SHA-256 checksum matches recorded value
+
+B2 DOES NOT:
+  - parse AdGuard syntax
+  - count parsed/unsupported/invalid rules
+  - classify CSS/scriptlet/CSP/etc.
+  - compile rules
+  - touch FilterEngine
+  - create or modify adblock_rules.txt / adblock_rules.new / filter_rules_cache.bin
+```
+
+Syntax parsing, compilation, and `FilterEngine` integration are **B3** responsibilities.
+
+**Atomic promotion boundary (locked):**
+```
+B2 atomic promotion:
+  filter_sources/source_N/download.tmp  →  filter_sources/source_N/current.txt
+
+B4 atomic activation (NOT B2):
+  adblock_rules.new  →  adblock_rules.txt
+```
+
+B2 must not create, modify, or delete `adblock_rules*` files or `filter_rules_cache.bin`.
+
+---
+
+#### G0 — Seed / Worker Concurrency
+
+`FilterUpdateWorker` MUST NOT call `ensurePresets()` or otherwise create
+`FilterSource` rows. Preset seeding remains a single startup responsibility
+(e.g. `Application.onCreate` or equivalent singleton init).
+
+If implementation requires concurrent preset creation:
+  → STOP-B2-SEED-CONCURRENCY
+  → solve DB-level uniqueness / serialization first.
+
+Worker operates **only** on already-existing `FilterSource` rows.
+
+**Artifact:** `phase1d_b2_g0_concurrency_evidence.txt`
+**Acceptance:** Worker source review confirms no `ensurePresets()` call path from
+worker context; Room row-creation traceable to single startup path only.
+
+---
+
+#### G1 — Conditional 304 Round Trip
+
+Use a deterministic HTTP fixture/server for the protocol gate. Live AdGuard
+servers are not required for this gate.
+
+Sequence:
+1. First request → `200 OK` + `ETag` + `Last-Modified` stored in `FilterSource`
+2. Second request sends:
+   - `If-None-Match: <stored ETag>`
+   - `If-Modified-Since: <stored Last-Modified>`
+3. Server → `304 Not Modified`
+4. `current.txt` unchanged; status records successful non-download round trip
+
+**Artifact:** `phase1d_b2_g1_304_evidence.txt`
+**Acceptance:** Request/response headers captured; `current.txt` SHA-256 before
+and after round trip identical; `lastUpdateStatus` reflects SUCCESS or
+equivalent NOT_MODIFIED semantic.
+
+---
+
+#### G2 — 200 + Streaming SHA-256 + Promotion
+
+1. `200 OK` response streamed to `download.tmp`
+2. SHA-256 computed during stream (digest captured before promotion)
+3. Validation passes: size ≤ 25 MB, non-empty, not HTML error payload
+4. Atomic promotion: `download.tmp` → `current.txt`
+5. `current.txt` SHA-256 computed after promotion; compared to stream digest
+
+Note: `download.tmp` may be absent after promotion. Evidence captures the
+stream digest before promotion and `current.txt` digest after — not a
+post-promotion `download.tmp` hash.
+
+**Artifact:** `phase1d_b2_g2_sha256_evidence.txt`
+**Acceptance:** Two hashes recorded; stream digest == post-promotion hash;
+`FilterSource.checksum` matches; file mtime updated; ETag/Last-Modified stored.
+
+---
+
+#### G3 — 25 MB Hard Cap
+
+Serve a deterministic response > 25 MB from fixture server.
+
+Required behavior:
+- Stream rejected at or before 25 MB boundary
+- `lastUpdateStatus = FAILED`
+- `errorMessage` populated (non-null, meaningful)
+- `download.tmp` removed
+- Existing `current.txt` SHA-256 unchanged
+- `current.txt` mtime unchanged (where filesystem permits)
+
+**Artifact:** `phase1d_b2_g3_cap_evidence.txt`
+**Acceptance:** SHA-256 comparison before/after shows no change;
+`download.tmp` absent; Room row shows FAILED + errorMessage.
+
+---
+
+#### G4 — Invalid Response Preservation
+
+Serve a deterministic HTML/error payload (e.g. `<!DOCTYPE html><html>…`).
+
+Required behavior:
+- Validation rejects response as non-filter-list content
+- `lastUpdateStatus = FAILED`
+- `errorMessage` populated
+- `download.tmp` cleaned
+- Last-known-good `current.txt` untouched
+
+Compare:
+- `current.txt` SHA-256 before rejection attempt
+- `current.txt` SHA-256 after rejection attempt
+- Hashes identical
+
+**Artifact:** `phase1d_b2_g4_error_state_evidence.txt`
+**Acceptance:** SHA-256 invariant; `download.tmp` absent; Room row shows FAILED.
+
+---
+
+#### G5 — HTTP Cache Metadata
+
+Deterministic server returns both `ETag` and `Last-Modified` headers on `200 OK`.
+
+After successful download:
+- `FilterSource.etag` persisted (non-null)
+- `FilterSource.lastModified` persisted (non-null)
+
+Next request:
+- Both conditional headers replayed: `If-None-Match` + `If-Modified-Since`
+
+On `304`:
+- `checksum` / `current.txt` retained (no unnecessary rewrite)
+- mtime of `current.txt` unchanged
+
+**Artifact:** `phase1d_b2_g5_caching_evidence.txt`
+**Acceptance:** Room query shows both fields populated after 200; request log
+shows both headers sent on subsequent call; 304 path confirmed.
+
+---
+
+#### G6 — Failed-State Observability
+
+Any deterministic failure (G3/G4 or network timeout) must produce observable
+state through repository/Room and diagnostic logging:
+
+- `lastUpdateStatus = FAILED`
+- `errorMessage != null` and meaningful (not generic "error")
+- Last successful `checksum` retained in row
+- Last-known-good `current.txt` retained on filesystem
+
+Evidence gathered via:
+- Room/repository query on affected `FilterSource` row
+- Logcat filter on download manager tag
+
+**No Plus UI requirement in B2.** UI surfacing is tested in B5.
+
+**Artifact:** `phase1d_b2_g6_error_observability_evidence.txt`
+**Acceptance:** Room row fields confirmed; logcat shows error at appropriate
+severity (WARN or ERROR, not silent); file content unchanged.
+
+---
+
+#### G7 — Multi-Source Download Isolation
+
+Two `FilterSource` rows active simultaneously:
+
+- **Source A**: valid `200 OK` → validation passes → `current.txt` promoted
+- **Source B**: corrupt / error response → validation fails → `FAILED` → old `current.txt` retained
+
+Required invariants:
+- A's success does not affect B's state
+- B's failure does not overwrite A's `current.txt`
+- Strict: `adblock_rules.txt` untouched; `adblock_rules.new` absent or untouched
+- `FilterSourceCompiler` NOT invoked as part of B2 download behavior
+
+**Artifact:** `phase1d_b2_g7_multisource_evidence.txt`
+**Acceptance:** SHA-256 of both `current.txt` files before and after; only A
+changed; B unchanged; no `adblock_rules*` files modified.
+
+---
+
+#### G8 — Physical Device Live Download Smoke
+
+Device: Xiaomi Mi A1 / tissot / Android 16 (`3595381c0804`)
+
+Use at least one real approved preset source (AdGuard Base Filter or Peter Lowe).
+
+Prove:
+- Actual network request issued (not stub/mock)
+- Streaming download observed
+- Successful validation
+- `current.txt` exists on device filesystem
+- Room metadata updated (checksum, lastUpdated, lastUpdateStatus = SUCCESS)
+- Zero FATAL crashes
+- Zero OOM kills
+- Zero SQLite / Room errors in logcat
+
+If `Update All` is implemented at repository/worker level: test one complete
+update-all cycle. Do **not** add temporary production UI solely to trigger a
+manual test — use adb shell `am` or worker introspection.
+
+**Artifact:** `phase1d_b2_g8_device_evidence.txt`
+**Acceptance:** Logcat filtered to `FilterSource` / `FilterUpdate` tags;
+`adb shell` Room query; file system listing of `filesDir/filter_sources/`.
+
+---
+
+#### G9 — WorkManager Contract
+
+`FilterUpdateWorker` uses `PeriodicWorkRequest` with:
+- Interval: 24 hours
+- Network constraint: `NetworkType.UNMETERED` (Wi-Fi/unmetered semantics chosen
+  by project — document which literal is used)
+
+Required proof:
+- `PeriodicWorkRequest` constructed with intended 24h interval
+- Unique work — duplicate schedule attempts do not create overlapping workers
+- Worker processes **only** existing enabled `FilterSource` rows
+- Worker does **not** call `ensurePresets()` or create seed rows
+- Worker failure does **not** delete last-known-good files or corrupt `current.txt`
+
+Do not wait 24 hours physically. Use WorkManager test / introspection mechanism
+(e.g. `WorkManagerTestInitHelper`, `WorkManager.getWorkInfosByTagLiveData`,
+or equivalent) to verify schedule and constraints.
+
+**Artifact:** `phase1d_b2_g9_worker_evidence.txt`
+**Acceptance:** Worker source review + test-run output; 24h interval confirmed
+in `PeriodicWorkRequest` builder call; `UNMETERED` constraint literal named;
+no preset-seeding path from worker context.
+
+---
 
 ### Phase 3: Streaming Ingestion & Atomic Compiler (`FilterSourceCompiler`)
 - Implement streaming line-by-line syntax classifier and per-source diagnostic counter.
@@ -546,6 +794,71 @@ DECISION-010 must be sealed before B2 and B4.5 implementation begins.
 - Low-RAM profiling (ensure compilation of AdGuard Base + Peter Lowe never exceeds 35 MB transient heap).
 - Network tests verifying 304 Not Modified conditional updates.
 - Verify fallback safety (corrupt download leaves active rules untouched).
+
+---
+
+### B2 / B3 / B4 Ownership Boundary
+
+This boundary exists to prevent evidence-gate leakage during phased
+implementation. Each phase's seal depends on **its own** gates only.
+
+```
+B2  Downloader + Validation
+    ├── HTTP transport: conditional GET, streaming, size cap
+    ├── File lifecycle: download.tmp → current.txt per source
+    ├── Checksum: SHA-256 computed during stream
+    ├── Cache metadata: ETag / Last-Modified persistence
+    ├── Error handling: FAILED state, errorMessage, file preservation
+    ├── WorkManager: 24h / UNMETERED worker (no seed path)
+    ├── Evidence: G0–G9 only
+    └── STRICTLY DOES NOT:
+        ├── parse filter syntax
+        ├── compile rules
+        ├── create adblock_rules.txt / adblock_rules.new / filter_rules_cache.bin
+        ├── invoke FilterSourceCompiler
+        └── surface Plus-tab UI (B5)
+
+B3  Parser / Compiler + Diagnostics
+    ├── Streaming line-by-line syntax classifier
+    ├── Per-source diagnostics (parsed / unsupported / invalid / subtype counts)
+    ├── Atomic staged compilation: adblock_rules.new → adblock_rules.txt
+    ├── Binary cache: filter_rules_cache.bin
+    └── Hot-reload trigger: BraveVPNService.reloadAdblockRules()
+
+B4  Atomic Activation + Rollback
+    ├── adblock_rules.new → adblock_rules.txt atomic rename (B3 delivers staged file)
+    ├── Rollback on compilation failure (retain last-known-good)
+    └── B2 download promotion is a separate, independent atomic step
+        (filter_sources/source_N/download.tmp → current.txt — NOT adblock_rules)
+
+B5  Manage Filters + Exclusions UI
+    ├── Plus-tab category-oriented source selector
+    ├── Per-source diagnostics display
+    ├── Error state surfacing (errorMessage → user-visible)
+    └── Manual / scheduled "Update All" trigger UI
+```
+
+**Key rule:** An artifact named in G1–G9 that touches `adblock_rules*` or
+`filter_rules_cache.bin` is a B3/B4 leak — B2 seal fails on that finding.
+
+---
+
+### Resource Host Envelope
+
+Build and test resource limits are enforced via Gradle CLI flags or test runner
+configuration. `gradle.properties` is **not modified** for these limits.
+
+```
+Normal build / compile:
+  --max-workers=3
+
+Focused / heavy unit-test suites (full-suite with FilterSource tests):
+  --max-workers=2
+```
+
+These are operational constraints, not architectural decisions. They may be
+adjusted based on device evidence (Mi A1 A16, 3 GB RAM) without reopening any
+decision document.
 
 ---
 
