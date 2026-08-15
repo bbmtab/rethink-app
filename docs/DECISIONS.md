@@ -837,4 +837,457 @@ Plus is **source/category-oriented**, **not** engine-capability-oriented:
 
 ---
 
+## DECISION-010: HTTPS INSPECTION ELIGIBILITY AND BYPASS POLICY
+
+**Date:** 2026-08-15
+**Status:** GOVERNING
+**Deciders:** User + Supervisor
+**Origin:** PHASE-1D-DOC5 baseline `5ec97f93` — documentation-only relay; no implementation committed.
+
+### Context
+
+HTTPS Inspection requires a per-connection eligibility decision before the MITM proxy
+accepts a `CONNECT` tunnel. The decision interacts with:
+
+- whether the originating application is a browser the project wishes to inspect,
+- whether the user has explicitly opted an application in or out,
+- whether the connection targets a domain or (application, port) tuple that must
+  never be intercepted for safety or operational reasons,
+- whether the body of an already-established MITM session is large enough to
+  justify downgrading from full modification to stream-only pass-through.
+
+Rethink adapts concepts from the ADBye project
+(`BypassManager` / `uidAllowlist` / domain-suffix and port bypass /
+resource-threshold logic). ADBye is a **design reference only**:
+
+```
+ADBye BypassManager
+        ↓
+adapt concepts
+        ↓
+Rethink policy architecture
+
+NOT:
+copy class unchanged
+```
+
+ADBye targets PCAPdroid / JNI capture; Rethink uses a userspace HTTP proxy
+injected via `VpnService.Builder.setHttpProxy`. The transport assumptions are
+different, so any code reuse requires architectural adaptation, not direct copy.
+
+### Decision
+
+Eligibility for HTTPS Inspection is resolved by `InspectionPolicyEngine` before
+the proxy accepts or rejects a `CONNECT` tunnel. The engine is the **sole
+authority** for MITM/bypass decisions; no other component (UI, VPN service,
+connection tracker) may bypass it.
+
+#### Donor architecture
+
+- ADBye `BypassManager` is a design/source reference demonstrating hard app
+  bypass, HTTPS exemptions, domain-suffix bypass, protected ports, and resource
+  thresholds — all concepts retained in Rethink's policy model.
+- ADBye implementation details (PCAPdroid/JNI, `uidAllowlist` mixing names and
+  UIDs, automatic conversion of domain bypasses to AdGuard exception rules, and
+  global port bypass) are **rejected**; see §4, §6, §7 for each rejection.
+
+#### Known browser default policy
+
+A **maintained hardcoded package registry** identifies known browsers. An entry
+is added only after the maintainer has verified both the production package ID
+and the branding correctness of the application.
+
+```
+KNOWN BROWSER
+├── maintained hardcoded package registry
+├── if installed → HTTPS Inspection ON by default
+└── primary / default fast deterministic path
+```
+
+Package names such as `Chrome/Brave/Firefox/Edge` are cited as examples;
+authoritative package IDs are recorded in the `InspectionPolicyEngine` registry
+(or its backing data) at implementation time and verified against the Google
+Play production signatures.
+
+**Do not invent or hardcode package names in DECISION-010 without that
+verification.**
+
+#### Dynamic browser fallback
+
+Browsers not in the known registry are handled via dynamic discovery. This
+fallback is **best-effort** only: results depend on Android **package visibility**
+(API 30+), and apps without appropriate `<queries>` declarations in their
+manifest may not appear even when installed. Known-registry browsers are not
+affected by an empty discovery result.
+
+```
+DYNAMIC BROWSER DISCOVERY
+├── fallback for browser not present in known registry
+├── detected through Android browser capability signals
+└── OFF by default until user enables it
+```
+
+**Primary discovery signal:** query `PackageManager` for activities handling
+`ACTION_VIEW` + `CATEGORY_BROWSABLE` with an `https://` URI scheme.
+
+**Supplementary signals** (where available, in addition to the primary query):
+- `ROLE_BROWSER` role (Android API 29+ via `RoleManager`)
+- `CATEGORY_APP_BROWSER` (secondary signal only; Android documentation warns
+  against using this category alone as a primary intent-filter key — it is
+  used here only to supplement the `ACTION_VIEW` + `CATEGORY_BROWSABLE` query)
+
+Only browsers are eligible for dynamic discovery. Non-browser applications are
+never auto-discovered for HTTPS inspection.
+
+#### Other applications
+
+```
+OTHER APPLICATIONS
+├── OFF by default
+└── explicit user opt-in required
+```
+
+#### Policy precedence
+
+Decisions are resolved in the following order. **Hard bypass always beats user
+inclusion.**
+
+```
+connection
+    ↓
+SYSTEM HARD BYPASS?
+    YES → BYPASS_SYSTEM
+    ↓ NO
+
+USER APP EXCLUSION?
+    YES → BYPASS_USER
+    ↓ NO
+
+PROTECTED DOMAIN?
+    YES → BYPASS_DOMAIN
+    ↓ NO
+
+PROTECTED APP + PORT?
+    YES → BYPASS_APP_PORT
+    ↓ NO
+
+KNOWN BROWSER INSTALLED?
+    YES → MITM_KNOWN_BROWSER
+    ↓ NO
+
+USER EXPLICIT APP INCLUDE?
+    YES → MITM_USER_APP
+    ↓ NO
+
+DYNAMICALLY DETECTED BROWSER
+(ACTION_VIEW + CATEGORY_BROWSABLE + https;
+ CATEGORY_APP_BROWSER/ROLE_BROWSER supplementary)
+AND USER ENABLED?
+    YES → MITM_DYNAMIC_BROWSER
+    ↓ NO
+
+BYPASS (no-match default)
+```
+
+#### Package vs UID model
+
+The ADBye `uidAllowlist` pattern mixes package names and UID strings in one
+collection. Rethink **rejects this ambiguity**:
+
+```
+Set<String> uidAllowlist           ← REJECTED (ambiguous, ADBye pattern)
+
+Rethink target model:
+
+protectedPackages : package names
+
+protectedUids :
+    only if implementation proves a UID-level policy is actually needed
+```
+
+A collection of package-name strings must never be named `uidAllowlist`. If a
+UID-level override is eventually needed (e.g., shared-UID application groups),
+`protectedUids` is introduced as a separate typed set with its own resolution
+rules — not by conflating the two namespaces.
+
+#### System hard bypass
+
+System hard bypass is an **internal safety layer for critical services**. It
+operates outside the ordinary user-editable exclusion list.
+
+Conceptual examples inherited from donor research (Play Services / Play Store,
+GSF, IMS) are research context only. The final Rethink registry **must be
+audited and validated** before implementation; entries must not be copied blindly
+from ADBye or any other source.
+
+```
+SYSTEM HARD BYPASS
+≠ normal user exclusion
+```
+
+Hard-bypass entries are not surfaced in the standard exclusions UI and are not
+removable by the user without root or developer intervention.
+
+#### Domain bypass is not a FilterEngine whitelist
+
+HTTPS MITM bypass and adblock exception rules are **mechanistically distinct**:
+
+```
+HTTPS MITM bypass       ≠    adblock exception rule
+```
+
+A domain that is HTTPS-bypassed must **not** automatically generate an AdGuard
+exception rule (`@@||domain^`). ADBye currently couples these two concerns by
+exporting its domain bypasses as AdGuard exception rules; Rethink must **not
+inherit that coupling**.
+
+```
+InspectionPolicy
+    → whether TLS is MITMed or bypassed
+
+FilterEngine
+    → whether request/content is blocked or modified
+```
+
+These subsystems operate independently. A domain may be HTTPS-bypassed while
+still being blocked at the DNS or FilterEngine level, and vice versa.
+
+#### App + port protection
+
+ADBye uses global port bypass (`port 5228 → bypass every application`). Rethink
+rejects global port trust:
+
+```
+port 5228 → bypass every application     ← REJECTED (global, unscoped)
+```
+
+Rethink policy is **scoped to (application, destination port)**:
+
+```
+critical push service
++   5228 / 5229 / 5230
+→  protected (app + port) connection
+```
+
+The tuple `(protectedPackage, destinationPort)` is the minimum resolvable unit
+for port-level protection. Global port bypass is not permitted because it trusts
+all applications on that port regardless of origin.
+
+#### Resource protection
+
+Resource protection governs behavior after a MITM tunnel is already established
+and a large body is detected in-flight.
+
+```
+TLS MITM already established
+        ↓
+large body detected
+        ↓
+DO NOT switch to raw TCP
+        ↓
+degrade expensive body processing
+        ↓
+STREAM_ONLY
+```
+
+| Body size | Decision | Processing |
+|-----------|----------|------------|
+| Small (within rewrite-size limit) | `MITM_FULL` | Full parsing, DOM injection, modification |
+| Large (exceeds rewrite-size or DOM-processing limit) | `MITM_STREAM_ONLY` | TLS proxy remains; no whole-body buffering; no DOM/Jsoup processing |
+
+**Locking the following as prohibited:**
+
+```
+MITM TLS
+→ threshold reached
+→ reconnect same flow as raw TLS
+```
+
+Switching from MITM to raw TCP mid-flow is forbidden. Once the proxy has
+accepted the `CONNECT` and completed the TLS handshake with both client and
+upstream, the TLS tunnel is maintained for the lifetime of the connection. Only
+the *processing depth* is degraded. This preserves the integrity of the MITM
+session and prevents observable reconnect artifacts that some clients would
+treat as a MITM downgrade attack.
+
+#### Decision / result model
+
+Conceptual decision reasons used for diagnostics and device evidence. Exact
+enumeration names may differ in implementation.
+
+```
+BYPASS_SYSTEM
+BYPASS_USER
+BYPASS_DOMAIN
+BYPASS_APP_PORT
+
+MITM_KNOWN_BROWSER
+MITM_USER_APP
+MITM_DYNAMIC_BROWSER
+
+MITM_STREAM_ONLY
+```
+
+These reason codes are diagnostic identifiers, not public API contracts.
+
+#### Target component architecture
+
+**Pre-MITM decision — `InspectionPolicyEngine`**
+
+```
+                  CONNECTION
+                       ↓
+               app / UID / host / port
+                       ↓
+            InspectionPolicyEngine
+             /                 \
+            ↓                   ↓
+        BYPASS                  MITM
+                                      ↓
+                               TLS interception
+                                      ↓
+                                 HTTP response
+                                      ↓
+                            ResourceProtectionPolicy
+                                 /             \
+                                ↓               ↓
+                          MITM_FULL       MITM_STREAM_ONLY
+                                \             /
+                                 ↓           ↓
+                           FilterEngine
+                   (where applicable)
+```
+
+`InspectionPolicyEngine` (and its three sub-policies) resolves BYPASS vs MITM
+using only data available before `CONNECT`: package/UID, host, port. It has no
+visibility into response body size and must not attempt to use it.
+
+`ResourceProtectionPolicy` acts only after MITM is established and the HTTP
+response is available. It downgrades `MITM_FULL` → `MITM_STREAM_ONLY` based on
+body size. It never produces a BYPASS decision. `MITM_STREAM_ONLY` is a
+processing mode, not an initial eligibility result.
+
+Responsibility boundaries:
+
+| Component | Scope |
+|-----------|-------|
+| `HttpsInspectionPolicy` | App eligibility: known registry, dynamic discovery, user includes, user exclusions |
+| `SystemBypassPolicy` | Internal safety: protected packages, optional UIDs, protected domains, protected (app, port) tuples |
+| `ResourceProtectionPolicy` | Post-MITM only: body-size thresholds; downgrades MITM_FULL → MITM_STREAM_ONLY. Never produces BYPASS decisions. |
+| `InspectionPolicyEngine` | Pre-MITM orchestrator: resolves precedence, returns (BYPASS / MITM, reason). Must not consult body size. |
+
+`InspectionPolicyEngine` is called before the proxy accepts `CONNECT`. It does
+not modify `FilterEngine` state; it only decides MITM vs bypass. FilterEngine
+receives flows that have already passed the MITM gate.
+
+#### UX architecture consequence
+
+The Plus tab HTTPS Inspection screen exposes the following user controls:
+
+```
+PLUS
+├── HTTPS Inspection
+│   ├── master toggle
+│   ├── CA status badge (✅ INSTALLED / ⚠️ NOT INSTALLED)
+│   ├── Install / Re-install CA
+│   ├── Save / Export CA
+│   └── Apps
+│       ├── Known browsers      default ON
+│       ├── Detected browsers   default OFF if not in known registry
+│       └── Other apps          default OFF, explicit opt-in
+│
+├── Advanced Filtering
+│   └── Manage Filters
+│
+└── Exclusions
+    ├── App exclusions (user-editable, BYPASS_USER)
+    └── Domain exclusions (user-editable, BYPASS_DOMAIN)
+```
+
+System hard bypass entries are **internal safety only**. They are not surfaced
+as ordinary user-editable exclusions and are not mixed with `BYPASS_USER`
+entries.
+
+Detected browsers (dynamic fallback) appear in the Apps list but start in the
+OFF state. The user flips each one to ON individually; there is no bulk-enable
+for the entire detected-browser category.
+
+#### Roadmap
+
+```
+B1  Data / storage foundation              SEALED  √
+B2  Downloader + validation                PENDING (blocked by DECISION-010)
+B3  Parser / compiler + diagnostics        PENDING
+B4  Atomic activation + rollback           PENDING
+
+B4.5 HTTPS Inspection Policy               ← DOC5 / DECISION-010 governs this
+     ├── known-browser registry
+     ├── dynamic discovery fallback
+     ├── per-app opt-in
+     ├── user exclusions (app + domain)
+     ├── hard system bypass
+     ├── protected domain / app-port policy
+     └── resource protection
+
+B5  Manage Filters + Exclusions UI         PENDING
+B6  Full physical-device verification      PENDING
+```
+
+DECISION-010 must be sealed **before** B2 implementation starts. B4.5
+implementation must be scoped to the architecture documented here; no component
+crosses the boundary defined in Target component architecture without a new
+decision.
+
+### What changed (documentation only)
+
+- DECISION-010 appended to `docs/DECISIONS.md`.
+- `docs/ARCHITECTURE-MAPPING.md` updated to insert `InspectionPolicyEngine` boundary
+  before the LocalHttpsProxy MITM section.
+- `docs/UNIFIED_UI_ARCHITECTURE.md` updated to reflect known-browser default-ON /
+  detected-browser default-OFF / other-app default-OFF apps list under Plus →
+  HTTPS Inspection.
+- `docs/PLAN-FILTER-SOURCE-MANAGER.md` updated to reference B4.5 as the HTTPS
+  inspection policy phase in the roadmap.
+- `docs/PLAN-HTTPS-INSPECTION-POLICY.md` created as the dedicated authority
+  document for this subsystem, preventing PLAN-FILTER-SOURCE-MANAGER from
+  becoming a dumping ground for HTTPS policy details.
+
+### What did NOT change
+
+- No Kotlin, Java, or XML source files were modified.
+- No Room migration was added.
+- No `gradle` command was run.
+- No device verification was performed.
+- No commit or push occurred.
+- B2 (Downloader + Validation) was not started.
+- B4.5 implementation was not started.
+- `gradle.properties` was not touched.
+
+### Implementation consequence
+
+DECISION-010 is an architecture lock for Phase-1D-B4.5. B2 and B4.5
+implementations must each include a boundary-review step verifying that their
+code respects the precedence order, the package-name model, the system-bypass
+isolation, the domain-vs-FilterEngine separation, the scoped port policy, and
+the resource-protection rules documented here.
+
+### Review Trigger
+
+Re-open this decision if any of the following occur before implementation:
+
+- A new application type (non-browser) is proposed for default-ON inspection.
+- A request is made to expose system hard-bypass entries in the user-facing
+  exclusions UI.
+- A request is made to merge domain MITM bypass with FilterEngine exception rules.
+- An implementation proposes switching from MITM to raw TCP mid-flow for any
+  reason.
+- Any change to the locked semantics: large body → MITM_STREAM_ONLY → never
+  raw-TCP mid-flow.
+
+**Threshold note:** Numerical byte thresholds (rewrite-size, DOM-processing) are
+implementation-tunable by B4.5 from device and performance evidence without
+reopening DECISION-010. Adjusted values must preserve the locked semantics above.
+
+---
+
 **End of Decisions — Append Only**

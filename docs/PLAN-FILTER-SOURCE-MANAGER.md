@@ -494,6 +494,53 @@ MANAGE FILTERS
   gating flags, if any remain in the proxy layer, are internal/engine-level and surfaced
   only via diagnostics, never as normal user toggles.
 
+---
+
+### B4.5 HTTPS Inspection Policy — Architecture Layer (documented in DECISION-010)
+
+Architecture lock only; implementation deferred to B4.5 implementation phase.
+
+| Sub-feature | Scope | Status |
+|-------------|-------|--------|
+| Known browser registry | Maintained hardcoded package IDs; default ON when installed | DOCUMENTED |
+| Dynamic browser fallback | `ACTION_VIEW` + `CATEGORY_BROWSABLE` + `https://` query (supplementary: `ROLE_BROWSER`, `CATEGORY_APP_BROWSER`). Best-effort, depends on package visibility. Default OFF. | DOCUMENTED |
+| Per-app opt-in | Other apps: default OFF, user opts in individually | DOCUMENTED |
+| System hard bypass | Internal safety list (Play Services / GSF / IMS …); not user-editable | DOCUMENTED |
+| Domain + app-port protection | Scoped, not global-port | DOCUMENTED |
+| Resource protection | Stream-only fallback at body-size threshold; raw-TCP mid-flow switch prohibited | DOCUMENTED |
+
+**Architecture boundary (DECISION-010):** `InspectionPolicyEngine` resolves MITM
+vs bypass before `CONNECT` is accepted. It delegates to `HttpsInspectionPolicy`,
+`SystemBypassPolicy`, and `ResourceProtectionPolicy`. Returns a single
+BYPASS/MITM decision with reason code using only metadata available pre-CONNECT
+(app/UID, host, port).
+
+`ResourceProtectionPolicy` is a separate post-MITM stage: it downgrades
+`MITM_FULL` → `MITM_STREAM_ONLY` based on response body size and never produces
+a BYPASS result.
+
+Threshold ownership: byte thresholds (rewrite-size, DOM-processing) are
+**B4.5 implementation parameters**, not an architecture decision. Initial values
+are unlocked; numerical tuning by B4.5 from device/performance evidence does not
+require reopening DECISION-010, provided the locked semantics (large body →
+STREAM_ONLY, never raw-TCP mid-flow) are preserved.
+
+**Roadmap order:**
+
+```
+B1  Data / storage foundation              SEALED  √
+B2  Downloader + validation                PENDING (blocked until DECISION-010 sealed)
+B3  Parser / compiler + diagnostics        PENDING
+B4  Atomic activation + rollback           PENDING
+B4.5  HTTPS Inspection Policy              ← DOC5 governs this (this section)
+B5  Manage Filters + Exclusions UI         PENDING
+B6  Full physical-device verification      PENDING
+```
+
+DECISION-010 must be sealed before B2 and B4.5 implementation begins.
+
+---
+
 ### Phase 5: Testing, Memory Profiling & Device Verification
 - Device verification on Mi A1 A16 (`3595381c0804`).
 - Low-RAM profiling (ensure compilation of AdGuard Base + Peter Lowe never exceeds 35 MB transient heap).

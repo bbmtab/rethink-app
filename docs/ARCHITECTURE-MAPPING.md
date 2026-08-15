@@ -109,6 +109,86 @@ graph TD
 - **Establishment of VPN**: `establishVpn` is called in [BraveVPNService.kt](file:///L:/test-code/rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3612-L3660) which returns the file descriptor (`tunFd`).
 - **L3/L4 Proxying**: The file descriptor is passed to [GoVpnAdapter.kt](file:///L:/test-code/rethink-app/app/src/main/java/com/celzero/bravedns/net/go/GoVpnAdapter.kt#L2882) where `Intra.connect` initializes the Go `firestack` backend.
 
+### A+. InspectionPolicyEngine Boundary (DECISION-010)
+
+`InspectionPolicyEngine` is the **sole authority** for MITM/bypass decisions
+before any `CONNECT` tunnel is accepted. No downstream component may bypass its
+result.
+
+**Two-stage architecture — policy resolution (pre-MITM) and resource
+protection (post-MITM) are separate stages:**
+
+```
+PRE-MITM POLICY RESOLUTION
+═══════════════════════════
+
+         CONNECTION
+              ↓
+       app / UID / host / port
+              ↓
+    InspectionPolicyEngine
+       /            \
+      ↓              ↓
+   BYPASS           MITM
+                               ↓
+                          TLS interception
+                               ↓
+                         HTTP response
+                               ↓
+
+POST-MITM RESOURCE RESOLUTION
+══════════════════════════════
+
+                  ResourceProtectionPolicy
+                       /                \
+                      ↓                  ↓
+                MITM_FULL         MITM_STREAM_ONLY
+                      \                /
+                       ↓              ↓
+                    FilterEngine
+            (where applicable)
+```
+
+`InspectionPolicyEngine` (and its three sub-policies) resolves BYPASS vs MITM
+using only data available before `CONNECT`: package/UID, host, port. It does
+not inspect response body size. `ResourceProtectionPolicy` acts only after MITM
+is established and the HTTP response is available; it downgrades `MITM_FULL` →
+`MITM_STREAM_ONLY` and never produces a BYPASS decision.
+
+Responsibility boundaries (DECISION-010):
+
+| Component | Scope |
+|-----------|-------|
+| `HttpsInspectionPolicy` | App eligibility: known registry, dynamic discovery, user includes, user exclusions |
+| `SystemBypassPolicy` | Internal safety: protected packages, optional UIDs, protected domains, protected (app, port) tuples |
+| `ResourceProtectionPolicy` | Post-MITM only: body-size thresholds; downgrades MITM_FULL → MITM_STREAM_ONLY. Never produces BYPASS decisions. |
+| `InspectionPolicyEngine` | Pre-MITM orchestrator: resolves precedence, returns (BYPASS | MITM, reason). Must not consult body size. |
+
+**Precedence order (resolved top-down, hard bypass always wins):**
+1. `SYSTEM_HARD_BYPASS` → `BYPASS_SYSTEM`
+2. `USER_APP_EXCLUSION` → `BYPASS_USER`
+3. `PROTECTED_DOMAIN` → `BYPASS_DOMAIN`
+4. `PROTECTED_APP_AND_PORT` → `BYPASS_APP_PORT`
+5. `KNOWN_BROWSER_INSTALLED` → `MITM_KNOWN_BROWSER`
+6. `USER_APP_INCLUDE` → `MITM_USER_APP`
+7. `DYNAMIC_BROWSER + USER_ENABLED` → `MITM_DYNAMIC_BROWSER`
+   (discovery signals: `ACTION_VIEW` + `CATEGORY_BROWSABLE` + `https://` URI
+   — `CATEGORY_APP_BROWSER` and `ROLE_BROWSER` are supplementary only)
+8. No match → `BYPASS`
+
+**Key invariants:**
+- MITM bypass and FilterEngine rules are independent (DECISION-010 §6). A
+  HTTPS-bypassed domain does **not** automatically become a FilterEngine exception rule.
+- `InspectionPolicyEngine` runs pre-MITM using only connection metadata
+  (app/UID, host, port). It does not inspect response body size.
+- `ResourceProtectionPolicy` runs post-MITM. It downgrades `MITM_FULL` →
+  `MITM_STREAM_ONLY` based on body size but never produces a BYPASS decision.
+- Switching from MITM to raw TCP mid-flow is **prohibited**.
+- System hard-bypass entries are internal safety only; they are **not** surfaced
+  as ordinary user-editable exclusions.
+- Dynamic browser discovery is best-effort: results depend on Android package
+  visibility. Known-registry browsers are not affected by an empty discovery result.
+
 ### B. TCP Connection Injection Point
 To avoid interfering with the heavy Cgo-compiled packet capture, we inject a system HTTP/HTTPS proxy.
 - **Proxy Configuration**:

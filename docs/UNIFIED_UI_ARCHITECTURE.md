@@ -64,7 +64,10 @@ Plus (bottom nav tab) → RethinkPlusFragment (full flavor, hoisted fdroid→ful
 │   ├── Master toggle (persist: httpsInspectionEnabled)
 │   ├── CA status badge (✅ INSTALLED / ⚠️ NOT INSTALLED)
 │   ├── CA actions: Install / Re-install / Export to Downloads
-│   └── Per-app HTTPS filter list → `HttpsFilteredAppsFragment` pattern
+│   └── Apps (three-tier eligibility — DECISION-010)
+        ├── Known browsers      default ON  (maintained hardcoded package registry)
+        ├── Detected browsers   default OFF (dynamic fallback; user enables individually)
+        └── Other apps          default OFF (explicit user opt-in required)
 │
 ├── 2. Advanced Filtering
 │   ├── Enabled filter source summary — e.g. `2 lists enabled • 48,210 rules • updated 1h ago`
