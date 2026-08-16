@@ -53,6 +53,36 @@ interface FilterSourceDao {
     @Query("UPDATE FilterSource SET lastUpdateStatus = :status, errorMessage = :error WHERE id = :id")
     suspend fun updateStatus(id: Int, status: String, error: String?)
 
+    @Query(
+        "UPDATE FilterSource SET lastUpdateStatus = :status, errorMessage = :errorMessage, etag = :etag, lastModified = :lastModified, checksum = :checksum, lastUpdated = :lastUpdated WHERE id = :id"
+    )
+    suspend fun updateDownloadSuccess(
+        id: Int,
+        status: String,
+        errorMessage: String?,
+        etag: String?,
+        lastModified: String?,
+        checksum: String?,
+        lastUpdated: Long
+    )
+
+    @Query(
+        "UPDATE FilterSource SET lastUpdateStatus = :status, errorMessage = :errorMessage, etag = :etag, lastModified = :lastModified, lastUpdated = :lastUpdated WHERE id = :id"
+    )
+    suspend fun updateDownloadNotModified(
+        id: Int,
+        status: String,
+        errorMessage: String?,
+        etag: String?,
+        lastModified: String?,
+        lastUpdated: Long
+    )
+
+    @Query(
+        "UPDATE FilterSource SET lastUpdateStatus = :status, errorMessage = :errorMessage WHERE id = :id"
+    )
+    suspend fun updateDownloadFailure(id: Int, status: String, errorMessage: String?)
+
     // ---- B1-only helpers -------------------------------------------------------
     // Preset identity by approved URL so seeding is idempotent by stable property, not by name.
     @Query("SELECT * FROM FilterSource WHERE url = :url LIMIT 1")

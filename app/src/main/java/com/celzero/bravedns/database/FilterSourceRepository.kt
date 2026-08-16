@@ -130,6 +130,51 @@ class FilterSourceRepository(
         filterSourceDao.updateStatus(id, status, error)
     }
 
+    suspend fun updateDownloadSuccess(
+        id: Int,
+        etag: String?,
+        lastModified: String?,
+        checksum: String?,
+        lastUpdated: Long = System.currentTimeMillis()
+    ) {
+        filterSourceDao.updateDownloadSuccess(
+            id = id,
+            status = FilterSourceStatus.SUCCESS,
+            errorMessage = null,
+            etag = etag,
+            lastModified = lastModified,
+            checksum = checksum,
+            lastUpdated = lastUpdated
+        )
+    }
+
+    suspend fun updateDownloadNotModified(
+        id: Int,
+        etag: String?,
+        lastModified: String?,
+        lastUpdated: Long = System.currentTimeMillis()
+    ) {
+        filterSourceDao.updateDownloadNotModified(
+            id = id,
+            status = FilterSourceStatus.SUCCESS,
+            errorMessage = null,
+            etag = etag,
+            lastModified = lastModified,
+            lastUpdated = lastUpdated
+        )
+    }
+
+    suspend fun updateDownloadFailure(id: Int, errorMessage: String) {
+        filterSourceDao.updateDownloadFailure(
+            id = id,
+            status = FilterSourceStatus.FAILED,
+            errorMessage = errorMessage
+        )
+    }
+
+    /** Expose the underlying [FilterSourceFileStore] for file lifecycle coordination. */
+    fun getFileStore(): FilterSourceFileStore = fileStore
+
     /**
      * Idempotently ensure the approved preset catalog exists in Room. Identity is the approved
      * URL ([FilterSourceCatalog.APPROVED_URLS]); safe to call any number of times without

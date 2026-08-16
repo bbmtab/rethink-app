@@ -82,4 +82,18 @@ class ScheduleManager(val context: Context) {
                 refreshAppsJob
             )
     }
+
+    /**
+     * Schedule periodic background refresh of enabled Advanced Filter Sources (24h unmetered).
+     */
+    fun scheduleFilterUpdateJob() {
+        FilterUpdateWorker.schedule(context)
+    }
+
+    /**
+     * Cancel periodic background refresh of Advanced Filter Sources.
+     */
+    fun cancelFilterUpdateJob() {
+        FilterUpdateWorker.cancel(context)
+    }
 }

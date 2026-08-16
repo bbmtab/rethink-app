@@ -47,8 +47,9 @@ object DatabaseModule {
         single { get<AppDatabase>().rpnProxyDao() }
         single { get<AppDatabase>().wgHopMapDao() }
         single { get<AppDatabase>().subscriptionStatusDao() }
-        single { get<AppDatabase>().subscriptionStateHistoryDao()}
+        single { get<AppDatabase>().subscriptionStateHistoryDao() }
         single { get<AppDatabase>().countryConfigDAO() }
+        single { get<AppDatabase>().filterSourceDao() }
 
         single { get<LogDatabase>().connectionTrackerDAO() }
         single { get<LogDatabase>().dnsLogDAO() }
@@ -85,6 +86,9 @@ object DatabaseModule {
         single { get<AppDatabase>().subscriptionStatusRepository() }
         single { get<AppDatabase>().subscriptionStateHistoryDao() }
         single { get<AppDatabase>().countryConfigRepository() }
+        single { FilterSourceFileStore(androidContext()) }
+        single { FilterSourceRepository(get(), get()) }
+        single { com.celzero.bravedns.download.FilterSourceDownloadManager(get()) }
 
         single { get<LogDatabase>().rethinkConnectionLogRepository() }
         single { get<LogDatabase>().connectionTrackerRepository() }
