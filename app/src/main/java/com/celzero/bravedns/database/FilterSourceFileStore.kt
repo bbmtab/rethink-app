@@ -32,10 +32,15 @@ import java.io.IOException
  * Layout (per source):
  * ```
  * <filesDir>/
- * └── filter_sources/
- *     └── source_<id>/
- *         ├── current.txt       # last known-good raw filter list (B2/B3 writes)
- *         └── download.tmp      # in-flight streaming download target (B2)
+ * ├── filter_sources/
+ * │   └── source_<id>/
+ * │       ├── current.txt       # last known-good raw filter list (B2/B3 reads)
+ * │       └── download.tmp      # in-flight streaming download target (B2)
+ * ├── adblock_rules.txt         # last-known-good compiled artifact (B4 atomic activate target)
+ * └── adblock_rules.new         # staged compiled artifact (B3 atomic-promotion writer)
+ *
+ * <cacheDir>/
+ * └── filter_rules_cache.bin    # pre-parsed binary rule cache (FilterEngine CACHE_VERSION=5 layout)
  * ```
  */
 class FilterSourceFileStore(private val context: Context) {
@@ -57,6 +62,30 @@ class FilterSourceFileStore(private val context: Context) {
     /** Absolute path to the per-source `download.tmp`. */
     fun downloadTempFile(id: Int): File =
         File(sourceDirectory(id), Companion.DOWNLOAD_TMP_NAME)
+
+    /**
+     * Absolute path to the staged compiled rules (`filesDir/adblock_rules.new`). B3 writes
+     * the staged artifact here; B4 atomically renames it to [compiledRulesFile]. B3 MUST NOT
+     * touch [compiledRulesFile] — that's a B4 boundary.
+     */
+    fun stagedRulesFile(): File =
+        File(filesDir, Companion.STAGED_RULES_NAME)
+
+    /**
+     * Absolute path to the last-known-good compiled rules (`filesDir/adblock_rules.txt`).
+     * Reserved for B4 atomic activation; exposed here only for path math and tests. B3 MUST NOT
+     * write this file — last-known-good must be preserved on compile failure.
+     */
+    fun compiledRulesFile(): File =
+        File(filesDir, Companion.COMPILED_RULES_NAME)
+
+    /**
+     * Absolute path to the pre-parsed binary cache (`cacheDir/filter_rules_cache.bin`).
+     * B3 writes this mirroring FilterEngine's `CACHE_VERSION=5` layout. FilterEngine's
+     * `loadRulesFromFile()` reads it on next startup (or explicitly on hot-reload).
+     */
+    fun cacheFile(): File =
+        File(context.applicationContext.cacheDir, Companion.CACHE_FILE_NAME)
 
     /** Canonical relativeFilePath string for the source id (what Room stores). */
     fun relativeFilePathFor(id: Int): String = Companion.relativeFilePathFor(id)
@@ -98,6 +127,9 @@ class FilterSourceFileStore(private val context: Context) {
         const val SOURCE_DIR_PREFIX = "source_"
         const val CURRENT_FILE_NAME = "current.txt"
         const val DOWNLOAD_TMP_NAME = "download.tmp"
+        const val STAGED_RULES_NAME = "adblock_rules.new"
+        const val COMPILED_RULES_NAME = "adblock_rules.txt"
+        const val CACHE_FILE_NAME = "filter_rules_cache.bin"
 
         /** Build the canonical relativeFilePath for [id]'s `current.txt`. Plan §11 layout. */
         fun relativeFilePathFor(id: Int): String =

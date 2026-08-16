@@ -172,6 +172,37 @@ class FilterSourceRepository(
         )
     }
 
+    // ---- B3 Filter Source Compiler diagnostics ------------------------------------
+    suspend fun updateCompilationDiagnostics(
+        id: Int,
+        totalLineCount: Int,
+        parsedRuleCount: Int,
+        unsupportedRuleCount: Int,
+        invalidRuleCount: Int,
+        networkRuleCount: Int,
+        cosmeticRuleCount: Int,
+        proceduralRuleCount: Int,
+        scriptletRuleCount: Int,
+        cspRuleCount: Int,
+        htmlFilterRuleCount: Int,
+        lastUpdated: Long = System.currentTimeMillis()
+    ) {
+        filterSourceDao.updateCompilationDiagnostics(
+            id = id,
+            totalLineCount = totalLineCount,
+            parsedRuleCount = parsedRuleCount,
+            unsupportedRuleCount = unsupportedRuleCount,
+            invalidRuleCount = invalidRuleCount,
+            networkRuleCount = networkRuleCount,
+            cosmeticRuleCount = cosmeticRuleCount,
+            proceduralRuleCount = proceduralRuleCount,
+            scriptletRuleCount = scriptletRuleCount,
+            cspRuleCount = cspRuleCount,
+            htmlFilterRuleCount = htmlFilterRuleCount,
+            lastUpdated = lastUpdated
+        )
+    }
+
     /** Expose the underlying [FilterSourceFileStore] for file lifecycle coordination. */
     fun getFileStore(): FilterSourceFileStore = fileStore
 

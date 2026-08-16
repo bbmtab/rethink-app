@@ -83,6 +83,24 @@ interface FilterSourceDao {
     )
     suspend fun updateDownloadFailure(id: Int, status: String, errorMessage: String?)
 
+    @Query(
+        "UPDATE FilterSource SET totalLineCount = :totalLineCount, parsedRuleCount = :parsedRuleCount, unsupportedRuleCount = :unsupportedRuleCount, invalidRuleCount = :invalidRuleCount, networkRuleCount = :networkRuleCount, cosmeticRuleCount = :cosmeticRuleCount, proceduralRuleCount = :proceduralRuleCount, scriptletRuleCount = :scriptletRuleCount, cspRuleCount = :cspRuleCount, htmlFilterRuleCount = :htmlFilterRuleCount, lastUpdated = :lastUpdated WHERE id = :id"
+    )
+    suspend fun updateCompilationDiagnostics(
+        id: Int,
+        totalLineCount: Int,
+        parsedRuleCount: Int,
+        unsupportedRuleCount: Int,
+        invalidRuleCount: Int,
+        networkRuleCount: Int,
+        cosmeticRuleCount: Int,
+        proceduralRuleCount: Int,
+        scriptletRuleCount: Int,
+        cspRuleCount: Int,
+        htmlFilterRuleCount: Int,
+        lastUpdated: Long
+    )
+
     // ---- B1-only helpers -------------------------------------------------------
     // Preset identity by approved URL so seeding is idempotent by stable property, not by name.
     @Query("SELECT * FROM FilterSource WHERE url = :url LIMIT 1")

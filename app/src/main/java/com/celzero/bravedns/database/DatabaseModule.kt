@@ -88,6 +88,7 @@ object DatabaseModule {
         single { get<AppDatabase>().countryConfigRepository() }
         single { FilterSourceFileStore(androidContext()) }
         single { FilterSourceRepository(get(), get()) }
+        single { com.celzero.bravedns.core.filter.FilterSourceCompiler(get(), get()) }
         single { com.celzero.bravedns.download.FilterSourceDownloadManager(get()) }
 
         single { get<LogDatabase>().rethinkConnectionLogRepository() }
