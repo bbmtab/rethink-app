@@ -26,6 +26,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.celzero.bravedns.download.FilterSourceDownloadManager
+import com.celzero.bravedns.core.filter.FilterSourceCompiler
+import com.celzero.bravedns.database.FilterSourceFileStore
+import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.service.PersistentState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.koin.core.component.KoinComponent
@@ -50,6 +54,10 @@ class FilterUpdateWorker(
 ) : CoroutineWorker(context, workerParams), KoinComponent {
 
     private val downloadManager by inject<FilterSourceDownloadManager>()
+    private val compiler by inject<FilterSourceCompiler>()
+    private val fileStore by inject<FilterSourceFileStore>()
+    private val repository by inject<FilterSourceRepository>()
+    private val persistentState by inject<PersistentState>()
 
     companion object {
         private const val TAG = "FilterUpdateWorker"
@@ -91,6 +99,18 @@ class FilterUpdateWorker(
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
             Logger.i(LOG_TAG_SCHEDULER, "$TAG; periodic filter update cancelled")
         }
+
+        /**
+         * Deterministic SHA-256 hash of the sorted, comma-joined set of enabled FilterSource IDs.
+         * Used as an inexpensive watermark to detect changes in the enabled-set so the worker
+         * can decide whether a recompile is needed without diffing source bodies.
+         */
+        fun computeEnabledSetHash(enabledIds: List<Int>): String {
+            val canonical = enabledIds.sorted().joinToString(",")
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(canonical.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { "%02x".format(it) }
+        }
     }
 
     override suspend fun doWork(): Result {
@@ -98,12 +118,34 @@ class FilterUpdateWorker(
             Logger.i(LOG_TAG_SCHEDULER, "$TAG; doWork: beginning scheduled filter update check")
             try {
                 val results = downloadManager.refreshAllEnabled()
-                val successCount = results.count { it is FilterSourceDownloadManager.DownloadResult.Success }
-                val failureCount = results.count { it is FilterSourceDownloadManager.DownloadResult.Failure }
+                val hasContentChange = results.any { result ->
+                    result is FilterSourceDownloadManager.DownloadResult.Success && !result.notModified && result.bytesDownloaded > 0
+                }
+                val enabledSources = repository.getEnabledSources()
+                val enabledIds = enabledSources.map { it.id }
+                val currentEnabledHash = computeEnabledSetHash(enabledIds)
+                val enabledSetChanged = currentEnabledHash != persistentState.lastCompiledEnabledSetHash
+                val artifactAbsent = !fileStore.compiledRulesFile().exists()
+                val triggerCompile = hasContentChange || enabledSetChanged || artifactAbsent
+
                 Logger.i(
                     LOG_TAG_SCHEDULER,
-                    "$TAG; doWork: completed scheduled update ($successCount succeeded, $failureCount failed out of ${results.size} total)"
+                    "$TAG; doWork: hasContentChange=$hasContentChange, enabledSetChanged=$enabledSetChanged, artifactAbsent=$artifactAbsent, triggerCompile=$triggerCompile"
                 )
+
+                if (triggerCompile) {
+                    val outcome = compiler.compileAllEnabled()
+                    if (outcome.success) {
+                        val nextGen = persistentState.advancedFilterGeneration + 1L
+                        persistentState.commitAdvancedFilterCompilation(currentEnabledHash, nextGen)
+                        Logger.i(LOG_TAG_SCHEDULER, "$TAG; compile succeeded, generation incremented to $nextGen")
+                    } else {
+                        Logger.e(LOG_TAG_SCHEDULER, "$TAG; compileAllEnabled failed: ${outcome.errorMessage}")
+                    }
+                } else {
+                    Logger.i(LOG_TAG_SCHEDULER, "$TAG; no compile needed (no changes)")
+                }
+
                 Result.success()
             } catch (e: Exception) {
                 Logger.e(LOG_TAG_SCHEDULER, "$TAG; doWork: unhandled error during scheduled update: ${e.message}", e)

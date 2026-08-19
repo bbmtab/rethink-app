@@ -405,19 +405,26 @@ object RethinkBlocklistManager : KoinComponent {
     }
 
     /**
-     * Syncs selected blocklists to adblock_rules.txt for MITM filtering.
-     * Downloads/reads selected blocklist rule files, parses via FilterEngine,
-     * writes combined rules to filesDir/adblock_rules.txt, updates stamp.
+     * State-only bridge: updates DNS blocklist bookkeeping (localBlocklistStamp,
+     * numberOfLocalBlocklists, blocklistEnabled) from the current selected tag set.
      *
-     * @param context App context for filesDir access
+     * **B4 Slice-1 contract (C-1 legacy bridge)** — this method MUST NOT:
+     *   - call FilterEngine.clear() or any FilterEngine load method
+     *   - write adblock_rules.txt / adblock_rules.new / filter_rules_cache.bin
+     *   - delete/rename/fsync any advanced-filter artifact
+     *   - trigger advanced-filter runtime activation
+     *
+     * It MAY read selected DNS blocklist tags and return read-only FilterEngine.getRuleStats().
+     *
+     * @param context App context (kept for signature compatibility; not used for I/O)
      * @param blocklistId Optional specific tag ID to sync; if null, syncs all selected
-     * @return RuleStats with breakdown of parsed rules
+     * @return RuleStats read from the live FilterEngine snapshot (non-R4 write)
      */
     suspend fun syncBlocklistToAdblockRules(
         context: Context,
         blocklistId: Int? = null
     ): FilterEngine.RuleStats = syncMutex.withLock {
-        // 1. Determine which tag IDs to sync
+        // 1. Determine which tag IDs to sync (DNS state only)
         val selectedTags = if (blocklistId != null) {
             setOf(blocklistId)
         } else {
@@ -426,92 +433,16 @@ object RethinkBlocklistManager : KoinComponent {
             local + remote
         }
 
-        Logger.i(LOG_TAG_DNS, "syncBlocklistToAdblockRules: syncing tags $selectedTags")
+        Logger.i(LOG_TAG_DNS, "syncBlocklistToAdblockRules: syncing tags $selectedTags (state-only bridge)")
 
-        // 2. Get the latest downloaded JSON metadata dir (both local and remote)
-        val localTimestamp = persistentState.localBlocklistTimestamp
-        val remoteTimestamp = persistentState.remoteBlocklistTimestamp
-
-        val allRulesText = mutableListOf<String>()
-
-        // Helper to read rule files from a timestamped download directory
-        suspend fun readRuleFilesFromDir(type: DownloadType, timestamp: Long, tagsToSync: Set<Int>) {
-            if (timestamp == 0L) return
-            val dirPath = Utilities.blocklistDownloadBasePath(
-                context,
-                if (type.isLocal()) LOCAL_BLOCKLIST_DOWNLOAD_FOLDER_NAME else REMOTE_BLOCKLIST_DOWNLOAD_FOLDER_NAME,
-                timestamp
-            )
-            val dir = File(dirPath)
-            if (!dir.exists()) return
-
-            // Parse the JSON metadata to find selected blocklists
-            val file = Utilities.blocklistFile(dirPath, ONDEVICE_BLOCKLIST_FILE_TAG) ?: return
-            val jsonString = file.bufferedReader().use { it.readText() }
-            val gson = GsonBuilder()
-                .registerTypeAdapter(FileTag::class.java, FileTagDeserializer())
-                .create()
-            val entries: JsonObject = Gson().fromJson(jsonString, JsonObject::class.java)
-
-            entries.entrySet().forEach {
-                val t = gson.fromJson(it.value, FileTag::class.java)
-                if (tagsToSync.contains(t.value)) {
-                    // Found a selected blocklist - read its rule text file
-                    // Rule files are typically named after the tag or simpleTagId
-                    // simpleTagId is Int; INVALID_SIMPLE_TAG_ID = -1 means not set
-                    val ruleFileName = if (t.simpleTagId != -1) t.simpleTagId.toString() else "blocklist_${t.value}.txt"
-                    val ruleFile = File(dir, ruleFileName)
-                    if (ruleFile.exists()) {
-                        val ruleText = ruleFile.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-                        allRulesText.add(ruleText)
-                        Logger.i(LOG_TAG_DNS, "Read rules from ${ruleFile.name}: ${ruleText.length} chars")
-                    } else {
-                        Logger.w(LOG_TAG_DNS, "Rule file not found for tag ${t.value}: expected $ruleFileName")
-                    }
-                }
-            }
-        }
-
-        // Read local and remote rule files
-        readRuleFilesFromDir(DownloadType.LOCAL, localTimestamp, selectedTags)
-        readRuleFilesFromDir(DownloadType.REMOTE, remoteTimestamp, selectedTags)
-
-        if (allRulesText.isEmpty()) {
-            Logger.w(LOG_TAG_DNS, "No rule text found for selected tags; writing empty adblock_rules.txt")
-        }
-
-        // 3. Parse all rules through FilterEngine to validate and count
-        FilterEngine.clear()
-        val combinedText = allRulesText.joinToString("\n")
-        if (combinedText.isNotBlank()) {
-            FilterEngine.loadRules(combinedText)
-        }
-
-        // 4. Write combined rules to adblock_rules.txt in filesDir
-        val adblockRulesFile = File(context.filesDir, "adblock_rules.txt")
-        adblockRulesFile.writeText(combinedText, StandardCharsets.UTF_8)
-        // fsync guard: ensure data is flushed to storage
-        try {
-            val fos = FileOutputStream(adblockRulesFile.absolutePath, true)
-            fos.fd.sync()
-            fos.close()
-        } catch (e: IOException) {
-            Logger.w(LOG_TAG_DNS, "Failed to fsync adblock_rules.txt: ${e.message}")
-        }
-        // Delete file if empty to avoid parsing empty file
-        if (adblockRulesFile.length() == 0L) {
-            adblockRulesFile.delete()
-            Logger.i(LOG_TAG_DNS, "Deleted empty adblock_rules.txt")
-        }
-        Logger.i(LOG_TAG_DNS, "Wrote adblock_rules.txt (${combinedText.length} chars) to ${adblockRulesFile.absolutePath}")
-
-        // 5. Update localBlocklistStamp with current selection
+        // 2. Update DNS blocklist state — the ONLY side-effects this method produces
         val newStamp = getStamp(selectedTags, RethinkBlocklistType.LOCAL)
         persistentState.localBlocklistStamp = newStamp
         persistentState.numberOfLocalBlocklists = selectedTags.size
         persistentState.blocklistEnabled = true
 
-        // 6. Return stats for UI feedback
+        // 4. Return read-only stats from the live FilterEngine snapshot
+        //    (no FilterEngine mutation, no disk write)
         return FilterEngine.getRuleStats()
     }
 

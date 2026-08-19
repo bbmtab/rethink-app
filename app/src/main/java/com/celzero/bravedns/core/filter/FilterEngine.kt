@@ -83,13 +83,13 @@ object FilterEngine {
     }
 
     // Trie node for domain suffix indexing
-    private class DomainTrieNode {
+    internal class DomainTrieNode {
         val children = ConcurrentHashMap<String, DomainTrieNode>()
         val rules = ArrayList<AdblockRule>()
     }
 
     // Trie structure for domain-anchored rules
-    private class DomainTrie {
+    internal class DomainTrie {
         val root = DomainTrieNode()
 
         fun insert(domain: String, rule: AdblockRule) {
@@ -126,29 +126,188 @@ object FilterEngine {
         }
     }
 
-    // Core rule indices
-    private val domainTrie = DomainTrie()
-    private val genericRules = ArrayList<AdblockRule>()
-
-    // Separate cosmetic rules for Phase 7
-    val cosmeticRules = ArrayList<String>()
-    val cosmeticExceptions = ArrayList<String>()
-
-    // CSP rules ($csp= modifier) — stored as raw rule lines for CspInjector to parse
-    val cspRules = ArrayList<String>()
-
-    // Procedural cosmetic rules (#?# operator) — stored as raw rule lines for ProceduralFilter
-    val proceduralRules = ArrayList<String>()
-
-    // Scriptlet injection rules (#%#//scriptlet) — stored as raw rule lines for ScriptletFilter
-    val scriptletRules = ArrayList<String>()
-
-    // HTML filtering rules (##^ operator) — stored as raw rule lines for HtmlFilter
-    val htmlFilterRules = ArrayList<String>()
+    /**
+     * Immutable snapshot of the complete engine runtime state (all 8 rule indices + network count +
+     * loaded flag).
+     *
+     * A load operation constructs a COMPLETE candidate [EngineState] into local [RuleBuilder]
+     * structures first, validates full success, and only then publishes it by a single assignment
+     * to [activeState] (one atomic @Volatile reference swap). On any failure the candidate is
+     * discarded and [activeState] is left untouched, so the previously published snapshot keeps
+     * serving readers — failed new load => previous active runtime state stays byte/semantically
+     * equivalent (transactional runtime activation, R3B). Readers (match/getRuleStats/injectors)
+     * capture [activeState] once per operation and observe a self-consistent generation; an older
+     * generation may stay alive while in-flight readers finish and is GC'd afterwards.
+     */
+    internal data class EngineState(
+        val domainTrie: DomainTrie,
+        val genericRules: List<AdblockRule>,
+        val cosmeticRules: List<String>,
+        val cosmeticExceptions: List<String>,
+        val cspRules: List<String>,
+        val proceduralRules: List<String>,
+        val scriptletRules: List<String>,
+        val htmlFilterRules: List<String>,
+        val networkRuleCount: Int,
+        val isLoaded: Boolean
+    ) {
+        companion object {
+            val EMPTY = EngineState(
+                domainTrie = DomainTrie(),
+                genericRules = emptyList(),
+                cosmeticRules = emptyList(),
+                cosmeticExceptions = emptyList(),
+                cspRules = emptyList(),
+                proceduralRules = emptyList(),
+                scriptletRules = emptyList(),
+                htmlFilterRules = emptyList(),
+                networkRuleCount = 0,
+                isLoaded = false
+            )
+        }
+    }
 
     @Volatile
-    private var networkRuleCount = 0
+    private var activeState: EngineState = EngineState.EMPTY
 
+    /**
+     * Local accumulator for a candidate [EngineState]. Owned by a single load operation (mutated
+     * under the outer @Synchronized load monitor) and never observed by readers until [build]
+     * publishes it via [activeState]. Plain holder — routing logic stays in [processRuleLine].
+     *
+     * Visibility is `internal` so R3B partial-candidate-failure tests in the same package can
+     * directly observe the half-populated state after a parse-induced exception. This is a
+     * minimal surface change (no new public API); production paths still funnel through the
+     * standard load functions.
+     */
+    internal class RuleBuilder {
+        val domainTrie = DomainTrie()
+        val genericRules = ArrayList<AdblockRule>()
+        val cosmeticRules = ArrayList<String>()
+        val cosmeticExceptions = ArrayList<String>()
+        val cspRules = ArrayList<String>()
+        val proceduralRules = ArrayList<String>()
+        val scriptletRules = ArrayList<String>()
+        val htmlFilterRules = ArrayList<String>()
+        var networkRuleCount = 0
+
+        /**
+         * Routes a single parsed rule into this candidate's indices. No synchronization needed —
+         * the builder is local to a single load operation that runs under the outer @Synchronized
+         * load monitor, and the builder is unpublished while being mutated, so no reader can ever
+         * observe a half-populated state.
+         */
+        fun processRuleLine(rawLine: String) {
+            val rule = FilterEngine.parseRule(rawLine) ?: return
+            when {
+                rule.isScriptlet -> scriptletRules.add(rule.rawText)
+                rule.isProcedural -> proceduralRules.add(rule.rawText)
+                rule.isCosmetic -> {
+                    if (rule.isWhitelist) {
+                        cosmeticExceptions.add(rule.rawText)
+                    } else {
+                        cosmeticRules.add(rule.rawText)
+                    }
+                }
+                rule.isCsp -> cspRules.add(rule.rawText)
+                rule.isHtmlFilter -> htmlFilterRules.add(rule.rawText)
+                else -> {
+                    networkRuleCount++
+                    if (rule.isDomainExact && rule.targetDomain != null) {
+                        domainTrie.insert(rule.targetDomain, rule)
+                    } else {
+                        genericRules.add(rule)
+                    }
+                }
+            }
+        }
+
+        fun build(isLoaded: Boolean): EngineState = EngineState(
+            domainTrie = domainTrie,
+            genericRules = genericRules,
+            cosmeticRules = cosmeticRules,
+            cosmeticExceptions = cosmeticExceptions,
+            cspRules = cspRules,
+            proceduralRules = proceduralRules,
+            scriptletRules = scriptletRules,
+            htmlFilterRules = htmlFilterRules,
+            networkRuleCount = networkRuleCount,
+            isLoaded = isLoaded
+        )
+
+        /**
+         * Total number of [AdblockRule]s held across every node of [domainTrie]. Test-only
+         * helper used by the R3B partial-candidate-failure test to verify that the per-line
+         * accumulation actually populated the trie before the parse loop's IOException.
+         * Internal visibility so same-package tests can call it without exposing [DomainTrie]
+         * externally.
+         */
+        internal fun countDomainRules(): Int = countTrieRules(domainTrie.root)
+
+        private fun countTrieRules(node: DomainTrieNode): Int {
+            var n = node.rules.size
+            for (child in node.children.values) {
+                n += countTrieRules(child)
+            }
+            return n
+        }
+    }
+
+    /**
+     * Test seam: parse rules from an arbitrary [BufferedReader] into a candidate [RuleBuilder]
+     * WITHOUT touching the live snapshot. Mirrors the per-line parse loop used by [loadRules]
+     * and the raw-parse path in [loadRulesFromFile] so partial-failure tests observe the exact
+     * accumulation order the production path takes.
+     *
+     * On any `IOException` (e.g., a [BufferedReader] that throws partway through, simulating a
+     * truncated file read or stream cut) the half-built [RuleBuilder] is left for inspection
+     * by the test; the caller decides whether to publish via `builder.build(...)` to
+     * [activeState] or discard. In a real production call site the build inside [loadRules] /
+     * [loadRulesFromFile] happens only after this loop returns without throwing, so any thrown
+     * exception here leaves the live snapshot untouched (R3B invariant).
+     *
+     * Internal-only; not part of the production API.
+     */
+    internal fun parseRulesIntoBuilder(reader: BufferedReader, builder: RuleBuilder) {
+        var line: String? = reader.readLine()
+        while (line != null) {
+            builder.processRuleLine(line)
+            line = reader.readLine()
+        }
+    }
+
+    /**
+     * Test seam: load rules from an arbitrary [Reader] using the publication-gate semantics of
+     * [loadRules]. On any `IOException` during the parse loop the exception propagates out and
+     * the live [activeState] is left untouched (R3B invariant).
+     *
+     * @Synchronized — the publication-gate mirrors [loadRules]; the activeState swap is the
+     * ONLY publication point. If we never reach the swap, the prior snapshot keeps serving.
+     */
+    @Synchronized
+    internal fun loadRulesFromReader(reader: Reader) {
+        val builder = RuleBuilder()
+        val br = if (reader is BufferedReader) reader else BufferedReader(reader)
+        parseRulesIntoBuilder(br, builder)
+        activeState = builder.build(isLoaded = true)
+    }
+
+    // Public read-only views over the live snapshot. Backed by [activeState], swapped atomically on
+    // load/clear. Concurrent readers (CspInjector/CosmeticFilter/ProceduralFilter/ScriptletFilter/
+    // HtmlFilter) observe a self-consistent generation and never see a half-populated list.
+    val cosmeticRules: List<String> get() = activeState.cosmeticRules
+    val cosmeticExceptions: List<String> get() = activeState.cosmeticExceptions
+    val cspRules: List<String> get() = activeState.cspRules
+    val proceduralRules: List<String> get() = activeState.proceduralRules
+    val scriptletRules: List<String> get() = activeState.scriptletRules
+    val htmlFilterRules: List<String> get() = activeState.htmlFilterRules
+
+    // Diagnostic flag set true only while a load operation is in progress. match() does NOT
+    // consult this flag — readers continue to evaluate against the previously published snapshot
+    // (activeState, captured once per match call) for the entire duration of any candidate
+    // rebuild. Only an atomic publication at the end of a successful candidate load makes new
+    // rules visible. Exposed only for diagnostic / instrumentation consumers; it is NOT a
+    // fail-open switch.
     @Volatile
     var isReloading: Boolean = false
 
@@ -170,39 +329,37 @@ object FilterEngine {
             "Rules: $total | Network: $network | Cosmetic: $cosmetic | Exceptions: $cosmeticExceptions | CSP: $csp | Procedural: $procedural | Scriptlet: $scriptlet | HTML Filter: $htmlFilter"
     }
 
-    @Volatile
-    var isLoaded = false
-        private set
+    // Backed by the live snapshot's publication flag — reflects the currently active generation
+    // and never a torn mid-reload state.
+    val isLoaded: Boolean get() = activeState.isLoaded
 
     /**
      * Clears all loaded rules from memory.
+     *
+     * Publishes the empty snapshot in a single atomic assignment; the previously published
+     * snapshot simply becomes unreferenced and is GC'd once in-flight readers finish.
      */
     @Synchronized
     fun clear() {
-        domainTrie.clear()
-        genericRules.clear()
-        cosmeticRules.clear()
-        cosmeticExceptions.clear()
-        cspRules.clear()
-        proceduralRules.clear()
-        scriptletRules.clear()
-        htmlFilterRules.clear()
-        networkRuleCount = 0
-        isLoaded = false
+        activeState = EngineState.EMPTY
     }
 
     /**
      * Returns aggregated rule statistics for UI feedback.
+     *
+     * Samples the live snapshot once so the returned [RuleStats] is internally consistent (all
+     * counts from the same published generation).
      */
     fun getRuleStats(): RuleStats {
+        val state = activeState
         return RuleStats(
-            network = networkRuleCount,
-            cosmetic = cosmeticRules.size,
-            cosmeticExceptions = cosmeticExceptions.size,
-            csp = cspRules.size,
-            procedural = proceduralRules.size,
-            scriptlet = scriptletRules.size,
-            htmlFilter = htmlFilterRules.size
+            network = state.networkRuleCount,
+            cosmetic = state.cosmeticRules.size,
+            cosmeticExceptions = state.cosmeticExceptions.size,
+            csp = state.cspRules.size,
+            procedural = state.proceduralRules.size,
+            scriptlet = state.scriptletRules.size,
+            htmlFilter = state.htmlFilterRules.size
         )
     }
 
@@ -216,18 +373,28 @@ object FilterEngine {
         resourceType: Int,
         refererHost: String? = null
     ): MatchResult {
-        if (!isLoaded) return MatchResult.Allow
-        if (isReloading) return MatchResult.Allow
+        // Capture the live snapshot ONCE and use it for the whole match operation, so a concurrent
+        // swap can never expose a mixed-generation state to a single evaluation.
+        //
+        // NOTE: NO isReloading-guard here. The supervisor contract requires that match() continue
+        // using the captured activeState during a candidate rebuild — the previous generation
+        // remains readable throughout the rebuild, and only an atomic publication at the end of a
+        // successful candidate load makes new rules visible. isReloading is a diagnostics-only
+        // flag; it MUST NOT disable filtering (no fail-open window).
+        val state = activeState
+        if (!state.isLoaded) return MatchResult.Allow
 
         // 1. Get all candidate rules
         val candidates = ArrayList<AdblockRule>()
-        
+
         // Find domain-anchored candidates (very fast O(1) path)
-        candidates.addAll(domainTrie.getRulesForHost(host))
-        
-        // Find generic candidates
-        synchronized(genericRules) {
-            candidates.addAll(genericRules)
+        candidates.addAll(state.domainTrie.getRulesForHost(host))
+
+        // Find generic candidates (guard kept: a published snapshot's list is never mutated
+        // post-swap, so the synchronized is no longer strictly required, but it preserves the
+        // original guarding pattern and the snapshot list's monitor is its own instance).
+        synchronized(state.genericRules) {
+            candidates.addAll(state.genericRules)
         }
 
         // 2. Evaluate candidates and split into Whitelist vs Block buckets
@@ -301,22 +468,31 @@ object FilterEngine {
     /**
      * Parses raw filter list files line-by-line.
      * Separates cosmetic rules and indexes network rules.
+     *
+     * Transactional: parsing writes into a local [RuleBuilder]; the snapshot is published only
+     * after the full parse succeeds. On any exception the previous active snapshot is preserved.
+     *
+     * Routes through the shared [loadRulesFromReader] entry so the per-line parse loop and the
+     * publication gate live in one place.
      */
     @Synchronized
     fun loadRules(rulesText: String) {
-        clear()
-        val reader = BufferedReader(StringReader(rulesText))
-        var line: String? = reader.readLine()
-        while (line != null) {
-            processRuleLine(line)
-            line = reader.readLine()
-        }
-        isLoaded = true
+        loadRulesFromReader(StringReader(rulesText))
     }
 
     /**
      * Loads rules from file on disk. Attempts to load pre-parsed cache first.
      * If no cache exists, parses raw and writes parsed cache to disk.
+     */
+    /**
+     * Loads rules from file on disk. Attempts to load pre-parsed cache first.
+     * If no cache exists, parses raw and writes parsed cache to disk.
+     *
+     * Transactional: both the cache rebuild and the raw parse construct a complete candidate
+     * [EngineState] into a local [RuleBuilder] and publish it only on full success. On any failure
+     * (cache deserialize error, raw parse IOException, ...) the previous active snapshot is
+     * preserved (R3B). match() see [isReloading] for the fail-open window semantics preserved from
+     * the legacy production load path.
      */
     @Synchronized
     fun loadRulesFromFile(rawFile: File, cacheDir: File) {
@@ -325,7 +501,12 @@ object FilterEngine {
             val cacheFile = File(cacheDir, CACHE_FILE_NAME)
             if (cacheFile.exists() && cacheFile.lastModified() >= rawFile.lastModified()) {
                 try {
-                    if (loadFromCache(cacheFile)) {
+                    val cached = loadFromCache(cacheFile)
+                    if (cached != null) {
+                        // Cache hit: publish the rebuilt snapshot. cached == null on any rebuild
+                        // failure -> fall through to raw parse. Live snapshot is never touched by
+                        // the rebuild path itself.
+                        activeState = cached
                         logInfo("Successfully loaded pre-parsed filter list from disk cache.")
                         return
                     }
@@ -334,24 +515,24 @@ object FilterEngine {
                 }
             }
 
-            // Parse raw EasyList file
+            // Parse raw EasyList file into a candidate snapshot; publish only on full success.
             logInfo("Parsing raw filter list file (${rawFile.length() / 1024} KB)...")
             val startTime = System.currentTimeMillis()
-            clear()
+            val builder = RuleBuilder()
 
             rawFile.bufferedReader(Charsets.UTF_8).use { br ->
                 var line: String? = br.readLine()
                 while (line != null) {
-                    processRuleLine(line)
+                    builder.processRuleLine(line)
                     line = br.readLine()
                 }
             }
 
-            isLoaded = true
+            activeState = builder.build(isLoaded = true)
             val duration = System.currentTimeMillis() - startTime
             logInfo("Parsed filter list in ${duration}ms. Saving pre-parsed cache...")
 
-            // Save pre-parsed cache asynchronously
+            // Save pre-parsed cache (best-effort; reflects the now-active snapshot).
             try {
                 saveToCache(cacheFile)
             } catch (e: Exception) {
@@ -359,39 +540,6 @@ object FilterEngine {
             }
         } finally {
             isReloading = false
-        }
-    }
-
-    private fun processRuleLine(rawLine: String) {
-        val rule = parseRule(rawLine) ?: return
-        when {
-            rule.isScriptlet -> {
-                synchronized(scriptletRules) { scriptletRules.add(rule.rawText) }
-            }
-            rule.isProcedural -> {
-                synchronized(proceduralRules) { proceduralRules.add(rule.rawText) }
-            }
-            rule.isCosmetic -> {
-                if (rule.isWhitelist) {
-                    synchronized(cosmeticExceptions) { cosmeticExceptions.add(rule.rawText) }
-                } else {
-                    synchronized(cosmeticRules) { cosmeticRules.add(rule.rawText) }
-                }
-            }
-            rule.isCsp -> {
-                synchronized(cspRules) { cspRules.add(rule.rawText) }
-            }
-            rule.isHtmlFilter -> {
-                synchronized(htmlFilterRules) { htmlFilterRules.add(rule.rawText) }
-            }
-            else -> {
-                networkRuleCount++
-                if (rule.isDomainExact && rule.targetDomain != null) {
-                    domainTrie.insert(rule.targetDomain, rule)
-                } else {
-                    synchronized(genericRules) { genericRules.add(rule) }
-                }
-            }
         }
     }
 
@@ -762,6 +910,10 @@ object FilterEngine {
     /* Simple binary caching mechanism to avoid re-parsing EasyList on every boot */
 
     private fun saveToCache(cacheFile: File) {
+        // Sample the live snapshot once — the cache reflects whatever generation is currently
+        // published, never a torn mid-reload state. The published lists are never mutated after
+        // they are placed into the snapshot, so concurrent reader iteration is safe.
+        val state = activeState
         try {
             ObjectOutputStream(BufferedOutputStream(FileOutputStream(cacheFile))).use { oos ->
                 // Write version first to detect layout or signature updates
@@ -769,41 +921,54 @@ object FilterEngine {
 
                 // Save Network rules
                 val domainRules = ArrayList<AdblockRule>()
-                collectTrieRules(domainTrie.root, domainRules)
+                collectTrieRules(state.domainTrie.root, domainRules)
                 oos.writeObject(domainRules)
-                
-                oos.writeObject(genericRules)
-                
+
+                oos.writeObject(state.genericRules)
+
                 // Save Cosmetic rules
-                oos.writeObject(cosmeticRules)
-                oos.writeObject(cosmeticExceptions)
+                oos.writeObject(state.cosmeticRules)
+                oos.writeObject(state.cosmeticExceptions)
 
                 // Save CSP rules
-                oos.writeObject(cspRules)
+                oos.writeObject(state.cspRules)
 
                 // Save Procedural rules
-                oos.writeObject(proceduralRules)
+                oos.writeObject(state.proceduralRules)
 
                 // Save Scriptlet rules
-                oos.writeObject(scriptletRules)
+                oos.writeObject(state.scriptletRules)
 
                 // Save HTML Filter rules
-                oos.writeObject(htmlFilterRules)
+                oos.writeObject(state.htmlFilterRules)
             }
         } catch (e: Exception) {
             logError("Failed to write rules cache: ${e.message}", e)
         }
     }
 
+    /**
+     * Rebuilds a full [EngineState] candidate from a previously written cache file.
+     *
+     * Important: this method NEVER touches the live snapshot. It only constructs and returns a
+     * candidate, or returns null on any failure (version mismatch, deserialize error, ...). The
+     * caller is responsible for publishing the returned snapshot to [activeState] exactly once,
+     * and only on a non-null result.
+     *
+     * The previous cache layout deliberately didn't persist networkRuleCount, which under the
+     * legacy loader caused a cache fast-path reload to leave it at 0 (stats drift vs a freshly
+     * parsed raw load). We rederive it here so a cache-restored snapshot is semantically
+     * equivalent to a freshly parsed one (R3B/R5 invariant).
+     */
     @Suppress("UNCHECKED_CAST")
-    private fun loadFromCache(cacheFile: File): Boolean {
+    private fun loadFromCache(cacheFile: File): EngineState? {
         try {
             ObjectInputStream(BufferedInputStream(FileInputStream(cacheFile))).use { ois ->
                 val version = ois.readInt()
                 if (version != CACHE_VERSION) {
                     logWarn("Cache version mismatch (got $version, expected $CACHE_VERSION). Invalidating cache.")
                     try { cacheFile.delete() } catch (ignore: Exception) {}
-                    return false
+                    return null
                 }
 
                 val domainRules = ois.readObject() as ArrayList<AdblockRule>
@@ -821,28 +986,29 @@ object FilterEngine {
                     ArrayList<String>()
                 }
 
-                clear()
-
+                // Build the COMPLETE candidate snapshot without touching the live snapshot, so
+                // any exception below leaves the previously published state untouched.
+                val builder = RuleBuilder()
+                builder.genericRules.addAll(genRules)
+                builder.cosmeticRules.addAll(cosRules)
+                builder.cosmeticExceptions.addAll(cosExceptions)
+                builder.cspRules.addAll(cspRulesList)
+                builder.proceduralRules.addAll(proceduralRulesList)
+                builder.scriptletRules.addAll(scriptletRulesList)
+                builder.htmlFilterRules.addAll(htmlFilterRulesList)
                 for (rule in domainRules) {
                     if (rule.targetDomain != null) {
-                        domainTrie.insert(rule.targetDomain, rule)
+                        builder.domainTrie.insert(rule.targetDomain, rule)
                     }
                 }
-                genericRules.addAll(genRules)
-                cosmeticRules.addAll(cosRules)
-                cosmeticExceptions.addAll(cosExceptions)
-                cspRules.addAll(cspRulesList)
-                proceduralRules.addAll(proceduralRulesList)
-                scriptletRules.addAll(scriptletRulesList)
-                htmlFilterRules.addAll(htmlFilterRulesList)
+                builder.networkRuleCount = genRules.size + domainRules.size
 
-                isLoaded = true
-                return true
+                return builder.build(isLoaded = true)
             }
         } catch (e: Exception) {
             logError("Cache deserialization failed: ${e.message}. Deleting corrupt cache file.", e)
             try { cacheFile.delete() } catch (ignore: Exception) {}
-            return false
+            return null
         }
     }
 

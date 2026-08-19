@@ -69,6 +69,7 @@ import androidx.work.WorkManager
 import com.celzero.bravedns.R
 import com.celzero.bravedns.RethinkDnsApplication.Companion.DEBUG
 import com.celzero.bravedns.customdownloader.IpInfoDownloader
+import com.celzero.bravedns.core.filter.FilterSourceCompiler
 import com.celzero.bravedns.data.AppConfig
 import com.celzero.bravedns.data.ConnTrackerMetaData
 import com.celzero.bravedns.data.ConnectionSummary
@@ -78,7 +79,11 @@ import com.celzero.bravedns.database.ConnectionTrackerRepository
 import com.celzero.bravedns.database.ConsoleLog
 import com.celzero.bravedns.database.EventSource
 import com.celzero.bravedns.database.EventType
+import com.celzero.bravedns.database.FilterSource
+import com.celzero.bravedns.database.FilterSourceFileStore
+import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.database.RefreshDatabase
+import com.celzero.bravedns.scheduler.FilterUpdateWorker
 import com.celzero.bravedns.iab.InAppBillingHandler
 import com.celzero.bravedns.iab.SubscriptionCheckWorker
 import com.celzero.bravedns.net.go.GoVpnAdapter
@@ -168,6 +173,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
+import java.io.File
 import java.io.IOException
 import java.net.InetAddress
 import java.net.Socket
@@ -188,6 +194,12 @@ import kotlin.time.Duration.Companion.milliseconds
 class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge, OnSharedPreferenceChangeListener {
 
     private val vpnScope = MainScope()
+
+    // Advanced Filter HOT runtime activation watermark (Phase 1D B4 Slice-3).
+    // In-memory only, NOT a preference; -1L sentinel means "never applied yet".
+    @Volatile
+    private var lastAppliedAdvancedFilterGeneration: Long = -1L
+    private val advancedFilterApplyMutex = Mutex()
 
     // used mostly for service to adapter creation and updates
     private val serializer: CoroutineDispatcher = Daemons.make("vpnser")
@@ -289,6 +301,8 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     private val persistentState by inject<PersistentState>()
     private val rdb by inject<RefreshDatabase>()
     private val netLogTracker by inject<NetLogTracker>()
+    private val fileStore by inject<FilterSourceFileStore>()
+    private val repository by inject<FilterSourceRepository>()
 
     @Volatile
     private var isAccessibilityServiceFunctional: Boolean = false
@@ -1576,6 +1590,11 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         connTracer = ConnectionTracer(this)
         VpnController.onVpnCreated(this)
 
+        // [B4 SLICE-3 D COLD-HOOK] cold AF activation (current/stale decision + async compile).
+        // HOT gen observer stays untouched. Runs once on cold service start, after HTTPS inspection
+        // is initialized; coldActivateAdvancedFilter gates on httpsInspectionEnabled + CA itself.
+        io("afColdActivate") { coldActivateAdvancedFilter() }
+
         // Temp-allow expiry scheduling is only relevant when VPN is active.
         FirewallManager.initTempAllowScheduler(this)
 
@@ -2247,10 +2266,8 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                 }
             }
 
-            PersistentState.LOCAL_BLOCK_LIST_STAMP -> { // update on local blocklist stamp change
+            PersistentState.LOCAL_BLOCK_LIST_STAMP -> { // update on local blocklist stamp change (DNS state only)
                 spawnLocalBlocklistStampUpdate()
-                // Also reload adblock rules for MITM filtering
-                reloadAdblockRules()
             }
 
             PersistentState.HTTPS_INSPECTION_ENABLED -> {
@@ -2263,6 +2280,13 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                 val ctx: Context = this@BraveVPNService
                 ui { Toast.makeText(ctx, R.string.applying_changes, Toast.LENGTH_SHORT).show() }
                 vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}"
+            }
+
+            PersistentState.ADVANCED_FILTER_GENERATION -> {
+                val gen = persistentState.advancedFilterGeneration
+                io("hotActivateAF") {
+                    applyAdvancedFilterGeneration(gen)
+                }
             }
 
             PersistentState.REMOTE_BLOCKLIST_UPDATE -> {
@@ -2704,6 +2728,120 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                 Logger.e(LOG_TAG_VPN, "Failed to reload rules into FilterEngine: ${e.message}", e)
             }
         }
+    }
+
+    internal suspend fun applyAdvancedFilterGeneration(gen: Long): Boolean {
+        advancedFilterApplyMutex.withLock {
+            if (gen == lastAppliedAdvancedFilterGeneration) {
+                Logger.i(LOG_TAG_VPN, "AF hot: gen $gen already applied, dedupe skip")
+                return true
+            }
+            if (!persistentState.httpsInspectionEnabled || !com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
+                Logger.i(LOG_TAG_VPN, "AF hot: eligibility not met (https=${persistentState.httpsInspectionEnabled}), skip")
+                return false
+            }
+            val ok = loadCompiledArtifactIntoEngine()
+            if (ok) {
+                lastAppliedAdvancedFilterGeneration = gen
+                Logger.i(LOG_TAG_VPN, "AF hot: activated gen $gen")
+            } else {
+                Logger.e(LOG_TAG_VPN, "AF hot: load failed gen $gen, keeping prior snapshot; lastApplied NOT advanced (retry allowed)")
+            }
+            return ok
+        }
+    }
+
+    internal suspend fun loadCompiledArtifactIntoEngine(): Boolean {
+        return try {
+            val f = fileStore.compiledRulesFile()
+            if (!f.exists()) {
+                Logger.i(LOG_TAG_VPN, "AF load: compiled artifact absent, no load")
+                return false
+            }
+            com.celzero.bravedns.core.filter.FilterEngine.loadRulesFromFile(f, cacheDir)
+            Logger.i(LOG_TAG_VPN, "AF load: production load OK from ${f.name}")
+            true
+        } catch (e: Exception) {
+            Logger.e(LOG_TAG_VPN, "AF load: production load failed: ${e.message}", e)
+            false
+        }
+    }
+
+    // [B4 SLICE-3 D STALE-PREDICATE] Decision-time staleness check for the compiled
+    // advanced-filter artifact. Pure read over the caller's dispatcher.
+    internal suspend fun isAdvancedFilterStale(compiled: File): Boolean {
+        val fileStore = fileStore   // Task-B field
+        if (!compiled.exists()) return true
+        val enabled = try {
+            repository.getEnabledSources()
+        } catch (e: Exception) {
+            Logger.e(LOG_TAG_VPN, "AF stale-check: failed to fetch enabled sources: ${e.message}", e)
+            return false
+        }
+        val currentHash = FilterUpdateWorker.computeEnabledSetHash(enabled.map { it.id })
+        if (currentHash != persistentState.lastCompiledEnabledSetHash) return true
+        // empty-enabled-set STILL participates: nonempty[7] -> empty[] diffs hash -> STALE -> compile empty artifact -> old source-7 rules disappear
+        // (no early "return false when empty"; the hash diff above already covers empty->empty == current).
+        for (source in enabled) {
+            val current = fileStore.currentFile(source.id)
+            if (!current.exists()) return true
+            if (current.lastModified() > compiled.lastModified()) return true
+        }
+        return false
+    }
+
+    // [B4 SLICE-3 D COLD-ACTIVATION] Cold-start activation path for advanced filter.
+    // Decoupled from establishVpn: a stale/missing artifact is compiled on IO without
+    // blocking VPN establish; the current artifact reuses the HOT path (load only).
+    internal suspend fun coldActivateAdvancedFilter() {
+        if (!persistentState.httpsInspectionEnabled) return
+        if (!com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) return
+        val compiled = fileStore.compiledRulesFile()
+        val stale = isAdvancedFilterStale(compiled)
+        if (!stale) {
+            // CURRENT ARTIFACT PATH — compiler MUST NOT run; direct production load via the HOT path
+            // (applyAdvancedFilterGeneration owns mutex+watermark so one load per generation).
+            applyAdvancedFilterGeneration(persistentState.advancedFilterGeneration)
+            return
+        }
+        // STALE / MISSING PATH — do NOT block VPN establish; compile on IO, decoupled from establishVpn.
+        // R8-E Availability Guard: if any enabled source is missing its current.txt, treat it as an
+        // unavailable/unready state rather than compiling a partial/empty artifact. Preserve LKG/snapshot.
+        val enabledSources = try {
+            repository.getEnabledSources()
+        } catch (e: Exception) {
+            Logger.e(LOG_TAG_VPN, "AF cold: failed to fetch enabled sources, preserving prior snapshot: ${e.message}", e)
+            return
+        }
+        val missingSource = enabledSources.find { !fileStore.currentFile(it.id).exists() }
+        if (missingSource != null) {
+            Logger.w(
+                LOG_TAG_VPN,
+                "AF cold: enabled source ${missingSource.id} (${missingSource.name}) missing current file, preserving LKG/snapshot"
+            )
+            return
+        }
+
+        val outcome = com.celzero.bravedns.core.filter.FilterSourceCompiler(repository, fileStore)
+            .compileAllEnabled()
+        if (!outcome.success) {
+            // FAILURE PATH — NO hash/gen bump, NO FilterEngine.clear(), NO destructive file changes.
+            // Prior runtime snapshot + B3 last-known-good preserved. Just log + bail.
+            Logger.e(LOG_TAG_VPN, "AF cold: compile failed (preserving prior snapshot): ${outcome.errorMessage}")
+            return
+        }
+        // RACE-SAFE HASH (STOP-S3-COMPILE-HASH-RACE resolution): hash is derived from the OUTCOME's
+        // diagnostics sourceIds — the exact snapshot that produced the promoted artifact. It is NEVER
+        // a post-compile repository.getEnabledSources() read, so it cannot describe a different set
+        // than the artifact on disk (even if the user toggled sources mid-compile).
+        val committedSourceIds = outcome.diagnostics.map { it.sourceId }
+        val hash = FilterUpdateWorker.computeEnabledSetHash(committedSourceIds)
+        val nextGen = persistentState.advancedFilterGeneration + 1
+        persistentState.commitAdvancedFilterCompilation(hash, nextGen)
+        // Generation-bump may trigger the HOT ADVANCED_FILTER_GENERATION observer; the shared
+        // Mutex + lastAppliedAdvancedFilterGeneration watermark guarantees at-most-one successful
+        // load per generation (first contender loads; second dedupes).
+        applyAdvancedFilterGeneration(nextGen)
     }
 
     // invoked on pref / probe-ip changes, so that the connection monitor can
