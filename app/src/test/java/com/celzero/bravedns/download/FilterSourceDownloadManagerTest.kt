@@ -28,6 +28,7 @@ import com.celzero.bravedns.database.FilterSourceFileStore
 import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.database.FilterSourceStatus
 import com.celzero.bravedns.scheduler.FilterUpdateWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -228,6 +229,102 @@ class FilterSourceDownloadManagerTest : KoinTest {
         assertEquals(sizeBefore304, currentFile.length())
         assertFalse(fileStore.downloadTempFile(source.id).exists())
     }
+
+    // =========================================================================
+    // G1-R — Cancellation and missing-current conditional-request regressions
+    // =========================================================================
+    @Test
+    fun cancellationException_rethrowsAndRestoresPriorStatus() =
+        runTest(testDispatcher) {
+            val client =
+                OkHttpClient.Builder()
+                    .addInterceptor {
+                        throw CancellationException("test cancellation")
+                    }
+                    .build()
+            val downloadManager = FilterSourceDownloadManager(repo, client)
+
+            val source =
+                repo.addSource(
+                    name = "Cancellation Source",
+                    url = "https://example.com/cancel.txt",
+                    category = FilterSourceCategory.SECURITY
+                )
+            val before = repo.getSourceById(source.id)!!
+
+            var caught: CancellationException? = null
+            try {
+                downloadManager.downloadSource(source.id)
+            } catch (e: CancellationException) {
+                caught = e
+            }
+
+            assertNotNull("CancellationException must be rethrown", caught)
+            assertEquals("test cancellation", caught?.message)
+
+            val after = repo.getSourceById(source.id)!!
+            assertEquals(
+                "Cancellation must restore the previous status",
+                before.lastUpdateStatus,
+                after.lastUpdateStatus
+            )
+            assertEquals(
+                "Cancellation must restore the previous error",
+                before.errorMessage,
+                after.errorMessage
+            )
+            assertFalse(fileStore.downloadTempFile(source.id).exists())
+            assertFalse(fileStore.currentFile(source.id).exists())
+        }
+
+    @Test
+    fun missingCurrentFile_withCachedValidators_usesUnconditionalRequest() =
+        runTest(testDispatcher) {
+            val client = createTestHttpClient()
+            val downloadManager = FilterSourceDownloadManager(repo, client)
+
+            val source =
+                repo.addSource(
+                    name = "Missing Current Source",
+                    url = "https://example.com/missing-current.txt",
+                    category = FilterSourceCategory.PRIVACY
+                )
+
+            repo.updateDownloadSuccess(
+                id = source.id,
+                etag = "\"stale-etag\"",
+                lastModified = "Wed, 15 Aug 2026 12:00:00 GMT",
+                checksum = "stale-checksum"
+            )
+            assertFalse(fileStore.currentFile(source.id).exists())
+
+            val payload = "||fresh.example^\n"
+            mockResponseGenerator = { request ->
+                assertNull(request.header("If-None-Match"))
+                assertNull(request.header("If-Modified-Since"))
+
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(payload.toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+
+            val result = downloadManager.downloadSource(source.id)
+
+            assertTrue(result is FilterSourceDownloadManager.DownloadResult.Success)
+            val success =
+                result as FilterSourceDownloadManager.DownloadResult.Success
+            assertFalse(success.notModified)
+            assertEquals(1, recordedRequests.size)
+
+            val currentFile = fileStore.currentFile(source.id)
+            assertTrue(currentFile.exists())
+            assertEquals(payload, currentFile.readText())
+            assertFalse(fileStore.downloadTempFile(source.id).exists())
+        }
 
     // =========================================================================
     // G2 — 200 + Streaming SHA-256 + Atomic Promotion

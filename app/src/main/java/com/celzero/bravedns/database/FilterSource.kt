@@ -70,7 +70,11 @@ data class FilterSource(
     val cspRuleCount: Int = 0,
     val htmlFilterRuleCount: Int = 0,
     // Path of current.txt relative to appContext.filesDir, e.g. "filter_sources/source_3/current.txt".
-    val relativeFilePath: String
+    val relativeFilePath: String,
+    // Stable reference to a row in the filters.json catalog (if any). Null when there is
+    // no corresponding catalog entry. Added in migration 32→33; nullable, no backfill.
+    // See B5 JSON-CATALOG-S1.
+    val referenceId: Int? = null
 ) : Serializable
 
 /**

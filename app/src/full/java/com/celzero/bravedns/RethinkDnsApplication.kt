@@ -22,10 +22,13 @@ import android.content.pm.ApplicationInfo
 import android.os.StrictMode
 import com.celzero.bravedns.scheduler.EnhancedBugReport
 import com.celzero.bravedns.scheduler.ScheduleManager
+import com.celzero.bravedns.database.FilterSourceCatalogBootstrapper
+import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.scheduler.WorkScheduler
 import com.celzero.bravedns.util.FirebaseErrorReporting
 import com.celzero.bravedns.util.GlobalExceptionHandler
 import com.celzero.bravedns.util.GoReportingHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,7 +71,26 @@ class RethinkDnsApplication : Application() {
         turnOnStrictMode()
 
         appScope.launch {
+            syncBundledFilterSourceCatalog()
             scheduleJobs()
+        }
+    }
+
+    private suspend fun syncBundledFilterSourceCatalog() {
+        try {
+            FilterSourceCatalogBootstrapper(
+                    this@RethinkDnsApplication,
+                    get<FilterSourceRepository>()
+                )
+                .syncBundledCatalog()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.e(
+                LOG_TAG_SCHEDULER,
+                "Filter source catalog startup sync failed " +
+                    "(${e.javaClass.simpleName}): ${e.message}"
+            )
         }
     }
 

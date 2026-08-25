@@ -2595,13 +2595,21 @@
     <string name="plus_blocklist_dns_lists_desc">0 lists selected</string>
     <string name="plus_blocklist_ad_blocking_title">Use DNS blocklists for ad blocking</string>
     <string name="plus_blocklist_ad_blocking_desc">Enable HTTPS-level ad blocking using your DNS blocklists</string>
-    <string name="plus_filter_sources_title">Filter Sources</string>
-    <string name="plus_filter_sources_desc">Advanced filter source manager is not available yet</string>
-    <string name="plus_filter_sources_manage">Manage Sources</string>
-    <string name="plus_filter_sources_empty">Advanced filter source manager not configured</string>
+    <string name="plus_filter_sources_title">Filter Lists</string>
+    <string name="plus_filter_sources_desc">Choose and enable filter lists by category</string>
+    <string name="plus_filter_sources_manage">Manage Filters</string>
+    <string name="plus_filter_sources_empty">Organized by category with source status and rule diagnostics</string>
     <string name="plus_filter_sources_coming_soon">Advanced filter sources coming soon</string>
+    <string name="plus_filter_sources_no_sources">No filter sources configured</string>
+    <string name="plus_filter_sources_inactive">0 filters enabled • Advanced filtering inactive</string>
+    <string name="plus_filter_sources_pending">%1$d source(s) pending download/compile</string>
+    <string name="plus_filter_sources_summary">%1$d filters enabled • %2$d rules</string>
+    <string name="plus_filter_sources_updated">%1$d filters enabled • %2$d rules • updated %3$s</string>
+    <string name="plus_filter_sources_failed">%1$d filters enabled • %2$d rules • %3$d source(s) failed</string>
+    <string name="plus_manage_filters_title">Manage Filters</string>
+    <string name="plus_manage_filters_empty">No filter sources configured. Add a source to begin.</string>
 
-    <string name="plus_advanced_filtering_desc">Experimental features - require FilterEngine support</string>
+    <string name="plus_advanced_filtering_desc">Choose filter lists by category to block ads, trackers, annoyances, and threats</string>
     <string name="plus_advanced_filtering_title">Advanced Filtering</string>
     <string name="plus_exclusions_title">Exclusions</string>
     <string name="plus_exclusions_desc">Configure domains or apps to exclude from HTTPS inspection</string>

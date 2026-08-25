@@ -29,12 +29,10 @@ import androidx.room.Transaction
  *    that id, derives `filter_sources/source_<id>/current.txt`, and persists the final path
  *    inside the same [Transaction]. LiveData observers never observe a row with a permanently
  *    wrong relativeFilePath.
- *  - Provide [ensurePresets] — an idempotent runtime guard keyed on the approved URL set
- *    (plan §17). Initial seeding happens structurally in [AppDatabase]'s MIGRATION_30_31 via
- *    `INSERT OR REPLACE` execSQL, so this method exists as a no-op once the catalog is loaded
- *    but can re-seed an exhausted/empty table deterministically. The approved catalog is read
- *    ONLY from [FilterSourceCatalog]; this method never fetches remote URLs and never rewrites
- *    user-custom sources (plan §16 forbids SILENT fabrication of SOCIAL/SECURITY/etc rows).
+ *  - Delegate catalog-driven reconciliation to [syncCatalog]; initial preset seeding is owned
+ *    by Room migrations (MIGRATION_30_31 / MIGRATION_31_32). No runtime catalog is re-seeded
+ *    from a hardcoded in-memory list; user-custom sources are never silently rewritten
+ *    (plan §16 forbids SILENT fabrication of SOCIAL/SECURITY/etc rows).
  *
  * NOT in scope (defensive checks below prevent accidental drift):
  *  - No HTTP I/O, no WorkManager, no OkHttp clients (B2 owns download).
@@ -206,39 +204,10 @@ class FilterSourceRepository(
     /** Expose the underlying [FilterSourceFileStore] for file lifecycle coordination. */
     fun getFileStore(): FilterSourceFileStore = fileStore
 
-    /**
-     * Idempotently ensure the approved preset catalog exists in Room. Identity is the approved
-     * URL ([FilterSourceCatalog.APPROVED_URLS]); safe to call any number of times without
-     * producing duplicates. Initial installation is handled structurally by MIGRATION_30_31 —
-     * this method is the runtime deterministic ensure for tests and any cold reset path.
-     *
-     * The URL-keyed identity (not the name) is essential: plan §17 explicitly forbids relying
-     * only on the user-editable name.
-     */
-    @Transaction
-    suspend fun ensurePresets() {
-        val existing = filterSourceDao.getAllSources().associateBy { it.url }
-        for (preset in FilterSourceCatalog.PRESETS) {
-            val row = existing[preset.url]
-            if (row == null) {
-                // Insert with explicit id from the preset catalog so the migration-time SQL
-                // and runtime ensure produce identical ids; relativeFilePath is pre-derived
-                // from the id at insert time so observers never see an unwritten path.
-                val prepared = FilterSource(
-                    id = preset.id,
-                    name = preset.name,
-                    url = preset.url,
-                    category = preset.category,
-                    enabled = preset.enabledDef,
-                    isPreset = true,
-                    // Explicit-id resolution: relativeFilePath known at insert time, no need for
-                    // an update_after_insert round-trip here.
-                    relativeFilePath = FilterSourceFileStore.relativeFilePathFor(preset.id)
-                )
-                filterSourceDao.insert(prepared)
-            }
-            // If a row already exists for this url (whether seeded by migration or previously
-            // edited by a future AddCustomURL flow), don't touch it: preserves user customizations.
-        }
+    suspend fun syncCatalog(
+        catalog: FilterSourceCatalogJson.Catalog
+    ): ReconciliationPlan {
+        val candidates = FilterSourceCatalogMapper.map(catalog)
+        return filterSourceDao.syncCatalogAtomically(candidates)
     }
 }

@@ -55,7 +55,7 @@ import com.celzero.bravedns.util.Constants
         SubscriptionStateHistory::class,
         CountryConfig::class
     ],
-    version = 31,
+    version = 33,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -107,6 +107,8 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_28_29)
                 .addMigrations(MIGRATION_29_30)
                 .addMigrations(MIGRATION_30_31)
+                .addMigrations(MIGRATION_31_32)
+                .addMigrations(MIGRATION_32_33)
                 .build()
 
         private val roomCallback: Callback =
@@ -1265,6 +1267,138 @@ abstract class AppDatabase : RoomDatabase() {
             )
         }
     }
+
+        /**
+         * Data-only migration adding the first reserved-negative-id presets.
+         *
+         * The seed is deliberately migration-local and immutable. Do not replace
+         * these literals with FilterSourceCatalog: historical migration behavior
+         * must not change when the runtime catalog grows later.
+         *
+         * Preflight scans every seed before the first insert:
+         * - same reserved id + same URL: preserve the existing row;
+         * - same reserved id + different URL: abort the migration;
+         * - same URL under another id: preserve that existing row;
+         * - otherwise: insert a new disabled preset.
+         *
+         * No existing row is updated and INSERT OR REPLACE is forbidden.
+         */
+        internal val MIGRATION_31_32: Migration =
+            object : Migration(31, 32) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    data class Seed(
+                        val id: Int,
+                        val name: String,
+                        val url: String,
+                        val category: String,
+                        val relativeFilePath: String
+                    )
+
+                    val seeds =
+                        listOf(
+                            Seed(
+                                id = -1001,
+                                name = "Fanboy's Social Blocking List",
+                                url = "https://easylist.to/easylist/fanboy-social.txt",
+                                category = "SOCIAL",
+                                relativeFilePath =
+                                    "filter_sources/source_-1001/current.txt"
+                            ),
+                            Seed(
+                                id = -1002,
+                                name = "uBlock Badware Risks",
+                                url =
+                                    "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt",
+                                category = "SECURITY",
+                                relativeFilePath =
+                                    "filter_sources/source_-1002/current.txt"
+                            ),
+                            Seed(
+                                id = -1003,
+                                name = "ABPindo",
+                                url =
+                                    "https://cdn.jsdelivr.net/gh/ABPindo/indonesianadblockrules@master/subscriptions/abpindo.txt",
+                                category = "LANGUAGE_SPECIFIC",
+                                relativeFilePath =
+                                    "filter_sources/source_-1003/current.txt"
+                            )
+                        )
+
+                    val toInsert = ArrayList<Seed>(seeds.size)
+
+                    // Complete collision/identity preflight before the first write.
+                    for (seed in seeds) {
+                        val existingUrlAtId =
+                            db.query(
+                                    "SELECT url FROM FilterSource WHERE id = ? LIMIT 1",
+                                    arrayOf<Any>(seed.id)
+                                )
+                                .use { cursor ->
+                                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                                }
+
+                        if (existingUrlAtId != null) {
+                            if (existingUrlAtId != seed.url) {
+                                throw IllegalStateException(
+                                    "MIGRATION_31_32: reserved preset id ${seed.id} " +
+                                        "already occupied by url '$existingUrlAtId'"
+                                )
+                            }
+                            continue
+                        }
+
+                        val urlAlreadyExists =
+                            db.query(
+                                    "SELECT 1 FROM FilterSource WHERE url = ? LIMIT 1",
+                                    arrayOf<Any>(seed.url)
+                                )
+                                .use { cursor -> cursor.moveToFirst() }
+
+                        if (!urlAlreadyExists) {
+                            toInsert.add(seed)
+                        }
+                    }
+
+                    for (seed in toInsert) {
+                        db.execSQL(
+                            """
+                            INSERT INTO FilterSource
+                                (id, name, url, category, enabled, isPreset, lastUpdated,
+                                 lastUpdateStatus, totalLineCount, parsedRuleCount,
+                                 unsupportedRuleCount, invalidRuleCount, networkRuleCount,
+                                 cosmeticRuleCount, proceduralRuleCount, scriptletRuleCount,
+                                 cspRuleCount, htmlFilterRuleCount, relativeFilePath)
+                            VALUES (?, ?, ?, ?, 0, 1, 0, 'IDLE', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?)
+                            """.trimIndent(),
+                            arrayOf<Any>(
+                                seed.id,
+                                seed.name,
+                                seed.url,
+                                seed.category,
+                                seed.relativeFilePath
+                            )
+                        )
+                    }
+                }
+            }
+
+        /**
+         * Schema-only migration adding the `referenceId` column (B5 JSON-CATALOG-S1).
+         *
+         * The column is a nullable INTEGER with no DEFAULT and no backfill. Existing
+         * rows receive NULL. This links each Room [FilterSource] row to a stable entry
+         * in the runtime `filters.json` catalog (if one exists).
+         *
+         * This migration is intentionally minimal — a single ALTER TABLE ADD COLUMN —
+         * so that historical migration behavior is preserved exactly and the old
+         * migrations above remain untouched.
+         */
+        internal val MIGRATION_32_33: Migration =
+            object : Migration(32, 33) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE FilterSource ADD COLUMN referenceId INTEGER")
+                }
+            }
 
     private val MIGRATION_29_30: Migration =
             object : Migration(29, 30) {

@@ -91,6 +91,12 @@ class FilterSourceCompiler(
 
     /**
      * Aggregated compilation outcome across all enabled sources.
+     *
+     * [enabledSetHash] is the deterministic SHA-256 hash of the SORTED set of
+     * `diagnostics.map { it.sourceId }` — populated by [success] for downstream
+     * callers (STOP-S3-COMPILE-HASH-RACE: never computed from a post-compile
+     * repository read); null on the failure path so the absence of a hash is
+     * self-documenting.
      */
     data class CompileOutcome(
         val success: Boolean,
@@ -98,7 +104,8 @@ class FilterSourceCompiler(
         val compiledAt: Long = 0,
         val totalSourcesProcessed: Int = 0,
         val totalParsedRules: Int = 0,
-        val diagnostics: List<SourceDiagnostics> = emptyList()
+        val diagnostics: List<SourceDiagnostics> = emptyList(),
+        val enabledSetHash: String? = null
     ) {
         companion object {
             fun success(diagnostics: List<SourceDiagnostics>) =
@@ -107,11 +114,30 @@ class FilterSourceCompiler(
                     compiledAt = System.currentTimeMillis(),
                     totalSourcesProcessed = diagnostics.size,
                     totalParsedRules = diagnostics.sumOf { it.parsedRuleCount },
-                    diagnostics = diagnostics
+                    diagnostics = diagnostics,
+                    enabledSetHash = computeEnabledSetHash(
+                        diagnostics.map { it.sourceId }
+                    )
                 )
 
             fun failure(message: String) =
                 CompileOutcome(success = false, errorMessage = message)
+
+            /**
+             * Canonical enabled-set hash. Byte-equivalent to the pre-existing
+             * `FilterUpdateWorker.computeEnabledSetHash` helper so any downstream
+             * value comparison (BraveVPNService.isAdvancedFilterStale,
+             * commitAdvancedFilterCompilation) keeps the same contract.
+             *
+             * Algorithm: IDs sorted ascending -> joinToString(",") -> UTF-8 bytes
+             * -> SHA-256 -> lowercase hex with no separator (64 chars).
+             */
+            private fun computeEnabledSetHash(enabledIds: List<Int>): String {
+                val canonical = enabledIds.sorted().joinToString(",")
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                val digest = md.digest(canonical.toByteArray(Charsets.UTF_8))
+                return digest.joinToString("") { "%02x".format(it) }
+            }
         }
     }
 
@@ -169,10 +195,11 @@ class FilterSourceCompiler(
         }
 
         if (allParsedLines.isEmpty()) {
-            // All sources failed or produced zero rules. Write empty compiled artifact so
-            // downstream consumers see a clean empty file, not a missing/stale one.
-            val emptyOutcome = writeEmptyArtifact()
-            return@withContext emptyOutcome.copy(
+            // Enabled sources were present but none produced a parsed rule. Preserve the
+            // last-known-good artifact instead of promoting an empty staged artifact.
+            return@withContext CompileOutcome.failure(
+                "Enabled sources produced no parsed rules"
+            ).copy(
                 totalSourcesProcessed = allDiagnostics.size,
                 diagnostics = allDiagnostics
             )
@@ -393,9 +420,8 @@ class FilterSourceCompiler(
     }
 
     /**
-     * Write an empty compiled artifact. Used when no sources are enabled or all sources
-     * produced zero rules. Produces a valid zero-byte `adblock_rules.txt` so downstream
-     * consumers see an intentional empty state rather than a missing file.
+     * Write an empty compiled artifact when no sources are enabled. Produces a valid
+     * zero-byte `adblock_rules.txt` so consumers see the intentional empty enabled-set.
      */
     private fun writeEmptyArtifact(): CompileOutcome {
         val diagnostics = emptyList<SourceDiagnostics>()

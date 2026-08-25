@@ -28,17 +28,13 @@ import androidx.lifecycle.observe
 import by.kirich1409.viewbindingdelegate.viewBinding
 import com.celzero.bravedns.R
 import com.celzero.bravedns.core.ca.CertificateAuthority
+import com.celzero.bravedns.database.FilterSource
+import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.viewmodel.FilterSourceSummaryFormatter
 import com.celzero.bravedns.databinding.FragmentRethinkPlusBinding
-import com.celzero.bravedns.download.AppDownloadManager
 import com.celzero.bravedns.service.PersistentState
-import com.celzero.bravedns.service.RethinkBlocklistManager
-import com.celzero.bravedns.service.VpnController
 import Logger
 import Logger.LOG_TAG_UI
-import com.celzero.bravedns.util.Utilities
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.progressindicator.CircularProgressIndicator
-import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,17 +46,19 @@ import java.io.File
  *
  * Sections:
  * 1. HTTPS Inspection — master toggle, CA status badge, CA actions (Install/Re-install/Export)
- * 2. DNS Blocklist → MITM Bridge — toggle, list selector, Sync button, status/result
- * 3. Advanced Filtering — cosmetic/scriptlet/procedural toggles (hidden until FilterEngine supports)
- * 4. Exclusions — domain exclusions, app exclusions
+ * 2. Advanced Filtering — read-only aggregate summary of enabled filter sources + Manage Filters action
+ * 3. Exclusions — domain exclusions, app exclusions
+ *
+ * The DNS Blocklist → MITM Bridge card and the obsolete cosmetic/scriptlet/procedural/CSP/HTML
+ * filtering toggles are retired in B5 Slice-1. The bridge is superseded by the FilterSource
+ * backend (B1–B4); the rule-subtype toggles are obsolete because FilterEngine auto-detects
+ * subtypes (DECISION-009).
  */
 class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private val b by viewBinding(FragmentRethinkPlusBinding::bind)
 
     private val persistentState by inject<PersistentState>()
-    private val appDownloadManager by inject<AppDownloadManager>()
-    private val vpnController by inject<VpnController>()
-    private var isSyncing = false
+    private val filterSourceRepo by inject<FilterSourceRepository>()
 
     companion object {
         private const val TAG = "RethinkPlusFragment"
@@ -73,28 +71,22 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         super.onViewCreated(view, savedInstanceState)
 
         initHttpsInspectionSection()
-        initBlocklistBridgeSection()
         initAdvancedFilteringSection()
         initExclusionsSection()
 
         // Immediate refresh of CA status on view creation
         updateCaStatusUi()
 
-        // Immediate refresh of DNS blocklist summary on view creation
-        updateDnsBlocklistSummary()
-
         // Start CA status polling
         startCaStatusPolling()
 
-        observeBlocklistBridgeState()
+        observeFilterSourcesState()
     }
 
     override fun onResume() {
         super.onResume()
         // Refresh CA status when returning to fragment (e.g. from system certificate installer)
         updateCaStatusUi()
-        // Refresh DNS blocklist summary when returning to fragment (e.g. from Manage DNS Lists)
-        updateDnsBlocklistSummary()
     }
 
     // ========== HTTPS INSPECTION SECTION ==========
@@ -374,158 +366,41 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         }
     }
 
-    // ========== DNS BLOCKLIST → HTTPS FILTERING SECTION ==========
+    // ========== ADVANCED FILTERING SECTION (read-only aggregate) ==========
 
-    private fun initBlocklistBridgeSection() {
-        b.switchBlocklistBridge.isEnabled = true
-
-        // Bridge toggle
-        b.switchBlocklistBridge.setOnCheckedChangeListener { _, isChecked ->
-            persistentState.blocklistEnabled = isChecked
-            updateBlocklistBridgeUi(isChecked)
-            if (isChecked) {
-                syncBlocklists()
-            }
-        }
-
-        // Observe blocklist bridge enabled state
-        persistentState.blocklistEnabledLiveData.observe(viewLifecycleOwner) { enabled ->
-            updateBlocklistBridgeUi(enabled)
-        }
-
-        // Open original Rethink DNS blocklist manager
-        b.btnOpenBlocklistManager.setOnClickListener {
-            openBlocklistManager()
-        }
-
-        // Sync button
-        b.btnSyncBlocklists.setOnClickListener { syncBlocklists() }
-    }
-
-    private fun updateBlocklistBridgeUi(enabled: Boolean) {
-        b.switchBlocklistBridge.isChecked = enabled
-        // Selected DNS lists row is always visible so user can see current selection and navigate to manage it
-        b.layoutBlocklistSelector.isVisible = true
-        b.btnOpenBlocklistManager.isEnabled = true
-
-        // Sync section is visible; Sync Now button is enabled only when bridge is ON
-        b.layoutSyncButton.isVisible = true
-        b.btnSyncBlocklists.isEnabled = enabled
-
-        updateDnsBlocklistSummary()
-    }
-
-    private fun updateDnsBlocklistSummary() {
-        val localCount = persistentState.numberOfLocalBlocklists
-        val remoteCount = persistentState.getRemoteBlocklistCount()
-        val totalCount = localCount + remoteCount
-
-        val summaryText = when (totalCount) {
-            0 -> getString(R.string.plus_blocklist_selected_count_none)
-            1 -> getString(R.string.plus_blocklist_selected_count_single)
-            else -> getString(R.string.plus_blocklist_selected_count_format, totalCount)
-        }
-        b.tvSelectedDnsCount.text = summaryText
-
-        if (persistentState.blocklistEnabled) {
-            if (totalCount > 0) {
-                if (b.tvSyncStatus.text.isNullOrEmpty() || b.tvSyncStatus.text == getString(R.string.plus_blocklist_bridge_ready)) {
-                    b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-                }
-            } else {
-                b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_select_first)
-            }
-        } else {
-            b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-        }
-    }
-
-    private fun observeBlocklistBridgeState() {
-        // Observe local blocklist stamp for changes from DNS settings
-        persistentState.localBlocklistStampLiveData.observe(viewLifecycleOwner) { _ ->
-            updateDnsBlocklistSummary()
-        }
-
-        // Observe blocklist timestamp for updates
-        persistentState.localBlocklistTimestampLiveData.observe(viewLifecycleOwner) { _ ->
-            updateDnsBlocklistSummary()
-        }
-    }
-
-    private fun syncBlocklists() {
-        if (isSyncing) return
-        isSyncing = true
-        b.btnSyncBlocklists.isEnabled = false
-        b.progressSync.isVisible = true
-        b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_syncing)
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val stats = RethinkBlocklistManager.syncBlocklistToAdblockRules(requireContext())
-
-                withContext(Dispatchers.Main) {
-                    b.progressSync.isVisible = false
-                    b.btnSyncBlocklists.isEnabled = persistentState.blocklistEnabled
-                    b.tvSyncStatus.text = getString(
-                        R.string.plus_blocklist_bridge_synced,
-                        stats.total,
-                        stats.cosmetic,
-                        stats.scriptlet
-                    )
-                    b.cardSyncResult.isVisible = true
-                    b.tvSyncResult.text = getString(
-                        R.string.plus_blocklist_bridge_synced,
-                        stats.total,
-                        stats.cosmetic,
-                        stats.scriptlet
-                    )
-                    showToast(getString(R.string.plus_sync_complete_toast, stats.total))
-                }
-            } catch (e: Exception) {
-                Logger.e(LOG_TAG_UI, "Sync blocklists failed", e)
-                withContext(Dispatchers.Main) {
-                    b.progressSync.isVisible = false
-                    b.btnSyncBlocklists.isEnabled = persistentState.blocklistEnabled
-                    b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-                    showToast(getString(R.string.plus_sync_error_toast, e.message ?: "Unknown error"))
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    isSyncing = false
-                }
-            }
-        }
-    }
-
-    private fun updateSyncStatusDisplay() {
-        updateDnsBlocklistSummary()
-    }
-
-    private fun openBlocklistManager() {
-        // Navigate to DNS blocklist configuration (original Rethink DNS screen)
-        val intent = Intent(requireContext(), com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity::class.java)
-        intent.putExtra(com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.INTENT, com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.FragmentLoader.LOCAL.ordinal)
-        startActivity(intent)
-    }
-
-    // ========== ADVANCED FILTERING SECTION (placeholder) ==========
 
     private fun initAdvancedFilteringSection() {
-        // Advanced Filtering is now visible with CSP and HTML filtering switches
+        // Advanced Filtering card is visible. The obsolete rule-subtype toggles
+        // (cosmetic/scriptlet/procedural/CSP/HTML) are retired in B5 Slice-1 —
+        // FilterEngine auto-detects subtypes (DECISION-009).
         b.cardAdvancedFiltering.isVisible = true
-
-        // All switches are disabled until FilterEngine supports these features
-        b.switchCosmeticFiltering.isEnabled = false
-        b.switchScriptletFiltering.isEnabled = false
-        b.switchProceduralFiltering.isEnabled = false
-        b.switchCspFiltering.isEnabled = false
-        b.switchHtmlFiltering.isEnabled = false
-
-        // Advanced Filter Sources management button - MUST NOT open Rethink DNS manager
         b.btnManageFilterSources.isEnabled = true
+
+        // Manage Filters opens the read-only Manage Filters shell (B5 Slice-1).
+        // Target activity is defined under full/ source set, so we launch via
+        // component intent to avoid compile-time coupling from the fdroid source set.
         b.btnManageFilterSources.setOnClickListener {
-            showToast(getString(R.string.plus_filter_sources_coming_soon))
+            try {
+                val intent = Intent().setClassName(
+                    requireContext().packageName,
+                    "com.celzero.bravedns.ui.activity.ManageFilterSourcesActivity"
+                )
+                startActivity(intent)
+            } catch (e: Exception) {
+                Logger.e(LOG_TAG_UI, "Failed to launch ManageFilterSourcesActivity", e)
+            }
         }
+    }
+
+    private fun observeFilterSourcesState() {
+        filterSourceRepo.getAllSourcesLiveData().observe(viewLifecycleOwner) { sources ->
+            updateFilterSourcesSummary(sources)
+        }
+    }
+
+    private fun updateFilterSourcesSummary(sources: List<FilterSource>) {
+        val summary = FilterSourceSummaryFormatter.compute(sources)
+        b.tvFilterSourcesCount.text = FilterSourceSummaryFormatter.format(requireContext(), summary)
     }
 
     // ========== EXCLUSIONS SECTION ==========

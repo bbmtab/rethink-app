@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Preserve the bundled filter catalog byte-for-byte across platforms
+app/src/main/assets/filter_sources/filters.json -text whitespace=cr-at-eol

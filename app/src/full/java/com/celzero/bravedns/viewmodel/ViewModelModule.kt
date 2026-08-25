@@ -49,6 +49,14 @@ object ViewModelModule {
         viewModel { DomainConnectionsViewModel(get()) }
         viewModel { WgNwActivityViewModel(get()) }
         viewModel { EventsViewModel(get()) }
+        viewModel {
+            ManageFilterSourcesViewModel(
+                get(),
+                get(),
+                get(),
+                get()
+            )
+        }
     }
 
     val modules = listOf(modelModules)

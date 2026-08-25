@@ -24,12 +24,15 @@ import com.celzero.bravedns.database.FilterSourceCategory
 import com.celzero.bravedns.database.FilterSourceDao
 import com.celzero.bravedns.database.FilterSourceFileStore
 import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.core.filter.FilterSourceCompiler.SourceDiagnostics
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -55,10 +58,11 @@ import java.security.MessageDigest
  *  - C3: Invalid rule accounting (garbage lines excluded from compiled output).
  *  - C4: Subtype compatibility metrics (per-source diagnostic breakdown is accurate).
  *  - C5: Multi-source isolation (one source failure does not corrupt another source).
- *  - C6: Last-known-good preservation (failed compile preserves previous state).
+ *  - C6: Zero-enabled set intentionally promotes an empty artifact.
+ *  - FIX-7A: Enabled source unavailable preserves last-known-good and returns failure.
  *  - C7: Atomic promotion (adblock_rules.new -> adblock_rules.txt replacement is atomic).
  *  - C8: Duplicate handling (identical rules across sources are deduped in compiled output).
- *  - C9: Empty source behavior (empty source produces valid empty artifact).
+ *  - C9: Empty enabled source returns failure without promoting an empty artifact.
  *  - C10: Large source behavior (streaming compile handles large inputs without OOM).
  *  - C11: Deterministic output order (rules sorted in ASCII order in compiled artifact).
  *  - C12: No B4 runtime activation in B3 (FilterEngine reload NOT called by compiler).
@@ -324,28 +328,114 @@ class FilterSourceCompilerTest : KoinTest {
     }
 
     // =========================================================================
-    // C6 — FAILED COMPILATION PRESERVES LAST-KNOWN-GOOD ADBLOCK_RULES.TXT
+    // ZERO-ENABLED-SOURCES PROMOTES EMPTY ARTIFACT (case A in compileAllEnabled)
+    //
+    // When no FilterSource is enabled, compilation succeeds and the empty artifact is
+    // promoted — this is the legitimate "user has chosen to filter nothing" state and
+    // must NOT be conflated with the "enabled sources unavailable" failure path.
     // =========================================================================
     @Test
-    fun c6_failedCompilation_preservesPreviousArtifact() = runTest(testDispatcher) {
+    fun zeroEnabledSources_promotesEmptyArtifact() = runTest(testDispatcher) {
+        // Seed prior LKG content; case A overwrites with empty artifact by design.
         val compiledFile = File(appContext.filesDir, FilterSourceFileStore.COMPILED_RULES_NAME)
         val knownGood = listOf("||old-known-good.example.com^")
         compiledFile.writeText(knownGood.joinToString("\n") + "\n")
 
-        val source = repo.addSource(
-            name = "Broken",
-            url = "https://example.com/broken.txt",
+        // Add a disabled source — not enabled, so enabledSources.isEmpty() returns true.
+        repo.addSource(
+            name = "Disabled",
+            url = "https://example.com/disabled.txt",
             category = FilterSourceCategory.CUSTOM,
-            enabled = true
+            enabled = false
         )
 
         val outcome = compiler.compileAllEnabled()
-        assertTrue(outcome.success)
+        assertTrue(
+            "Zero enabled sources must compile to success (empty set is legitimate)",
+            outcome.success
+        )
 
         val afterFile = File(appContext.filesDir, FilterSourceFileStore.COMPILED_RULES_NAME)
         assertTrue("Artifact must exist after compile", afterFile.exists())
         val afterLines = afterFile.readLines()
-        assertEquals("Empty source set should produce empty artifact", 0, afterLines.size)
+        assertEquals(
+            "Zero-enabled-set must produce empty artifact (case A intentional clear)",
+            0,
+            afterLines.size
+        )
+    }
+
+    // =========================================================================
+    // ENABLED SOURCE MISSING CURRENT.TXT PRESERVES LKG + RETURNS FAILURE
+    // (case B in compileAllEnabled — slice-3C fix-7A)
+    //
+    // When one or more FilterSource rows have enabled=true but their current.txt
+    // files are unavailable, compilation must fail and adblock_rules.txt must not
+    // be overwritten with an empty artifact. The last-known-good compiled
+    // rules must survive untouched so the runtime continues to enforce them.
+    // =========================================================================
+    @Test
+    fun enabledSourceMissingCurrentFile_preservesLkgAndReturnsFailure() = runTest(testDispatcher) {
+        // Seed the last-known-good artifact the runtime is currently enforcing.
+        val compiledFile = File(appContext.filesDir, FilterSourceFileStore.COMPILED_RULES_NAME)
+        val preservedLkg = listOf("||preserved-lkg.example^")
+        compiledFile.writeText(preservedLkg.joinToString("\n") + "\n")
+
+        // Add an enabled source — but never write its current.txt, simulating a
+        // B2 download failure that left the row enabled with no raw data on disk.
+        val source = repo.addSource(
+            name = "EnabledButUnavailable",
+            url = "https://example.com/unavailable.txt",
+            category = FilterSourceCategory.CUSTOM,
+            enabled = true
+        )
+        assertFalse(
+            "Regression setup requires missing current.txt",
+            fileStore.currentFile(source.id).exists()
+        )
+
+        val outcome = compiler.compileAllEnabled()
+
+        // Failure surface — the caller (ViewModel.setSourceEnabled) reads this and
+        // emits TransactionState.Failed WITHOUT committing hash/gen, so the runtime
+        // watermark continues to point at the preserved LKG.
+        assertFalse(
+            "Compilation must FAIL when enabled source has no current.txt (case B)",
+            outcome.success
+        )
+        assertNull(
+            "Failure outcome must not carry an enabledSetHash (no successful compile)",
+            outcome.enabledSetHash
+        )
+        assertEquals(
+            "Failure must report the count of attempted sources in diagnostics",
+            1,
+            outcome.totalSourcesProcessed
+        )
+        assertNotNull(
+            "Failure must include per-source diagnostics for the unavailable source",
+            outcome.diagnostics.find { it.sourceId == source.id }
+        )
+        assertNotNull(
+            "Failure outcome must carry an explanatory errorMessage",
+            outcome.errorMessage
+        )
+
+        // LKG preservation — adblock_rules.txt must NOT have been overwritten.
+        val afterFile = File(appContext.filesDir, FilterSourceFileStore.COMPILED_RULES_NAME)
+        assertTrue("Artifact must still exist after failed compile", afterFile.exists())
+        val afterLines = afterFile.readLines()
+        assertEquals(
+            "LKG must be preserved verbatim — empty artifact must NOT have overwritten it",
+            preservedLkg.size,
+            afterLines.size
+        )
+        assertTrue(
+            "Preserved LKG rule must still be present in adblock_rules.txt",
+            afterLines.contains(preservedLkg[0])
+        )
+        assertFalse("Failure must not write a staged artifact", fileStore.stagedRulesFile().exists())
+        assertFalse("Failure must not write a binary cache", fileStore.cacheFile().exists())
     }
 
     // =========================================================================
@@ -415,10 +505,15 @@ class FilterSourceCompilerTest : KoinTest {
     }
 
     // =========================================================================
-    // C9 — EMPTY SOURCE BEHAVIOR
+    // ENABLED SOURCE WITH EMPTY CURRENT.TXT — case B (slice-3C fix-7A)
+    //
+    // An enabled FilterSource whose current.txt exists but contains no parseable
+    // rules is indistinguishable, at the allParsedLines layer, from one whose
+    // current.txt is missing. Per case B in compileAllEnabled, this returns
+    // FAILURE without touching the artifact.
     // =========================================================================
     @Test
-    fun c9_emptySource_compilesToEmptyArtifact() = runTest(testDispatcher) {
+    fun c9_enabledSourceWithEmptyCurrentFile_returnsFailureNoArtifactWrite() = runTest(testDispatcher) {
         val source = repo.addSource(
             name = "Empty",
             url = "https://example.com/empty.txt",
@@ -429,16 +524,27 @@ class FilterSourceCompilerTest : KoinTest {
         writeCurrentFile(source.id, emptyList())
 
         val outcome = compiler.compileAllEnabled()
-        assertTrue(outcome.success)
+        assertFalse(
+            "Enabled source with empty current.txt must fall under case B (failure)",
+            outcome.success
+        )
+        assertNull(
+            "Failure must not carry an enabledSetHash",
+            outcome.enabledSetHash
+        )
 
         val diag = outcome.diagnostics.single()
+        assertEquals(source.id, diag.sourceId)
         assertEquals(0, diag.parsedRuleCount)
         assertEquals(0, diag.invalidRuleCount)
 
         val artifact = File(appContext.filesDir, FilterSourceFileStore.COMPILED_RULES_NAME)
-        assertTrue(artifact.exists())
-        val lines = artifact.readLines()
-        assertEquals("Empty source should produce empty artifact", 0, lines.size)
+        // Case B must NOT promote an empty artifact over any existing file.
+        // No prior artifact existed in this test, so none should be created.
+        assertFalse(
+            "Case B must not create or promote an empty artifact",
+            artifact.exists()
+        )
     }
 
     // =========================================================================
@@ -542,6 +648,70 @@ class FilterSourceCompilerTest : KoinTest {
             assertTrue("Smoke compile iteration $iteration must succeed", outcome.success)
             assertEquals("Iteration $iteration: total rules must be 3", 3L, outcome.totalParsedRules.toLong())
         }
+    }
+
+    // =========================================================================
+    // META-A — enabledSetHash field on CompileOutcome (additive, contract (v))
+    // =========================================================================
+
+    /**
+     * TEST A — success contains deterministic hash.
+     *
+     * Source IDs 1 and 2 (in that order) -> canonical "1,2" -> SHA-256 hex:
+     *   17f8af97ad4a7f7639a4c9171d5185cbafb85462877a4746c21bdb0a4f940ca0
+     */
+    @Test
+    fun metaA_success_compileOutcomeContainsDeterministicEnabledSetHash() {
+        val diagnostics = listOf(
+            SourceDiagnostics(sourceId = 1, sourceName = "A"),
+            SourceDiagnostics(sourceId = 2, sourceName = "B")
+        )
+
+        val outcome = FilterSourceCompiler.CompileOutcome.success(diagnostics)
+
+        assertTrue(outcome.success)
+        assertEquals(
+            "17f8af97ad4a7f7639a4c9171d5185cbafb85462877a4746c21bdb0a4f940ca0",
+            outcome.enabledSetHash
+        )
+    }
+
+    /**
+     * TEST B — input order does not change hash.
+     *
+     * The algorithm sorts ascending before hashing, so [1,2] and [2,1] must
+     * produce the same enabledSetHash.
+     */
+    @Test
+    fun metaA_success_inputOrderDoesNotChangeEnabledSetHash() {
+        val forward = FilterSourceCompiler.CompileOutcome.success(
+            listOf(
+                SourceDiagnostics(sourceId = 1, sourceName = "A"),
+                SourceDiagnostics(sourceId = 2, sourceName = "B")
+            )
+        )
+        val reversed = FilterSourceCompiler.CompileOutcome.success(
+            listOf(
+                SourceDiagnostics(sourceId = 2, sourceName = "B"),
+                SourceDiagnostics(sourceId = 1, sourceName = "A")
+            )
+        )
+
+        assertEquals(forward.enabledSetHash, reversed.enabledSetHash)
+    }
+
+    /**
+     * TEST C — failure contains no hash (null, not "").
+     *
+     * Per META-A contract: failure(...) does NOT explicitly pass enabledSetHash,
+     * data-class default = null. Empty string is forbidden as the failure sentinel.
+     */
+    @Test
+    fun metaA_failure_compileOutcomeHasNullEnabledSetHash() {
+        val outcome = FilterSourceCompiler.CompileOutcome.failure("test failure")
+
+        assertFalse(outcome.success)
+        assertNull(outcome.enabledSetHash)
     }
 
     // =========================================================================

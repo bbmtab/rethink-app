@@ -172,6 +172,10 @@
             android:name=".ui.activity.AdvancedSettingActivity"
             android:finishOnTaskLaunch="true" />
         <activity
+            android:name=".ui.activity.ManageFilterSourcesActivity"
+            android:exported="true"
+            android:finishOnTaskLaunch="true" />
+        <activity
             android:name=".ui.activity.CertificateSetupActivity"
             android:finishOnTaskLaunch="true" />
         <activity

@@ -21,7 +21,11 @@ import android.os.Build
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.database.FilterSourceStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -137,11 +141,16 @@ class FilterSourceDownloadManager(
 
         // 3. Build HTTP request with conditional headers
         val requestBuilder = Request.Builder().url(source.url)
-        if (!source.etag.isNullOrBlank()) {
-            requestBuilder.header("If-None-Match", source.etag)
-        }
-        if (!source.lastModified.isNullOrBlank()) {
-            requestBuilder.header("If-Modified-Since", source.lastModified)
+        // Cached validators are meaningful only when the corresponding
+        // last-known-good current.txt still exists. If the file is missing,
+        // force an unconditional 200 response so it can be reconstructed.
+        if (currentFile.exists()) {
+            if (!source.etag.isNullOrBlank()) {
+                requestBuilder.header("If-None-Match", source.etag)
+            }
+            if (!source.lastModified.isNullOrBlank()) {
+                requestBuilder.header("If-Modified-Since", source.lastModified)
+            }
         }
 
         val request = requestBuilder.build()
@@ -149,6 +158,7 @@ class FilterSourceDownloadManager(
         var response: Response? = null
         try {
             response = httpClient.newCall(request).execute()
+            currentCoroutineContext().ensureActive()
             val code = response.code
 
             // Handle 304 Not Modified
@@ -204,6 +214,7 @@ class FilterSourceDownloadManager(
 
                 // Stream response to download.tmp while computing SHA-256 and enforcing 25 MiB cap
                 val streamResult = streamToFileWithDigest(body.byteStream(), tempFile)
+                currentCoroutineContext().ensureActive()
                 if (streamResult is StreamOutcome.Error) {
                     Logger.e(LOG_TAG_DOWNLOAD, "$TAG; source id=$sourceId stream failed: ${streamResult.message}")
                     cleanTempFile(tempFile)
@@ -256,6 +267,34 @@ class FilterSourceDownloadManager(
             repository.updateDownloadFailure(sourceId, err)
             return@withContext DownloadResult.Failure(sourceId, err, code)
 
+        } catch (e: CancellationException) {
+            Logger.i(
+                LOG_TAG_DOWNLOAD,
+                "$TAG; download cancelled for source id=$sourceId"
+            )
+            cleanTempFile(tempFile)
+
+            // The download marked this source IN_PROGRESS before network I/O.
+            // Restore the prior observable status without allowing the cancelled
+            // Job to interrupt that restoration, then preserve cancellation.
+            try {
+                withContext(NonCancellable) {
+                    repository.updateStatus(
+                        sourceId,
+                        source.lastUpdateStatus,
+                        source.errorMessage
+                    )
+                }
+            } catch (restoreError: Exception) {
+                Logger.e(
+                    LOG_TAG_DOWNLOAD,
+                    "$TAG; failed to restore status after cancellation for " +
+                        "source id=$sourceId: ${restoreError.message}",
+                    restoreError
+                )
+            }
+
+            throw e
         } catch (e: Exception) {
             val err = "Network/IO error during download: ${e.message ?: e.javaClass.simpleName}"
             Logger.e(LOG_TAG_DOWNLOAD, "$TAG; source id=$sourceId exception: $err", e)
