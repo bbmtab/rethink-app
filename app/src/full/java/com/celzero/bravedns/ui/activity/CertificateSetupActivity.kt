@@ -15,15 +15,12 @@
  */
 package com.celzero.bravedns.ui.activity
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import android.view.View
 import android.widget.Toast
@@ -35,8 +32,10 @@ import com.celzero.bravedns.R
 import com.celzero.bravedns.databinding.ActivityCertificateSetupBinding
 import com.celzero.bravedns.service.PersistentState
 import com.celzero.bravedns.ui.BaseActivity
+import com.celzero.bravedns.core.ca.CaCertificateExporter
 import com.celzero.bravedns.core.ca.CertificateAuthority
 import com.celzero.bravedns.util.Themes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,6 +55,7 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
     private val persistentState by inject<PersistentState>()
     private val b by viewBinding(ActivityCertificateSetupBinding::bind)
     private var isPolling = false
+    private var isCaExportInProgress = false
     private var certificateUri: Uri? = null
 
     // Activity result launcher for KeyChain install intent
@@ -135,20 +135,39 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
 
         // Save Certificate button click - saves to Downloads for manual install
         b.btnSaveCert.setOnClickListener {
-            try {
-                val certBytes = CertificateAuthority.exportCaCert()
-                saveCertificateToDownloads(certBytes)
-                Toast.makeText(
-                    this,
-                    "Certificate saved to Downloads/rethinkdns_root_ca.crt",
-                    Toast.LENGTH_LONG
-                ).show()
-            } catch (e: Exception) {
-                Toast.makeText(
-                    this,
-                    "Failed to save certificate: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+            if (isCaExportInProgress) return@setOnClickListener
+            isCaExportInProgress = true
+            b.btnSaveCert.isEnabled = false
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val certBytes = CertificateAuthority.exportCaCert()
+                    val result = CaCertificateExporter.exportToDownloads(
+                        this@CertificateSetupActivity,
+                        certBytes
+                    )
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@CertificateSetupActivity,
+                            "Certificate saved to Downloads/${result.displayName}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@CertificateSetupActivity,
+                            "Failed to save certificate: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } finally {
+                    withContext(Dispatchers.Main) {
+                        isCaExportInProgress = false
+                        updateUiStatus()
+                    }
+                }
             }
         }
 
@@ -217,30 +236,6 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
         }
     }
 
-    /**
-     * Saves the CA certificate to Downloads folder for manual installation.
-     * Useful for devices where automatic install fails (OEMs, etc.)
-     */
-    private fun saveCertificateToDownloads(certBytes: ByteArray) {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val certFile = File(downloadsDir, "rethinkdns_root_ca.crt")
-        certFile.writeBytes(certBytes)
-        // MediaStore scan so it shows up in file managers
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "rethinkdns_root_ca.crt")
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/x-x509-ca-cert")
-                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-            val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                contentResolver.openOutputStream(it)?.use { outputStream ->
-                    outputStream.write(certBytes)
-                }
-            }
-        }
-    }
-
     override fun onResume() {
         super.onResume()
         isPolling = true
@@ -298,7 +293,7 @@ class CertificateSetupActivity : BaseActivity(R.layout.activity_certificate_setu
                 b.tvInstallBadge.setBackgroundResource(R.drawable.badge_bg_red)
 
                 b.btnInstall.isEnabled = canExport
-                b.btnSaveCert.isEnabled = canExport
+                b.btnSaveCert.isEnabled = canExport && !isCaExportInProgress
                 b.tvGenerateHint.visibility = if (canExport) View.GONE else View.VISIBLE
                 b.switchHttpsInspection.isEnabled = false
                 b.switchHttpsInspection.isChecked = false

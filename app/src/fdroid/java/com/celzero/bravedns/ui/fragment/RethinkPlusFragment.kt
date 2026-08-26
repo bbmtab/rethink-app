@@ -27,6 +27,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.observe
 import by.kirich1409.viewbindingdelegate.viewBinding
 import com.celzero.bravedns.R
+import com.celzero.bravedns.core.ca.CaCertificateExporter
 import com.celzero.bravedns.core.ca.CertificateAuthority
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceRepository
@@ -35,11 +36,13 @@ import com.celzero.bravedns.databinding.FragmentRethinkPlusBinding
 import com.celzero.bravedns.service.PersistentState
 import Logger
 import Logger.LOG_TAG_UI
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * F-Droid flavour Plus tab — full MITM/Adblock UI.
@@ -60,11 +63,11 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private val persistentState by inject<PersistentState>()
     private val filterSourceRepo by inject<FilterSourceRepository>()
 
+    private val isCaExportInProgress = AtomicBoolean(false)
+
     companion object {
         private const val TAG = "RethinkPlusFragment"
-        private const val CA_INSTALL_REQUEST_CODE = 1001
         private const val CA_INSTALL_POLL_INTERVAL_MS = 1000L
-        private const val CA_INSTALL_POLL_MAX_ATTEMPTS = 30
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -107,10 +110,6 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
 
         // CA Action button removed — canonical flows use Generate, Install, Save
         // b.btnCaAction.setOnClickListener { showCaActionDialog() }
-
-        // CA Re-install and CA Export buttons removed in favor of single canonical Install and Save buttons
-        // b.btnCaReinstall.setOnClickListener { launchCaInstall() }
-        // b.btnCaExport.setOnClickListener { exportCaCertificate() }
 
         // Generate CA Certificate button
         b.btnGenerate.setOnClickListener {
@@ -171,47 +170,32 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
 
         // Save Certificate button
         b.btnSaveCert.setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
+            if (!isCaExportInProgress.compareAndSet(false, true)) {
+                return@setOnClickListener
+            }
+            b.btnSaveCert.isEnabled = false
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 try {
-                    val certBytes = CertificateAuthority.exportCaCert()
-                    val publicDownloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-                    val certFile = File(publicDownloadsDir, "rethinkdns_root_ca.crt")
-                    certFile.writeBytes(certBytes)
-
-                    // MediaStore indexing for Android 10+ (Q+) so it appears immediately in system file picker
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        try {
-                            val contentValues = android.content.ContentValues().apply {
-                                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "rethinkdns_root_ca.crt")
-                                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/x-x509-ca-cert")
-                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
-                            }
-                            val resolver = requireContext().contentResolver
-                            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                            uri?.let {
-                                resolver.openOutputStream(it)?.use { outputStream ->
-                                    outputStream.write(certBytes)
-                                }
-                            }
-                        } catch (ignored: Exception) {
-                            // File write above succeeded as fallback
-                        }
-                    }
-
-                    // Also write to app-specific external downloads directory for redundancy
-                    try {
-                        val appDownloadsDir = File(requireContext().getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "RethinkDNS")
-                        appDownloadsDir.mkdirs()
-                        val appFile = File(appDownloadsDir, "rethinkdns_root_ca.crt")
-                        appFile.writeBytes(certBytes)
-                    } catch (ignored: Exception) {}
-
+                    val certificateBytes = CertificateAuthority.exportCaCert()
+                    val result = CaCertificateExporter.exportToDownloads(
+                        requireContext().applicationContext,
+                        certificateBytes
+                    )
                     withContext(Dispatchers.Main) {
-                        showToast("Certificate saved to Downloads: ${certFile.name}")
+                        showToast("Certificate saved to Downloads: ${result.displayName}")
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         showToast(getString(R.string.plus_ca_export_error, e.message ?: "Unknown error"))
+                    }
+                } finally {
+                    isCaExportInProgress.set(false)
+                    withContext(Dispatchers.Main) {
+                        if (view != null) {
+                            updateCaStatusUi()
+                        }
                     }
                 }
             }
@@ -270,7 +254,7 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
             b.switchHttpsInspection.isEnabled = true
             b.btnGenerate.isEnabled = false
             b.btnInstall.isEnabled = true
-            b.btnSaveCert.isEnabled = true
+            b.btnSaveCert.isEnabled = !isCaExportInProgress.get()
             b.tvGenerateHint.isVisible = false
         } else if (caAvailable) {
             b.ivCaStatusIcon.setImageResource(R.drawable.ic_warning)
@@ -280,7 +264,7 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
             b.switchHttpsInspection.isEnabled = false
             b.btnGenerate.isEnabled = false
             b.btnInstall.isEnabled = true
-            b.btnSaveCert.isEnabled = true
+            b.btnSaveCert.isEnabled = !isCaExportInProgress.get()
             b.tvGenerateHint.isVisible = false
         } else {
             b.ivCaStatusIcon.setImageResource(R.drawable.ic_warning)
@@ -297,73 +281,6 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
 
     private fun showCaActionDialog() {
         // Unused dialog removed; actions are directly on the Plus tab UI.
-    }
-
-    private fun launchCaInstall() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            CertificateAuthority.initializeCA(requireContext())
-            val caBytes = CertificateAuthority.exportCaCert()
-
-            val file = File(requireContext().getExternalFilesDir(null), "rethinkdns_root_ca.crt")
-            file.writeBytes(caBytes)
-
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                requireContext(),
-                "${requireContext().packageName}.fileprovider",
-                file
-            )
-
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                setDataAndType(uri, "application/x-x509-ca-cert")
-            }
-
-            if (intent.resolveActivity(requireContext().packageManager) != null) {
-                withContext(Dispatchers.Main) {
-                    try {
-                        startActivityForResult(intent, CA_INSTALL_REQUEST_CODE)
-                    } catch (e: Exception) {
-                        Logger.e(LOG_TAG_UI, "Failed to launch CA installer", e)
-                        showToast(getString(R.string.plus_ca_install_error))
-                    }
-                }
-            } else {
-                // Fallback: open Settings security page
-                withContext(Dispatchers.Main) {
-                    val settingsIntent = Intent(Settings.ACTION_SECURITY_SETTINGS)
-                    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    try {
-                        startActivity(settingsIntent)
-                    } catch (e: Exception) {
-                        showToast(getString(R.string.plus_ca_install_error))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun exportCaCertificate() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                CertificateAuthority.initializeCA(requireContext())
-                val caBytes = CertificateAuthority.exportCaCert()
-
-                val downloadsDir = File(requireContext().getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "RethinkDNS")
-                downloadsDir.mkdirs()
-                val file = File(downloadsDir, "rethinkdns_root_ca.crt")
-                file.writeBytes(caBytes)
-
-                withContext(Dispatchers.Main) {
-                    showToast(getString(R.string.plus_ca_export_dialog_message).replace("%s", file.absolutePath))
-                }
-            } catch (e: Exception) {
-                Logger.e(LOG_TAG_UI, "Failed to export CA certificate", e)
-                withContext(Dispatchers.Main) {
-                    showToast(getString(R.string.plus_ca_export_error, e.message ?: "Unknown error"))
-                }
-            }
-        }
     }
 
     // ========== ADVANCED FILTERING SECTION (read-only aggregate) ==========
@@ -435,35 +352,6 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private fun showToast(message: String) {
         if (isAdded) {
             Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == CA_INSTALL_REQUEST_CODE) {
-            // Poll for CA installation
-            pollCaInstallation()
-        }
-    }
-
-    private fun pollCaInstallation() {
-        lifecycleScope.launch {
-            var attempts = 0
-            while (attempts < CA_INSTALL_POLL_MAX_ATTEMPTS) {
-                kotlinx.coroutines.delay(CA_INSTALL_POLL_INTERVAL_MS)
-                if (CertificateAuthority.isCaInstalled()) {
-                    withContext(Dispatchers.Main) {
-                        updateCaStatusUi()
-                        showToast(getString(R.string.plus_ca_install_success))
-                    }
-                    return@launch
-                }
-                attempts++
-            }
-            // Timeout - user may still be in Settings
-            withContext(Dispatchers.Main) {
-                updateCaStatusUi()
-            }
         }
     }
 
