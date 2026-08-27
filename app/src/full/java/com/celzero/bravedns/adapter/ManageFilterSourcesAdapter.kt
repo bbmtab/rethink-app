@@ -23,8 +23,10 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import androidx.core.view.isVisible
 import com.celzero.bravedns.R
 import com.celzero.bravedns.database.FilterSource
+import com.celzero.bravedns.database.FilterSourceCategory
 import com.celzero.bravedns.database.FilterSourceStatus
 import com.celzero.bravedns.databinding.ListItemFilterSourceBinding
 
@@ -32,14 +34,19 @@ import com.celzero.bravedns.databinding.ListItemFilterSourceBinding
  * Grouped read-only adapter for Manage Filters (B5 Slice-2R).
  *
  * Row types:
- *  - [FilterCategoryRow]   — non-interactive category header (count summary). Tapping
- *                            toggles category expand/collapse via [onCategoryToggle]. The
- *                            expansion state itself lives in the Activity (UI-local map)
- *                            and never persists; this adapter never mutates domain
- *                            entities.
+ *  - [FilterCategoryRow]   — interactive category header (count summary). Tapping toggles
+ *                            category expand/collapse via [onCategoryToggle]. Headers are
+ *                            tappable even at totalCount == 0 (empty buckets expand too;
+ *                            e.g. Custom Filters hosts the Add action when expanded). The
+ *                            expansion state itself lives in the Activity (UI-local map,
+ *                            default collapsed) and never persists; this adapter never
+ *                            mutates domain entities.
+ *  - [FilterAddCustomRow]  — inline "Add custom filter" action rendered between the
+ *                            Custom Filters header and its source rows whenever that
+ *                            section is expanded. Tapping invokes [onAddCustomFilter].
  *  - [FilterSourceRow]     — single FilterSource item with truthful status + diagnostics.
- *                            Entirely read-only: no switches, no delete, no download, no
- *                            compile trigger. Mutation surfaces are deferred to B5 Slice-3.
+ *                            Shows an enable switch for every source and one overflow control
+ *                            only for user-owned CUSTOM sources. The Activity owns all actions.
  *
  * All rows use unique stable IDs for DiffUtil; [DiffUtil.ItemCallback] keys on that ID.
  */
@@ -52,9 +59,14 @@ data class FilterCategoryRow(
     val displayName: String,
     val enabledCount: Int,
     val totalCount: Int,
-    val expanded: Boolean = true
+    val expanded: Boolean = false
 ) : FilterRow() {
     override val id: String = "cat_$categoryCode"
+}
+
+/** Inline "Add custom filter" action for the expanded Custom Filters section. */
+object FilterAddCustomRow : FilterRow() {
+    override val id: String = "action_add_custom"
 }
 
 data class FilterSourceRow(
@@ -75,33 +87,70 @@ class ManageFilterSourcesAdapter :
     var onCategoryToggle: ((String) -> Unit)? = null
 
     /**
+     * Optional callback invoked when the user taps the inline Add-custom-filter action in
+     * the expanded Custom Filters section. The Activity uses this to show its creation
+     * dialog. The adapter never mutates any supplied state itself.
+     */
+    var onAddCustomFilter: (() -> Unit)? = null
+
+    /**
      * Optional callback invoked when the user toggles a source's enable switch. The
      * Activity uses this to call [ManageFilterSourcesViewModel.setSourceEnabled]. The
      * adapter never mutates any supplied state itself.
      */
     var onSourceToggle: ((FilterSource, Boolean) -> Unit)? = null
 
+    /**
+     * Invoked when the overflow control on a user-owned CUSTOM source is tapped.
+     * The Activity owns menu rendering and action selection.
+     */
+    var onCustomSourceMenu: ((View, FilterSource) -> Unit)? = null
+
+    private var busySourceId: Int? = null
+
+    /**
+     * Disable the switch and overflow control for one source while a destructive
+     * operation is in progress. Passing null clears the busy row.
+     */
+    fun setBusySourceId(sourceId: Int?) {
+        if (busySourceId == sourceId) return
+        busySourceId = sourceId
+        notifyDataSetChanged()
+    }
+
     override fun getItemViewType(position: Int): Int = when (getItem(position)) {
         is FilterCategoryRow -> TYPE_HEADER
+        is FilterAddCustomRow -> TYPE_ADD_CUSTOM
         is FilterSourceRow -> TYPE_SOURCE
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-        return if (viewType == TYPE_HEADER) {
-            val v = LayoutInflater.from(parent.context)
-                .inflate(R.layout.list_item_filter_category_header, parent, false)
-            HeaderHolder(v)
-        } else {
-            val b = ListItemFilterSourceBinding.inflate(
-                LayoutInflater.from(parent.context), parent, false
-            )
-            SourceHolder(b)
+        return when (viewType) {
+            TYPE_HEADER -> {
+                val v = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.list_item_filter_category_header, parent, false)
+                HeaderHolder(v)
+            }
+
+            TYPE_ADD_CUSTOM -> {
+                val v = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.list_item_filter_add_custom, parent, false)
+                AddCustomHolder(v)
+            }
+
+            else -> {
+                val b = ListItemFilterSourceBinding.inflate(
+                    LayoutInflater.from(parent.context), parent, false
+                )
+                SourceHolder(b)
+            }
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val row = getItem(position)) {
             is FilterCategoryRow -> (holder as HeaderHolder).bind(row)
+            is FilterAddCustomRow -> (holder as AddCustomHolder).bind()
             is FilterSourceRow -> (holder as SourceHolder).bind(row)
         }
     }
@@ -111,27 +160,31 @@ class ManageFilterSourcesAdapter :
         private val tvCount: TextView = itemView.findViewById(R.id.tvCategoryCount)
 
         fun bind(row: FilterCategoryRow) {
-            val hasSources = row.totalCount > 0
-            val glyph = when {
-                !hasSources -> ""
-                row.expanded -> "▼ "
-                else -> "▶ "
-            }
+            // Collapsed-by-default UX (2026-08-26 fix): every header always shows an
+            // expand glyph and stays tappable — including empty buckets at count 0,
+            // whose expanded section hosts the inline Add-custom-filter action.
+            val glyph = if (row.expanded) "▼ " else "▶ "
             tvName.text = glyph + row.displayName
             tvCount.text = if (row.totalCount == 0) {
                 "0"
             } else {
                 "${row.enabledCount} / ${row.totalCount}"
             }
-            if (hasSources) {
-                itemView.setOnClickListener {
-                    onCategoryToggle?.invoke(row.categoryCode)
-                }
-            } else {
-                itemView.setOnClickListener(null)
+            itemView.setOnClickListener {
+                onCategoryToggle?.invoke(row.categoryCode)
             }
-            itemView.isClickable = hasSources
-            itemView.isFocusable = hasSources
+            itemView.isClickable = true
+            itemView.isFocusable = true
+        }
+    }
+
+    inner class AddCustomHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val btnAdd: View = itemView.findViewById(R.id.btnAddCustomFilterRow)
+
+        fun bind() {
+            btnAdd.setOnClickListener {
+                onAddCustomFilter?.invoke()
+            }
         }
     }
 
@@ -146,9 +199,24 @@ class ManageFilterSourcesAdapter :
             b.tvSourceStatus.text = formatStatus(item)
             b.tvSourceDiagnostics.text = formatDiagnostics(item)
             b.tvSourceDiagnostics.visibility = if (row.expanded) View.VISIBLE else View.GONE
+
+            val canManageCustomSource =
+                item.category == FilterSourceCategory.CUSTOM &&
+                    !item.isPreset
+
+            val sourceBusy = busySourceId == item.id
+            b.btnCustomSourceMenu.isVisible = canManageCustomSource
+            b.btnCustomSourceMenu.isEnabled =
+                canManageCustomSource && !sourceBusy
+            b.btnCustomSourceMenu.setOnClickListener(null)
+            if (canManageCustomSource) {
+                b.btnCustomSourceMenu.setOnClickListener { anchor ->
+                    onCustomSourceMenu?.invoke(anchor, item)
+                }
+            }
             b.switchEnabled.setOnCheckedChangeListener(null)
             b.switchEnabled.isChecked = row.source.enabled
-            b.switchEnabled.isEnabled = true
+            b.switchEnabled.isEnabled = !sourceBusy
             b.switchEnabled.setOnCheckedChangeListener { _, checked ->
                 onSourceToggle?.invoke(row.source, checked)
             }
@@ -213,6 +281,7 @@ class ManageFilterSourcesAdapter :
     companion object {
         private const val TYPE_HEADER = 0
         private const val TYPE_SOURCE = 1
+        private const val TYPE_ADD_CUSTOM = 2
 
         private val RowDiffCallback = object : DiffUtil.ItemCallback<FilterRow>() {
             override fun areItemsTheSame(old: FilterRow, new: FilterRow) = old.id == new.id

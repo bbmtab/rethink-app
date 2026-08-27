@@ -2619,4 +2619,35 @@
     <string name="plus_ca_export_error">Failed to export CA certificate: %s</string>
     <string name="plus_blocklist_bridge_status">Last sync: %s</string>
 
+    <!-- CUSTOM-FILTER-B5: add-dialog resources -->
+    <string name="custom_filter_add">Add custom filter</string>
+    <string name="custom_filter_more_actions">More actions for this custom filter</string>
+    <string name="custom_filter_edit">Edit</string>
+    <string name="custom_filter_remove">Remove</string>
+    <string name="custom_filter_edit_dialog_title">Edit custom filter</string>
+    <string name="custom_filter_edit_saved">Custom filter updated</string>
+    <string name="custom_filter_edit_requires_disabled">Turn off this filter before editing</string>
+    <string name="custom_filter_remove_dialog_title">Remove custom filter?</string>
+    <string name="custom_filter_remove_dialog_message">Remove “%1$s”? This cannot be undone.</string>
+    <string name="custom_filter_removed">Custom filter removed</string>
+    <string name="custom_filter_error_source_missing">This filter no longer exists</string>
+    <string name="custom_filter_error_not_custom">Only custom filters can be edited or removed</string>
+    <string name="custom_filter_error_cleanup_failed">Could not remove the old filter files. Try again.</string>
+    <string name="custom_filter_error_state_changed">The filter state changed. Try again.</string>
+    <string name="custom_filter_error_edit_failed">Could not update this custom filter: %1$s</string>
+    <string name="custom_filter_error_remove_failed">Could not remove this custom filter: %1$s</string>
+    <string name="custom_filter_dialog_title">Add custom filter</string>
+    <string name="custom_filter_name_label">Name</string>
+    <string name="custom_filter_url_label">Filter list URL</string>
+    <string name="custom_filter_error_empty_name">Enter a name</string>
+    <string name="custom_filter_error_empty_url">Enter a URL</string>
+    <string name="custom_filter_error_invalid_url">Enter a valid HTTP or HTTPS URL</string>
+    <string name="custom_filter_error_unsupported_scheme">Only HTTP and HTTPS URLs are supported</string>
+    <string name="custom_filter_error_missing_host">The URL must include a host</string>
+    <string name="custom_filter_error_fragment">Remove the URL fragment (#…)</string>
+    <string name="custom_filter_error_duplicate_name">A filter named “%1$s” is already in your list</string>
+    <string name="custom_filter_error_duplicate_url">This filter URL is already in your list</string>
+    <string name="custom_filter_error_create_failed">Could not save this custom filter: %1$s</string>
+    <string name="custom_filter_saved">Custom filter saved</string>
+
 </resources>

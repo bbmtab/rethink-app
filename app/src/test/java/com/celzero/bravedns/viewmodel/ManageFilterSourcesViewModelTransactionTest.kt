@@ -17,10 +17,14 @@ package com.celzero.bravedns.viewmodel
 
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import com.celzero.bravedns.core.filter.FilterSourceCompiler
+import com.celzero.bravedns.database.AddCustomSourceResult
+import com.celzero.bravedns.database.CustomFilterSourceValidator
+import com.celzero.bravedns.database.EditCustomSourceResult
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceCategory
 import com.celzero.bravedns.database.FilterSourceFileStore
 import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.database.RemoveCustomSourceResult
 import com.celzero.bravedns.download.FilterSourceDownloadManager
 import com.celzero.bravedns.service.PersistentState
 import io.mockk.coEvery
@@ -29,6 +33,7 @@ import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +46,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -857,6 +864,257 @@ class ManageFilterSourcesViewModelTransactionTest {
     }
 
     // =========================================================================
+    // CUSTOM-FILTER-B4 — createCustomSource state-machine tests (C1-C7)
+    //
+    // Metadata-only contract: creation enters the same txMutex as enable/disable
+    // transactions, maps the repository result onto CustomSourceCreationState, and never
+    // touches the downloader, compiler, PersistentState, or setSourceEnabled.
+    // =========================================================================
+
+    // C1 — Added: Creating then Added, the exact repository source instance preserved,
+    // repository called exactly once with the original name and URL.
+    @Test
+    fun createCustomSource_added_emitsCreatingThenAdded() = runTest(testDispatcher) {
+        val source = disabledCustomSource(id = 7)
+        coEvery {
+            repository.addCustomSource("My List", "https://example.com/custom.txt")
+        } returns AddCustomSourceResult.Added(source)
+
+        val states = collectCustomCreationStates()
+        val job = viewModel.createCustomSource("My List", "https://example.com/custom.txt")
+        job.join()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                CustomSourceCreationState.Idle,
+                CustomSourceCreationState.Creating,
+                CustomSourceCreationState.Added(source)
+            ),
+            states
+        )
+        // Fixture contract: id > 0, CUSTOM, disabled, non-preset, no catalog reference,
+        // finalized relativeFilePath.
+        assertTrue("fixture id must be > 0", source.id > 0)
+        assertEquals(FilterSourceCategory.CUSTOM, source.category)
+        assertFalse(source.enabled)
+        assertFalse(source.isPreset)
+        assertNull(source.referenceId)
+        assertEquals("filter_sources/source_7/current.txt", source.relativeFilePath)
+        // The exact instance returned by the repository must be carried through unchanged.
+        assertSame(
+            source,
+            (states.last() as CustomSourceCreationState.Added).source
+        )
+        coVerify(exactly = 1) {
+            repository.addCustomSource("My List", "https://example.com/custom.txt")
+        }
+    }
+
+    // C2 — InvalidInput: Creating then InvalidInput; zero downloader/compiler/
+    // PersistentState/updateEnabledStatus calls (no pipeline mutation on invalid input).
+    @Test
+    fun createCustomSource_invalidInput_emitsInvalidWithoutPipelineMutation() =
+        runTest(testDispatcher) {
+            coEvery { repository.addCustomSource(any(), any()) } returns
+                AddCustomSourceResult.InvalidInput(
+                    CustomFilterSourceValidator.Error.UNSUPPORTED_SCHEME
+                )
+
+            val states = collectCustomCreationStates()
+            viewModel.createCustomSource("My List", "ftp://example.com/list.txt").join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceCreationState.Idle,
+                    CustomSourceCreationState.Creating,
+                    CustomSourceCreationState.InvalidInput(
+                        CustomFilterSourceValidator.Error.UNSUPPORTED_SCHEME
+                    )
+                ),
+                states
+            )
+            coVerify(exactly = 0) { downloadManager.downloadSource(any<Int>()) }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+            coVerify(exactly = 0) { repository.updateEnabledStatus(any(), any()) }
+        }
+
+    // C3 — DuplicateUrl: Creating then DuplicateUrl carrying the exact URL; zero pipeline
+    // mutation.
+    @Test
+    fun createCustomSource_duplicateUrl_emitsDuplicateWithoutPipelineMutation() =
+        runTest(testDispatcher) {
+            val url = "https://duplicate.example.com/list.txt"
+            coEvery { repository.addCustomSource(any(), any()) } returns
+                AddCustomSourceResult.DuplicateUrl(url)
+
+            val states = collectCustomCreationStates()
+            viewModel.createCustomSource("My List", url).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceCreationState.Idle,
+                    CustomSourceCreationState.Creating,
+                    CustomSourceCreationState.DuplicateUrl(url)
+                ),
+                states
+            )
+            assertEquals(
+                url,
+                (states.last() as CustomSourceCreationState.DuplicateUrl).url
+            )
+            coVerify(exactly = 0) { downloadManager.downloadSource(any<Int>()) }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+            coVerify(exactly = 0) { repository.updateEnabledStatus(any(), any()) }
+        }
+
+    // C4 — DuplicateName: Creating then DuplicateName carrying the existing stored name;
+    // zero downloader/compiler/PersistentState/updateEnabledStatus mutation.
+    @Test
+    fun createCustomSource_duplicateName_emitsDuplicateWithoutPipelineMutation() =
+        runTest(testDispatcher) {
+            val existingName = "Existing Filter"
+            coEvery { repository.addCustomSource(any(), any()) } returns
+                AddCustomSourceResult.DuplicateName(existingName)
+
+            val states = collectCustomCreationStates()
+            viewModel.createCustomSource(
+                "existing filter",
+                "https://alternative.example.com/list.txt"
+            ).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceCreationState.Idle,
+                    CustomSourceCreationState.Creating,
+                    CustomSourceCreationState.DuplicateName(existingName)
+                ),
+                states
+            )
+            assertEquals(
+                existingName,
+                (states.last() as CustomSourceCreationState.DuplicateName).name
+            )
+            coVerify(exactly = 0) {
+                downloadManager.downloadSource(any<Int>())
+            }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(any(), any())
+            }
+        }
+
+    // C5 — unexpected failure: Creating then Failed with the exception message; the Job
+    // completes WITHOUT rethrowing the ordinary exception; zero pipeline mutation.
+    @Test
+    fun createCustomSource_unexpectedFailure_emitsFailed() = runTest(testDispatcher) {
+        coEvery { repository.addCustomSource(any(), any()) } throws
+            IllegalStateException("db failed")
+
+        val states = collectCustomCreationStates()
+        val job = viewModel.createCustomSource("My List", "https://example.com/list.txt")
+        job.join()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                CustomSourceCreationState.Idle,
+                CustomSourceCreationState.Creating,
+                CustomSourceCreationState.Failed("db failed")
+            ),
+            states
+        )
+        assertTrue("Job must complete without rethrowing", job.isCompleted)
+        assertFalse("ordinary failure must not cancel the Job", job.isCancelled)
+        coVerify(exactly = 0) { downloadManager.downloadSource(any<Int>()) }
+        coVerify(exactly = 0) { compiler.compileAllEnabled() }
+        verify(exactly = 0) {
+            persistentState.commitAdvancedFilterCompilation(any(), any())
+        }
+        coVerify(exactly = 0) { repository.updateEnabledStatus(any(), any()) }
+    }
+
+    // C6 — cancellation: the exact CancellationException instance thrown by the repository
+    // escapes as the Job's completion cause; state is reset to Idle before rethrow; zero
+    // pipeline mutation.
+    @Test
+    fun createCustomSource_cancellation_resetsIdleAndRethrows() = runTest(testDispatcher) {
+        val cancelled = CancellationException("creation cancelled by caller")
+        coEvery { repository.addCustomSource(any(), any()) } throws cancelled
+
+        val states = collectCustomCreationStates()
+        val job = viewModel.createCustomSource("My List", "https://example.com/list.txt")
+        var completionCause: Throwable? = null
+        job.invokeOnCompletion { cause -> completionCause = cause }
+        job.join()
+        advanceUntilIdle()
+
+        assertSame(
+            "the exact CancellationException instance must escape Job completion",
+            cancelled,
+            completionCause
+        )
+        assertTrue("Job must be cancelled", job.isCancelled)
+        assertEquals(
+            listOf(
+                CustomSourceCreationState.Idle,
+                CustomSourceCreationState.Creating,
+                CustomSourceCreationState.Idle
+            ),
+            states
+        )
+        coVerify(exactly = 0) { downloadManager.downloadSource(any<Int>()) }
+        coVerify(exactly = 0) { compiler.compileAllEnabled() }
+        verify(exactly = 0) {
+            persistentState.commitAdvancedFilterCompilation(any(), any())
+        }
+        coVerify(exactly = 0) { repository.updateEnabledStatus(any(), any()) }
+    }
+
+    // C7 — clearCustomSourceCreationState(): resets a non-Idle terminal state to Idle;
+    // pure UI-state reset — no repository/downloader/compiler/PersistentState interaction.
+    @Test
+    fun clearCustomSourceCreationState_setsIdle() = runTest(testDispatcher) {
+        coEvery { repository.addCustomSource(any(), any()) } returns
+            AddCustomSourceResult.DuplicateUrl("https://duplicate.example.com/list.txt")
+
+        val states = collectCustomCreationStates()
+        viewModel.createCustomSource("My List", "https://duplicate.example.com/list.txt")
+            .join()
+        advanceUntilIdle()
+
+        assertTrue(
+            "precondition: terminal creation state must be non-Idle",
+            states.last() != CustomSourceCreationState.Idle
+        )
+
+        viewModel.clearCustomSourceCreationState()
+
+        assertEquals(CustomSourceCreationState.Idle, states.last())
+        // The single addCustomSource call above is the creation itself; clear() must add
+        // no further interactions of any kind.
+        coVerify(exactly = 1) { repository.addCustomSource(any(), any()) }
+        coVerify(exactly = 0) { downloadManager.downloadSource(any<Int>()) }
+        coVerify(exactly = 0) { compiler.compileAllEnabled() }
+        verify(exactly = 0) {
+            persistentState.commitAdvancedFilterCompilation(any(), any())
+        }
+        coVerify(exactly = 0) { repository.updateEnabledStatus(any(), any()) }
+    }
+
+    // =========================================================================
     // Download-on-enable contract tests
 /*
     // =========================================================================
@@ -1098,6 +1356,545 @@ class ManageFilterSourcesViewModelTransactionTest {
         const val TEST_HASH = "test-enabled-set-hash"
     }
 
+    private fun collectCustomRemovalStates():
+        MutableList<CustomSourceRemovalState> {
+        val states = mutableListOf<CustomSourceRemovalState>()
+        viewModel.customSourceRemoval.observeForever {
+            states.add(it)
+        }
+        return states
+    }
+
+    // =========================================================================
+    // CUSTOM-FILTER-REMOVE-B5 — removeCustomSource transaction tests (R1-R8)
+    // =========================================================================
+
+    @Test
+    fun removeCustomSource_disabled_removesWithoutCompileOrGenerationCommit() =
+        runTest(testDispatcher) {
+            val source = disabledCustomSource(id = 51)
+            coEvery { repository.getSourceById(51) } returns source
+            coEvery {
+                repository.removeDisabledCustomSource(51)
+            } returns RemoveCustomSourceResult.Removed(51)
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(51).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceRemovalState.Idle,
+                    CustomSourceRemovalState.Removing(51),
+                    CustomSourceRemovalState.Removed(51)
+                ),
+                states
+            )
+            coVerify(exactly = 1) {
+                repository.removeDisabledCustomSource(51)
+            }
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(any(), any())
+            }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+        }
+
+    @Test
+    fun removeCustomSource_enabled_compilesCommitsThenRemoves() =
+        runTest(testDispatcher) {
+            val source = mockSource(52, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            coEvery { repository.getSourceById(52) } returns source
+            coEvery { repository.getEnabledSources() } returnsMany
+                listOf(listOf(source), emptyList())
+            every { persistentState.advancedFilterGeneration } returns 7L
+            coEvery { compiler.compileAllEnabled() } returns successOutcome()
+            coEvery {
+                repository.removeDisabledCustomSource(52)
+            } returns RemoveCustomSourceResult.Removed(52)
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(52).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                CustomSourceRemovalState.Removed(52),
+                states.last()
+            )
+            coVerifyOrder {
+                repository.updateEnabledStatus(52, false)
+                compiler.compileAllEnabled()
+                repository.removeDisabledCustomSource(52)
+            }
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(52, true)
+            }
+            verify(exactly = 1) {
+                persistentState.commitAdvancedFilterCompilation(
+                    TEST_HASH,
+                    8L
+                )
+            }
+        }
+
+    @Test
+    fun removeCustomSource_compileFailure_rollsBackAndDoesNotDelete() =
+        runTest(testDispatcher) {
+            val source = mockSource(53, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            coEvery { repository.getSourceById(53) } returns source
+            coEvery { repository.getEnabledSources() } returnsMany
+                listOf(listOf(source), emptyList())
+            coEvery { compiler.compileAllEnabled() } returns
+                FilterSourceCompiler.CompileOutcome.failure(
+                    "remove compile failed"
+                )
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(53).join()
+            advanceUntilIdle()
+
+            coVerifyOrder {
+                repository.updateEnabledStatus(53, false)
+                repository.updateEnabledStatus(53, true)
+            }
+            coVerify(exactly = 0) {
+                repository.removeDisabledCustomSource(53)
+            }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+            val failed =
+                states.last() as CustomSourceRemovalState.Failed
+            assertEquals("remove compile failed", failed.message)
+        }
+
+    @Test
+    fun removeCustomSource_commitFailure_rollsBackAndDoesNotDelete() =
+        runTest(testDispatcher) {
+            val source = mockSource(54, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            coEvery { repository.getSourceById(54) } returns source
+            coEvery { repository.getEnabledSources() } returnsMany
+                listOf(listOf(source), emptyList())
+            every { persistentState.advancedFilterGeneration } returns 2L
+            coEvery { compiler.compileAllEnabled() } returns successOutcome()
+            every {
+                persistentState.commitAdvancedFilterCompilation(
+                    TEST_HASH,
+                    3L
+                )
+            } throws IllegalStateException("commit failed")
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(54).join()
+            advanceUntilIdle()
+
+            coVerifyOrder {
+                repository.updateEnabledStatus(54, false)
+                repository.updateEnabledStatus(54, true)
+            }
+            coVerify(exactly = 0) {
+                repository.removeDisabledCustomSource(54)
+            }
+            val failed =
+                states.last() as CustomSourceRemovalState.Failed
+            assertEquals("commit failed", failed.message)
+        }
+
+    @Test
+    fun removeCustomSource_cleanupFailureAfterCommit_keepsDisabledWithoutRollback() =
+        runTest(testDispatcher) {
+            val source = mockSource(55, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            coEvery { repository.getSourceById(55) } returns source
+            coEvery { repository.getEnabledSources() } returnsMany
+                listOf(listOf(source), emptyList())
+            every { persistentState.advancedFilterGeneration } returns 0L
+            coEvery { compiler.compileAllEnabled() } returns successOutcome()
+            coEvery {
+                repository.removeDisabledCustomSource(55)
+            } returns RemoveCustomSourceResult.FileCleanupFailed(55)
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(55).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                CustomSourceRemovalState.FileCleanupFailed(55),
+                states.last()
+            )
+            coVerify(exactly = 1) {
+                repository.updateEnabledStatus(55, false)
+            }
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(55, true)
+            }
+            verify(exactly = 1) {
+                persistentState.commitAdvancedFilterCompilation(
+                    TEST_HASH,
+                    1L
+                )
+            }
+        }
+
+    @Test
+    fun removeCustomSource_cancellationBeforeCommit_rollsBackAndRethrows() =
+        runTest(testDispatcher) {
+            val source = mockSource(56, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            val compileStarted = CompletableDeferred<Unit>()
+            val releaseCompile = CompletableDeferred<Unit>()
+
+            coEvery { repository.getSourceById(56) } returns source
+            coEvery { repository.getEnabledSources() } returnsMany
+                listOf(listOf(source), emptyList())
+            coEvery { compiler.compileAllEnabled() } coAnswers {
+                compileStarted.complete(Unit)
+                releaseCompile.await()
+                successOutcome()
+            }
+
+            val states = collectCustomRemovalStates()
+            val job = viewModel.removeCustomSource(56)
+            compileStarted.await()
+
+            job.cancel()
+            advanceUntilIdle()
+
+            coVerifyOrder {
+                repository.updateEnabledStatus(56, false)
+                repository.updateEnabledStatus(56, true)
+            }
+            coVerify(exactly = 0) {
+                repository.removeDisabledCustomSource(56)
+            }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+            assertTrue(job.isCancelled)
+            assertEquals(CustomSourceRemovalState.Idle, states.last())
+        }
+
+    @Test
+    fun removeCustomSource_lookupGuards_haveZeroPipelineMutation() =
+        runTest(testDispatcher) {
+            coEvery { repository.getSourceById(57) } returns null
+            val missingStates = collectCustomRemovalStates()
+            viewModel.removeCustomSource(57).join()
+            advanceUntilIdle()
+            assertEquals(
+                CustomSourceRemovalState.SourceNotFound(57),
+                missingStates.last()
+            )
+
+            viewModel.clearCustomSourceRemovalState()
+
+            val preset = mockSource(58, enabled = false).copy(
+                category = FilterSourceCategory.ADS,
+                isPreset = true
+            )
+            coEvery { repository.getSourceById(58) } returns preset
+            viewModel.removeCustomSource(58).join()
+            advanceUntilIdle()
+            assertEquals(
+                CustomSourceRemovalState.NotCustomSource(58),
+                viewModel.customSourceRemoval.value
+            )
+
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(any(), any())
+            }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            coVerify(exactly = 0) {
+                repository.removeDisabledCustomSource(any())
+            }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+        }
+
+    @Test
+    fun removeCustomSource_remainingSourceDownloadFailure_stopsBeforeRoomMutation() =
+        runTest(testDispatcher) {
+            val target = mockSource(59, enabled = true).copy(
+                category = FilterSourceCategory.CUSTOM,
+                isPreset = false
+            )
+            val remaining = mockSource(60, enabled = true)
+
+            coEvery { repository.getSourceById(59) } returns target
+            coEvery { repository.getEnabledSources() } returns
+                listOf(target, remaining)
+            every {
+                fileStore.currentFile(60).exists()
+            } returns false
+            coEvery {
+                downloadManager.downloadSource(60)
+            } returns
+                FilterSourceDownloadManager.DownloadResult.Failure(
+                    sourceId = 60,
+                    errorMessage = "network down",
+                    httpCode = 503
+                )
+
+            val states = collectCustomRemovalStates()
+            viewModel.removeCustomSource(59).join()
+            advanceUntilIdle()
+
+            val failed =
+                states.last() as CustomSourceRemovalState.Failed
+            assertTrue(failed.message.contains("network down"))
+            coVerify(exactly = 0) {
+                repository.updateEnabledStatus(any(), any())
+            }
+            coVerify(exactly = 0) { compiler.compileAllEnabled() }
+            coVerify(exactly = 0) {
+                repository.removeDisabledCustomSource(any())
+            }
+            verify(exactly = 0) {
+                persistentState.commitAdvancedFilterCompilation(any(), any())
+            }
+        }
+
+    private fun collectCustomEditStates(): MutableList<CustomSourceEditState> {
+        val states = mutableListOf<CustomSourceEditState>()
+        viewModel.customSourceEdit.observeForever {
+            states.add(it)
+        }
+        return states
+    }
+
+    private fun assertNoEditPipelineMutation() {
+        coVerify(exactly = 0) {
+            downloadManager.downloadSource(any<Int>())
+        }
+        coVerify(exactly = 0) {
+            compiler.compileAllEnabled()
+        }
+        coVerify(exactly = 0) {
+            repository.updateEnabledStatus(any(), any())
+        }
+        verify(exactly = 0) {
+            persistentState.commitAdvancedFilterCompilation(any(), any())
+        }
+    }
+
+    // =========================================================================
+    // CUSTOM-FILTER-EDIT-B3 — editCustomSource state-machine tests (E1-E5)
+    // =========================================================================
+
+    @Test
+    fun editCustomSource_updated_emitsEditingThenExactUpdatedSource() =
+        runTest(testDispatcher) {
+            val source = disabledCustomSource(id = 41)
+            coEvery {
+                repository.editCustomSource(
+                    41,
+                    "Edited",
+                    "https://edited.example.com/list.txt"
+                )
+            } returns EditCustomSourceResult.Updated(source)
+
+            val states = collectCustomEditStates()
+            viewModel.editCustomSource(
+                41,
+                "Edited",
+                "https://edited.example.com/list.txt"
+            ).join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceEditState.Idle,
+                    CustomSourceEditState.Editing(41),
+                    CustomSourceEditState.Updated(source)
+                ),
+                states
+            )
+            assertSame(
+                source,
+                (states.last() as CustomSourceEditState.Updated).source
+            )
+            coVerify(exactly = 1) {
+                repository.editCustomSource(
+                    41,
+                    "Edited",
+                    "https://edited.example.com/list.txt"
+                )
+            }
+            assertNoEditPipelineMutation()
+        }
+
+    @Test
+    fun editCustomSource_explicitRepositoryResults_mapOneToOne() =
+        runTest(testDispatcher) {
+            val sourceId = 42
+            val name = "Edited"
+            val url = "https://edited.example.com/list.txt"
+
+            val cases =
+                listOf(
+                    EditCustomSourceResult.InvalidInput(
+                        CustomFilterSourceValidator.Error.INVALID_URL
+                    ) to
+                        CustomSourceEditState.InvalidInput(
+                            CustomFilterSourceValidator.Error.INVALID_URL
+                        ),
+                    EditCustomSourceResult.SourceNotFound(sourceId) to
+                        CustomSourceEditState.SourceNotFound(sourceId),
+                    EditCustomSourceResult.NotCustomSource(sourceId) to
+                        CustomSourceEditState.NotCustomSource(sourceId),
+                    EditCustomSourceResult.SourceEnabled(sourceId) to
+                        CustomSourceEditState.SourceEnabled(sourceId),
+                    EditCustomSourceResult.DuplicateName("Existing Name") to
+                        CustomSourceEditState.DuplicateName("Existing Name"),
+                    EditCustomSourceResult.DuplicateUrl(
+                        "https://existing.example.com/list.txt"
+                    ) to
+                        CustomSourceEditState.DuplicateUrl(
+                            "https://existing.example.com/list.txt"
+                        ),
+                    EditCustomSourceResult.FileCleanupFailed(sourceId) to
+                        CustomSourceEditState.FileCleanupFailed(sourceId)
+                )
+
+            cases.forEach { (repositoryResult, expectedState) ->
+                val localViewModel =
+                    ManageFilterSourcesViewModel(
+                        repository,
+                        compiler,
+                        persistentState,
+                        downloadManager
+                    )
+                coEvery {
+                    repository.editCustomSource(sourceId, name, url)
+                } returns repositoryResult
+
+                val states = mutableListOf<CustomSourceEditState>()
+                localViewModel.customSourceEdit.observeForever {
+                    states.add(it)
+                }
+
+                localViewModel.editCustomSource(sourceId, name, url).join()
+                advanceUntilIdle()
+
+                assertEquals(
+                    listOf(
+                        CustomSourceEditState.Idle,
+                        CustomSourceEditState.Editing(sourceId),
+                        expectedState
+                    ),
+                    states
+                )
+            }
+
+            coVerify(exactly = cases.size) {
+                repository.editCustomSource(sourceId, name, url)
+            }
+            assertNoEditPipelineMutation()
+        }
+
+    @Test
+    fun editCustomSource_unexpectedFailure_emitsFailed() =
+        runTest(testDispatcher) {
+            coEvery {
+                repository.editCustomSource(any(), any(), any())
+            } throws IllegalStateException("edit database failed")
+
+            val states = collectCustomEditStates()
+            val job =
+                viewModel.editCustomSource(
+                    43,
+                    "Edited",
+                    "https://edited.example.com/list.txt"
+                )
+            job.join()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    CustomSourceEditState.Idle,
+                    CustomSourceEditState.Editing(43),
+                    CustomSourceEditState.Failed(
+                        43,
+                        "edit database failed"
+                    )
+                ),
+                states
+            )
+            assertTrue(job.isCompleted)
+            assertFalse(job.isCancelled)
+            assertNoEditPipelineMutation()
+        }
+
+    @Test
+    fun editCustomSource_cancellation_resetsIdleAndRethrows() =
+        runTest(testDispatcher) {
+            val cancelled = CancellationException("edit cancelled")
+            coEvery {
+                repository.editCustomSource(any(), any(), any())
+            } throws cancelled
+
+            val states = collectCustomEditStates()
+            val job =
+                viewModel.editCustomSource(
+                    44,
+                    "Edited",
+                    "https://edited.example.com/list.txt"
+                )
+            var completionCause: Throwable? = null
+            job.invokeOnCompletion { cause ->
+                completionCause = cause
+            }
+            job.join()
+            advanceUntilIdle()
+
+            assertSame(cancelled, completionCause)
+            assertTrue(job.isCancelled)
+            assertEquals(CustomSourceEditState.Idle, states.last())
+            assertNoEditPipelineMutation()
+        }
+
+    @Test
+    fun clearCustomSourceEditState_setsIdleWithoutPipelineMutation() =
+        runTest(testDispatcher) {
+            coEvery {
+                repository.editCustomSource(any(), any(), any())
+            } returns EditCustomSourceResult.DuplicateName("Existing")
+
+            val states = collectCustomEditStates()
+            viewModel.editCustomSource(
+                45,
+                "Existing",
+                "https://alternative.example.com/list.txt"
+            ).join()
+            advanceUntilIdle()
+
+            assertTrue(states.last() is CustomSourceEditState.DuplicateName)
+
+            viewModel.clearCustomSourceEditState()
+
+            assertEquals(CustomSourceEditState.Idle, states.last())
+            coVerify(exactly = 1) {
+                repository.editCustomSource(any(), any(), any())
+            }
+            assertNoEditPipelineMutation()
+        }
+
     /**
      * Build a minimal [FilterSource] row for mock snapshots. Only the fields the
      * FIX-7B lookup consults ([id], [enabled]) need to be meaningful; remaining
@@ -1133,6 +1930,34 @@ class ManageFilterSourcesViewModelTransactionTest {
         MutableList<ManageFilterSourcesViewModel.TransactionState> {
         val states = mutableListOf<ManageFilterSourcesViewModel.TransactionState>()
         viewModel.transaction.observeForever { states.add(it) }
+        return states
+    }
+
+    /**
+     * CUSTOM-FILTER-B4 fixture: a disabled CUSTOM row shaped exactly like the row
+     * [com.celzero.bravedns.database.FilterSourceRepository.addCustomSource] returns —
+     * generated id > 0, category CUSTOM, enabled=false, non-preset, no catalog reference,
+     * and a finalized id-derived relativeFilePath.
+     */
+    private fun disabledCustomSource(id: Int): FilterSource =
+        FilterSource(
+            id = id,
+            name = "S$id",
+            url = "https://custom.example.com/$id.txt",
+            category = FilterSourceCategory.CUSTOM,
+            enabled = false,
+            isPreset = false,
+            relativeFilePath = "filter_sources/source_$id/current.txt"
+        )
+
+    /**
+     * Observe the custom-source-creation LiveData synchronously (InstantTaskExecutorRule makes
+     * setValue synchronous) and collect every emitted state in order, starting with the
+     * initial Idle.
+     */
+    private fun collectCustomCreationStates(): MutableList<CustomSourceCreationState> {
+        val states = mutableListOf<CustomSourceCreationState>()
+        viewModel.customSourceCreation.observeForever { states.add(it) }
         return states
     }
 }

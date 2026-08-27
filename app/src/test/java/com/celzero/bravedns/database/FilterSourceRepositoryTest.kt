@@ -26,11 +26,12 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -727,4 +728,596 @@ class FilterSourceRepositoryTest : KoinTest {
         assertSame("exact exception instance must propagate", failure, caught)
         coVerify(exactly = 1) { fakeDao.syncCatalogAtomically(candidates) }
     }
+
+    // ---- CUSTOM-FILTER-B3: addCustomSource (6 tests) ---------------------------------------
+
+    @Test
+    fun addCustomSource_validInput_returnsAddedDisabledCustomRow() = runTest(testDispatcher) {
+        val result = repo.addCustomSource(
+            name = "  My Custom List  ",
+            url = "  https://example.com/lists/custom.txt?token=abc  "
+        )
+
+        assertTrue("expected Added", result is AddCustomSourceResult.Added)
+        val added = result as AddCustomSourceResult.Added
+        val src = added.source
+
+        assertEquals("name must be trimmed", "My Custom List", src.name)
+        assertEquals("url must be trimmed",
+            "https://example.com/lists/custom.txt?token=abc", src.url)
+        assertTrue("generated id must be > 0", src.id > 0)
+        assertEquals(FilterSourceCategory.CUSTOM, src.category)
+        assertFalse("custom source must be created disabled", src.enabled)
+        assertFalse(src.isPreset)
+        assertNull(src.referenceId)
+        assertEquals("relativeFilePath must be finalized from generated id",
+            FilterSourceFileStore.relativeFilePathFor(src.id), src.relativeFilePath)
+
+        val persisted = repo.getSourceById(src.id)
+        assertEquals("persisted row must equal returned source", persisted, src)
+
+        assertTrue("filter_sources root must exist after successful add",
+            fileStore.ensureRootExists().exists())
+    }
+
+    @Test
+    fun addCustomSource_invalidInput_returnsInvalidWithoutMutation() = runTest(testDispatcher) {
+        val emptyNameResult = repo.addCustomSource(name = "   ", url = "https://example.com/x.txt")
+        assertTrue(emptyNameResult is AddCustomSourceResult.InvalidInput)
+        assertEquals(CustomFilterSourceValidator.Error.EMPTY_NAME,
+            (emptyNameResult as AddCustomSourceResult.InvalidInput).error)
+
+        val badSchemeResult = repo.addCustomSource(name = "FTP List", url = "ftp://example.com/x.txt")
+        assertTrue(badSchemeResult is AddCustomSourceResult.InvalidInput)
+        assertEquals(CustomFilterSourceValidator.Error.UNSUPPORTED_SCHEME,
+            (badSchemeResult as AddCustomSourceResult.InvalidInput).error)
+
+        assertEquals("zero DAO writes on invalid input", 0, repo.count())
+        assertFalse("filter_sources root must not be created on invalid input",
+            fileStore.rootDirectory().exists())
+    }
+
+    @Test
+    fun addCustomSource_existingCustomUrl_returnsDuplicateWithoutMutation() = runTest(testDispatcher) {
+        val url = "https://example.com/dup-custom.txt"
+        val first = repo.addCustomSource(name = "First", url = url)
+        assertTrue(first is AddCustomSourceResult.Added)
+        val original = (first as AddCustomSourceResult.Added).source
+
+        val second = repo.addCustomSource(name = "Second Different Name", url = url)
+
+        assertTrue("expected DuplicateUrl for exact stored URL",
+            second is AddCustomSourceResult.DuplicateUrl)
+        assertEquals(url, (second as AddCustomSourceResult.DuplicateUrl).url)
+        assertEquals("count must remain one", 1, repo.count())
+
+        val unchanged = repo.getSourceById(original.id)
+        assertEquals(original, unchanged)
+    }
+
+    @Test
+    fun addCustomSource_existingCatalogUrl_returnsDuplicateWithoutMutation() = runTest(testDispatcher) {
+        val catalogUrl = "https://example.com/catalog-owned.txt"
+        dao.insert(
+            FilterSource(
+                id = 0,
+                name = "Catalog Owned",
+                url = catalogUrl,
+                category = FilterSourceCategory.ADS,
+                enabled = true,
+                isPreset = true,
+                relativeFilePath = "",
+                referenceId = 77
+            )
+        )
+        val catalogRow = repo.getAllSources().single { it.url == catalogUrl }
+        val beforeCount = repo.count()
+
+        val result = repo.addCustomSource(name = "User Copy", url = catalogUrl)
+
+        assertTrue("catalog-owned URL must also be treated as duplicate",
+            result is AddCustomSourceResult.DuplicateUrl)
+        assertEquals(catalogUrl, (result as AddCustomSourceResult.DuplicateUrl).url)
+        assertEquals(beforeCount, repo.count())
+        assertEquals("catalog row must be unchanged",
+            catalogRow, repo.getSourceById(catalogRow.id))
+    }
+
+    @Test
+    fun addCustomSource_duplicateCustomName_trimmedCaseInsensitive_isRejected() =
+        runTest(testDispatcher) {
+            val first =
+                repo.addCustomSource(
+                    name = "Same Name",
+                    url = "https://one.example/a.txt"
+                )
+            assertTrue(first is AddCustomSourceResult.Added)
+            val original = (first as AddCustomSourceResult.Added).source
+
+            val second =
+                repo.addCustomSource(
+                    name = "  same name  ",
+                    url = "https://two.example/b.txt"
+                )
+
+            assertTrue(second is AddCustomSourceResult.DuplicateName)
+            assertEquals(
+                "Same Name",
+                (second as AddCustomSourceResult.DuplicateName).name
+            )
+            assertEquals(1, repo.count())
+            assertEquals(original, repo.getSourceById(original.id))
+        }
+
+    @Test
+    fun addCustomSource_duplicateCatalogName_isRejected() =
+        runTest(testDispatcher) {
+            dao.insert(
+                FilterSource(
+                    id = 0,
+                    name = "Catalog Owned",
+                    url = "https://catalog.example/original.txt",
+                    category = FilterSourceCategory.ADS,
+                    enabled = true,
+                    isPreset = true,
+                    relativeFilePath = "",
+                    referenceId = 77
+                )
+            )
+            val existing = repo.getAllSources().single()
+            val beforeCount = repo.count()
+
+            val result =
+                repo.addCustomSource(
+                    name = "catalog owned",
+                    url = "https://user.example/alternative.txt"
+                )
+
+            assertTrue(result is AddCustomSourceResult.DuplicateName)
+            assertEquals(
+                "Catalog Owned",
+                (result as AddCustomSourceResult.DuplicateName).name
+            )
+            assertEquals(beforeCount, repo.count())
+            assertEquals(existing, repo.getSourceById(existing.id))
+        }
+
+    @Test
+    fun addCustomSource_unexpectedDaoFailure_isRethrown() = runTest(testDispatcher) {
+        val sentinel = IllegalStateException("sentinel: unexpected DAO failure")
+        val fakeDao = mockk<FilterSourceDao>(relaxed = true)
+        coEvery { fakeDao.findByNameIgnoringCase(any()) } returns null
+        coEvery { fakeDao.findByUrl(any()) } returns null
+        coEvery {
+            fakeDao.insertCustomAtomically(any(), any())
+        } throws sentinel
+
+        val repo = FilterSourceRepository(fakeDao, fileStore)
+
+        val caught = try {
+            repo.addCustomSource(name = "Boom", url = "https://boom.example/list.txt")
+            null
+        } catch (e: IllegalStateException) {
+            e
+        }
+
+        assertNotNull("non-IllegalArgumentException must propagate", caught)
+        assertSame("exact sentinel instance must propagate untouched", sentinel, caught)
+        // Sanity: a non-IAE failure must NOT enter the race re-query path —
+        // exactly one pre-insert findByUrl, zero re-queries.
+        coVerify(exactly = 1) { fakeDao.findByUrl(any()) }
+        coVerify(exactly = 1) { fakeDao.findByNameIgnoringCase(any()) }
+    }
+
+    // ---- CUSTOM-FILTER-EDIT-B2: disabled CUSTOM repository edit -----------------
+
+    @Test
+    fun editCustomSource_invalidOrMissingSource_returnsWithoutMutation() =
+        runTest(testDispatcher) {
+            val original =
+                (repo.addCustomSource(
+                    "Original",
+                    "https://example.com/original.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val invalid =
+                repo.editCustomSource(
+                    original.id,
+                    "   ",
+                    "https://example.com/new.txt"
+                )
+            assertTrue(invalid is EditCustomSourceResult.InvalidInput)
+            assertEquals(original, repo.getSourceById(original.id))
+
+            val missing =
+                repo.editCustomSource(
+                    999_999,
+                    "Missing",
+                    "https://example.com/missing.txt"
+                )
+            assertEquals(
+                EditCustomSourceResult.SourceNotFound(999_999),
+                missing
+            )
+            assertEquals(1, repo.count())
+        }
+
+    @Test
+    fun editCustomSource_nonCustomOrEnabledSource_isRejected() =
+        runTest(testDispatcher) {
+            val preset =
+                repo.addSource(
+                    name = "Preset",
+                    url = "https://example.com/preset.txt",
+                    category = FilterSourceCategory.ADS,
+                    enabled = false,
+                    isPreset = true
+                )
+            val presetBefore = repo.getSourceById(preset.id)
+
+            assertEquals(
+                EditCustomSourceResult.NotCustomSource(preset.id),
+                repo.editCustomSource(
+                    preset.id,
+                    "Changed",
+                    "https://example.com/changed.txt"
+                )
+            )
+            assertEquals(presetBefore, repo.getSourceById(preset.id))
+
+            val custom =
+                (repo.addCustomSource(
+                    "Enabled Custom",
+                    "https://example.com/enabled.txt"
+                ) as AddCustomSourceResult.Added).source
+            repo.updateEnabledStatus(custom.id, true)
+            val enabledBefore = repo.getSourceById(custom.id)
+
+            assertEquals(
+                EditCustomSourceResult.SourceEnabled(custom.id),
+                repo.editCustomSource(
+                    custom.id,
+                    "Changed Enabled",
+                    "https://example.com/changed-enabled.txt"
+                )
+            )
+            assertEquals(enabledBefore, repo.getSourceById(custom.id))
+        }
+
+    @Test
+    fun editCustomSource_duplicateNameOrUrl_excludesSelfAndRejectsOthers() =
+        runTest(testDispatcher) {
+            val target =
+                (repo.addCustomSource(
+                    "Target",
+                    "https://example.com/target.txt"
+                ) as AddCustomSourceResult.Added).source
+            val other =
+                (repo.addCustomSource(
+                    "Existing Name",
+                    "https://example.com/existing.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val duplicateName =
+                repo.editCustomSource(
+                    target.id,
+                    "  existing name  ",
+                    "https://example.com/alternative.txt"
+                )
+            assertTrue(duplicateName is EditCustomSourceResult.DuplicateName)
+            assertEquals(
+                "Existing Name",
+                (duplicateName as EditCustomSourceResult.DuplicateName).name
+            )
+
+            val duplicateUrl =
+                repo.editCustomSource(
+                    target.id,
+                    "Unique Name",
+                    other.url
+                )
+            assertTrue(duplicateUrl is EditCustomSourceResult.DuplicateUrl)
+            assertEquals(
+                other.url,
+                (duplicateUrl as EditCustomSourceResult.DuplicateUrl).url
+            )
+
+            val ownValues =
+                repo.editCustomSource(target.id, target.name, target.url)
+            assertTrue(ownValues is EditCustomSourceResult.Updated)
+            assertEquals(
+                target,
+                (ownValues as EditCustomSourceResult.Updated).source
+            )
+            assertEquals(target, repo.getSourceById(target.id))
+            assertEquals(2, repo.count())
+        }
+
+    @Test
+    fun editCustomSource_nameOnly_preservesFilesAndMetadata() =
+        runTest(testDispatcher) {
+            val source =
+                (repo.addCustomSource(
+                    "Old Name",
+                    "https://example.com/same-url.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val enriched =
+                source.copy(
+                    lastUpdated = 1234L,
+                    lastUpdateStatus = FilterSourceStatus.SUCCESS,
+                    etag = "etag-old",
+                    lastModified = "yesterday",
+                    checksum = "checksum-old",
+                    totalLineCount = 100,
+                    parsedRuleCount = 80,
+                    unsupportedRuleCount = 10,
+                    invalidRuleCount = 10,
+                    networkRuleCount = 50,
+                    cosmeticRuleCount = 20,
+                    proceduralRuleCount = 2,
+                    scriptletRuleCount = 3,
+                    cspRuleCount = 4,
+                    htmlFilterRuleCount = 1
+                )
+            repo.update(enriched)
+
+            val currentFile = fileStore.currentFile(source.id)
+            currentFile.parentFile!!.mkdirs()
+            currentFile.writeText("old downloaded body")
+
+            val result =
+                repo.editCustomSource(
+                    source.id,
+                    "  New Name  ",
+                    source.url
+                )
+
+            assertTrue(result is EditCustomSourceResult.Updated)
+            val updated = (result as EditCustomSourceResult.Updated).source
+            assertEquals(enriched.copy(name = "New Name"), updated)
+            assertEquals(updated, repo.getSourceById(source.id))
+            assertTrue(currentFile.exists())
+            assertEquals("old downloaded body", currentFile.readText())
+        }
+
+    @Test
+    fun editCustomSource_urlChange_removesOldFilesAndResetsMetadata() =
+        runTest(testDispatcher) {
+            val source =
+                (repo.addCustomSource(
+                    "Old Name",
+                    "https://old.example.com/list.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val enriched =
+                source.copy(
+                    lastUpdated = 9876L,
+                    lastUpdateStatus = FilterSourceStatus.FAILED,
+                    errorMessage = "HTTP 403",
+                    etag = "etag-old",
+                    lastModified = "old-modified",
+                    checksum = "old-checksum",
+                    totalLineCount = 100,
+                    parsedRuleCount = 70,
+                    unsupportedRuleCount = 20,
+                    invalidRuleCount = 10,
+                    networkRuleCount = 40,
+                    cosmeticRuleCount = 20,
+                    proceduralRuleCount = 2,
+                    scriptletRuleCount = 3,
+                    cspRuleCount = 4,
+                    htmlFilterRuleCount = 1
+                )
+            repo.update(enriched)
+
+            val currentFile = fileStore.currentFile(source.id)
+            val tempFile = fileStore.downloadTempFile(source.id)
+            currentFile.parentFile!!.mkdirs()
+            currentFile.writeText("old body")
+            tempFile.writeText("old temporary body")
+
+            val newUrl = "https://alternative.example.com/list.txt"
+            val result =
+                repo.editCustomSource(
+                    source.id,
+                    "Alternative Host",
+                    newUrl
+                )
+
+            assertTrue(result is EditCustomSourceResult.Updated)
+            val updated = (result as EditCustomSourceResult.Updated).source
+
+            assertEquals(source.id, updated.id)
+            assertEquals("Alternative Host", updated.name)
+            assertEquals(newUrl, updated.url)
+            assertEquals(FilterSourceCategory.CUSTOM, updated.category)
+            assertFalse(updated.enabled)
+            assertFalse(updated.isPreset)
+            assertEquals(source.relativeFilePath, updated.relativeFilePath)
+            assertEquals(source.referenceId, updated.referenceId)
+
+            assertEquals(0L, updated.lastUpdated)
+            assertEquals(FilterSourceStatus.IDLE, updated.lastUpdateStatus)
+            assertNull(updated.errorMessage)
+            assertNull(updated.etag)
+            assertNull(updated.lastModified)
+            assertNull(updated.checksum)
+            assertEquals(0, updated.totalLineCount)
+            assertEquals(0, updated.parsedRuleCount)
+            assertEquals(0, updated.unsupportedRuleCount)
+            assertEquals(0, updated.invalidRuleCount)
+            assertEquals(0, updated.networkRuleCount)
+            assertEquals(0, updated.cosmeticRuleCount)
+            assertEquals(0, updated.proceduralRuleCount)
+            assertEquals(0, updated.scriptletRuleCount)
+            assertEquals(0, updated.cspRuleCount)
+            assertEquals(0, updated.htmlFilterRuleCount)
+
+            assertEquals(updated, repo.getSourceById(source.id))
+            assertFalse(fileStore.sourceDirectory(source.id).exists())
+        }
+
+    @Test
+    fun editCustomSource_urlChangeCleanupFailure_doesNotMutateRoom() =
+        runTest(testDispatcher) {
+            val source =
+                (repo.addCustomSource(
+                    "Original",
+                    "https://old.example.com/list.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val blockedFileStore = mockk<FilterSourceFileStore>()
+            every {
+                blockedFileStore.removeSourceDirectory(source.id)
+            } returns false
+            val blockedRepository =
+                FilterSourceRepository(dao, blockedFileStore)
+
+            val result =
+                blockedRepository.editCustomSource(
+                    source.id,
+                    "Replacement",
+                    "https://new.example.com/list.txt"
+                )
+
+            assertEquals(
+                EditCustomSourceResult.FileCleanupFailed(source.id),
+                result
+            )
+            assertEquals(source, repo.getSourceById(source.id))
+            verify(exactly = 1) {
+                blockedFileStore.removeSourceDirectory(source.id)
+            }
+        }
+
+    // ---- CUSTOM-FILTER-REMOVE-B4: disabled CUSTOM repository removal ------------
+
+    @Test
+    fun removeDisabledCustomSource_missingSource_returnsNotFound() =
+        runTest(testDispatcher) {
+            val result = repo.removeDisabledCustomSource(999_999)
+
+            assertEquals(
+                RemoveCustomSourceResult.SourceNotFound(999_999),
+                result
+            )
+            assertEquals(0, repo.count())
+        }
+
+    @Test
+    fun removeDisabledCustomSource_nonCustomSource_isRejectedWithoutMutation() =
+        runTest(testDispatcher) {
+            val preset =
+                repo.addSource(
+                    name = "Preset",
+                    url = "https://example.com/preset.txt",
+                    category = FilterSourceCategory.ADS,
+                    enabled = false,
+                    isPreset = true
+                )
+            val currentFile = fileStore.currentFile(preset.id)
+            currentFile.parentFile!!.mkdirs()
+            currentFile.writeText("preset body")
+
+            val before = repo.getSourceById(preset.id)
+            val result = repo.removeDisabledCustomSource(preset.id)
+
+            assertEquals(
+                RemoveCustomSourceResult.NotCustomSource(preset.id),
+                result
+            )
+            assertEquals(before, repo.getSourceById(preset.id))
+            assertTrue(currentFile.exists())
+        }
+
+    @Test
+    fun removeDisabledCustomSource_enabledCustom_isRejectedWithoutMutation() =
+        runTest(testDispatcher) {
+            val source =
+                (repo.addCustomSource(
+                    "Enabled Custom",
+                    "https://example.com/enabled-custom.txt"
+                ) as AddCustomSourceResult.Added).source
+            repo.updateEnabledStatus(source.id, true)
+
+            val currentFile = fileStore.currentFile(source.id)
+            currentFile.parentFile!!.mkdirs()
+            currentFile.writeText("enabled body")
+
+            val before = repo.getSourceById(source.id)
+            val result = repo.removeDisabledCustomSource(source.id)
+
+            assertEquals(
+                RemoveCustomSourceResult.SourceEnabled(source.id),
+                result
+            )
+            assertEquals(before, repo.getSourceById(source.id))
+            assertTrue(currentFile.exists())
+        }
+
+    @Test
+    fun removeDisabledCustomSource_success_removesRowAndOnlyItsDirectory() =
+        runTest(testDispatcher) {
+            val target =
+                (repo.addCustomSource(
+                    "Target",
+                    "https://example.com/target-remove.txt"
+                ) as AddCustomSourceResult.Added).source
+            val sibling =
+                (repo.addCustomSource(
+                    "Sibling",
+                    "https://example.com/sibling-keep.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val targetFile = fileStore.currentFile(target.id)
+            val siblingFile = fileStore.currentFile(sibling.id)
+            targetFile.parentFile!!.mkdirs()
+            siblingFile.parentFile!!.mkdirs()
+            targetFile.writeText("target body")
+            siblingFile.writeText("sibling body")
+
+            val result = repo.removeDisabledCustomSource(target.id)
+
+            assertEquals(
+                RemoveCustomSourceResult.Removed(target.id),
+                result
+            )
+            assertNull(repo.getSourceById(target.id))
+            assertNotNull(repo.getSourceById(sibling.id))
+            assertFalse(fileStore.sourceDirectory(target.id).exists())
+            assertTrue(fileStore.sourceDirectory(sibling.id).exists())
+            assertTrue(siblingFile.exists())
+            assertTrue(fileStore.rootDirectory().exists())
+        }
+
+    @Test
+    fun removeDisabledCustomSource_cleanupFailure_retainsRoomRow() =
+        runTest(testDispatcher) {
+            val source =
+                (repo.addCustomSource(
+                    "Cleanup Failure",
+                    "https://example.com/cleanup-failure.txt"
+                ) as AddCustomSourceResult.Added).source
+
+            val blockedFileStore = mockk<FilterSourceFileStore>()
+            every {
+                blockedFileStore.removeSourceDirectory(source.id)
+            } returns false
+            val blockedRepository =
+                FilterSourceRepository(dao, blockedFileStore)
+
+            val before = repo.getSourceById(source.id)
+            val result =
+                blockedRepository.removeDisabledCustomSource(source.id)
+
+            assertEquals(
+                RemoveCustomSourceResult.FileCleanupFailed(source.id),
+                result
+            )
+            assertEquals(before, repo.getSourceById(source.id))
+            verify(exactly = 1) {
+                blockedFileStore.removeSourceDirectory(source.id)
+            }
+        }
 }

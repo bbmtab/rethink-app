@@ -49,6 +49,79 @@ interface FilterSourceDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPresetAbort(source: FilterSource): Long
 
+    /**
+     * Dedicated custom-source insert. ABORT (never REPLACE/IGNORE) so any unexpected conflict
+     * surfaces as an exception instead of silently overwriting an existing row.
+     */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertCustomAbort(source: FilterSource): Long
+
+    /**
+     * CUSTOM-FILTER-B2: Insert a disabled custom source atomically in one Room transaction.
+     *
+     * Behavior:
+     *  - Rejects blank [name] / [url] with [IllegalArgumentException].
+     *  - Rejects trimmed, case-insensitive name duplicates (any custom or catalog/preset row)
+     *    with [IllegalArgumentException].
+     *  - Rejects exact stored-URL duplicates (any custom or catalog/preset row) with
+     *    [IllegalArgumentException]. URL comparison remains exact string equality.
+     *  - Inserts a placeholder row (id=0, category=CUSTOM, enabled=false, isPreset=false,
+     *    referenceId=null, relativeFilePath="") via [insertCustomAbort] (ABORT).
+     *  - Derives the final relativeFilePath from the generated id via
+     *    [FilterSourceFileStore.relativeFilePathFor] and persists it with
+     *    [updateRelativeFilePath], still inside the same transaction.
+     *  - Re-reads and returns the finalized row.
+     *  - No filesystem operations occur inside this DAO method.
+     */
+    @Transaction
+    suspend fun insertCustomAtomically(
+        name: String,
+        url: String
+    ): FilterSource {
+        require(name.isNotBlank()) { "insertCustomAtomically: name must not be blank" }
+        require(url.isNotBlank()) { "insertCustomAtomically: url must not be blank" }
+
+        val existingName =
+            getAllSources().firstOrNull {
+                it.name.trim().equals(name.trim(), ignoreCase = true)
+            }
+        if (existingName != null) {
+            throw IllegalArgumentException(
+                "insertCustomAtomically: source with the same name already exists " +
+                    "(id=${existingName.id})"
+            )
+        }
+
+        val existingUrl = findByUrl(url)
+        if (existingUrl != null) {
+            throw IllegalArgumentException(
+                "insertCustomAtomically: source with the same URL already exists " +
+                    "(id=${existingUrl.id})"
+            )
+        }
+
+        val placeholder = FilterSource(
+            id = 0,
+            name = name,
+            url = url,
+            category = FilterSourceCategory.CUSTOM,
+            enabled = false,
+            isPreset = false,
+            relativeFilePath = "",
+            referenceId = null
+        )
+        val generatedId = insertCustomAbort(placeholder).toInt()
+        require(generatedId > 0) {
+            "insertCustomAtomically: non-positive generated id ($generatedId); auto-increment broken?"
+        }
+
+        val relativePath = FilterSourceFileStore.relativeFilePathFor(generatedId)
+        updateRelativeFilePath(generatedId, relativePath)
+
+        return getSourceById(generatedId)
+            ?: error("insertCustomAtomically: row $generatedId missing immediately after insert+update")
+    }
+
     @Update
     suspend fun update(source: FilterSource)
 
@@ -113,6 +186,49 @@ interface FilterSourceDao {
     // Preset identity by approved URL so seeding is idempotent by stable property, not by name.
     @Query("SELECT * FROM FilterSource WHERE url = :url LIMIT 1")
     suspend fun findByUrl(url: String): FilterSource?
+
+    /**
+     * Find the first source whose trimmed name equals [name] ignoring case.
+     *
+     * Comparison is deliberately performed in Kotlin rather than SQLite NOCASE so names
+     * outside SQLite's ASCII-only NOCASE behavior receive Kotlin's case-insensitive handling.
+     * This method performs no writes.
+     */
+    @Transaction
+    suspend fun findByNameIgnoringCase(name: String): FilterSource? {
+        val normalizedName = name.trim()
+        return getAllSources().firstOrNull {
+            it.name.trim().equals(normalizedName, ignoreCase = true)
+        }
+    }
+
+    /**
+     * Find the first source other than [excludedId] whose trimmed name equals [name]
+     * ignoring case. Used by custom-source Edit so retaining the source's own name is valid.
+     */
+    @Transaction
+    suspend fun findByNameIgnoringCaseExcludingId(
+        name: String,
+        excludedId: Int
+    ): FilterSource? {
+        val normalizedName = name.trim()
+        return getAllSources().firstOrNull {
+            it.id != excludedId &&
+                it.name.trim().equals(normalizedName, ignoreCase = true)
+        }
+    }
+
+    /**
+     * Find a source other than [excludedId] with the exact stored URL.
+     */
+    @Query(
+        "SELECT * FROM FilterSource " +
+            "WHERE url = :url AND id != :excludedId LIMIT 1"
+    )
+    suspend fun findByUrlExcludingId(
+        url: String,
+        excludedId: Int
+    ): FilterSource?
 
     // Generated-id → filesystem path finalization. After an insert returns the row id, the
     // repository persists the final relativeFilePath derived from that id.
