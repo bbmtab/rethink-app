@@ -1,6 +1,7 @@
 # Device-Verify Protocol — DV1–DV5 (Phase B)
 
-> **Status:** Canonical, repo-resolvable. **Issued 2026-07-28; NOT YET EXECUTED** by the executor as of 2026-07-29 (supervisor-issued, awaiting a fresh executor session to run Phase B).
+> **Historical status (2026-07-29):** Canonical, repo-resolvable. **Issued 2026-07-28; NOT YET EXECUTED** by the executor at that time (supervisor-issued, awaiting a fresh executor session to run Phase B).
+> **Current status (2026-08-27):** Later Mi A1 device gates and filter-source-management checks have executed. The latest evidence is appended in §7; controlled website filtering and RC readiness remain blocked.
 > **Owner:** Supervisor. This doc is the single source of truth for the device-verify gate labels `DV1`–`DV5`. Executor relays MUST resolve `DV1`–`DV5` here, not from memory.
 
 ---
@@ -108,6 +109,64 @@ Executor closes Phase B with a clean+solid report + raw artifacts (per supervise
 - Memory: `project_device_run_fabrication_phase_b_20260728` (Phase A fabrication audit), `project_device_change_mi_a1_a16` (real serial), `feedback_ca_install_is_human_only` (DV3), `feedback_auto_restart_on_setting_change` (DV4).
 - Non-collision: `docs/PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md` (its own G1–G5, unrelated, all still ⏳ pending — see §5–8 there).
 - Push gate: CLOSED (`51ac26d2` ff-accepted 2026-07-27). HEAD = origin/main = `51ac26d2`.
+
+---
+
+## 7. Latest Phase-1D-B device status (2026-08-27)
+
+This section is a later status addendum. It does not rewrite or invalidate the
+historical DV1–DV5 protocol above.
+
+**Implementation baseline:**
+`ca797a1d179b060b602c26664814111b640ffd8a`
+
+**Device:** Xiaomi Mi A1 / Android 16 / serial `3595381c0804`
+
+**Automated companion evidence:** 102/102 targeted JUnit tests passed:
+
+* `FilterSourceRepositoryTest`: 41
+* `ManageFilterSourcesViewModelTransactionTest`: 38
+* `FilterRowFlattenerTest`: 9
+* `CustomFilterSourceValidatorTest`: 9
+* `FilterSourceCustomDaoTest`: 5
+
+**Physical-device source-management evidence:**
+
+* Custom-section collapse and expansion behavior passed.
+* Add-row visibility followed the Custom Filters expansion state.
+* Custom badge, switch, and overflow menu rendered.
+* Edit-dialog prefill and cancel behavior passed.
+* Remove-confirmation and cancel behavior passed.
+* URL-only edit persisted byte-exactly through two cold relaunches.
+* The source name and disabled state were preserved.
+* Removal persisted across cold relaunches.
+* Add, edit, remove, enable, and disable are implemented through the existing
+  transaction path.
+
+**Evidence caveat:**
+
+B11R removed the intended source and persistence was visible afterward, but its
+pre-remove XML did not contain the B7 row even though runner stdout claimed that
+it did. B11R is retained with an audit caveat, not treated as a clean
+full-sequence pass.
+
+**Open runtime blocker:**
+
+* No hot-reload toast was observed after a filter source was switched.
+* Browser web access worked before the custom filter was added.
+* Browser web access failed after the custom filter was added while HTTPS
+  Inspection remained enabled.
+* Browser web access recovered when HTTPS Inspection was disabled for that
+  browser.
+* A controlled real-website OFF → ON → OFF custom-filter test has not passed.
+
+The missing toast alone does not prove a generation-reload failure. The browser
+regression implicates the HTTPS interception path but does not prove intended
+custom-rule blocking. B4.5, B6, and release-candidate readiness remain open.
+
+Runtime diagnosis must distinguish certificate trust, application/domain
+eligibility, upstream TLS, proxy routing or bypass, filter
+compilation/activation, and intended rule blocking.
 
 ---
 

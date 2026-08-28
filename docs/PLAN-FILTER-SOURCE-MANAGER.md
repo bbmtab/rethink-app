@@ -776,18 +776,54 @@ STREAM_ONLY, never raw-TCP mid-flow) are preserved.
 **Roadmap order:**
 
 ```
-B1  Data / storage foundation              SEALED  √
-B2  Downloader + validation                PENDING (blocked until DECISION-010 sealed)
-B3  Parser / compiler + diagnostics        PENDING
-B4  Atomic activation + rollback           PENDING
-B4.5  HTTPS Inspection Policy              ← DOC5 governs this (this section)
-B5  Manage Filters + Exclusions UI         PENDING
-B6  Full physical-device verification      PENDING
+B1    Data / storage foundation              SEALED
+B2    Downloader + validation                SEALED
+B3    Parser / compiler + diagnostics        SEALED
+B4    Atomic activation + rollback           SEALED
+B4.5  HTTPS Inspection Policy                OPEN — DOC5 governs the design; full preset-driven policy is not implemented
+B5    Manage Filters + custom source UI       IMPLEMENTED — add, edit, remove, enable and disable flows committed
+B6    End-to-end verification                 BLOCKED — unit and device UI gates pass; controlled website filtering has not passed
 ```
 
-DECISION-010 must be sealed before B2 and B4.5 implementation begins.
+DECISION-010 is already GOVERNING, so the former B2 architecture block is closed. B4.5 remains open: the repository does not yet contain the complete preset-driven HTTPS inspection policy or a production `InspectionPolicyEngine`.
 
 ---
+
+### Current verification status — 2026-08-28
+
+Implementation commit:
+
+- `ed8a0a2b774cf9795b17a44ad52ad77204b33b86`
+- Branch: `phase1d-advanced-filter`
+- Commit subject: `feat(filter): manage custom filter sources`
+
+Completed evidence:
+
+- Custom sources can be added, edited, removed, enabled and disabled.
+- URL-only edit persisted byte-exactly across two cold relaunches.
+- Repository tests: 41 passed.
+- ViewModel transaction tests: 38 passed.
+- Row flattener tests: 9 passed.
+- Initial feature commit: `ed8a0a2b774cf9795b17a44ad52ad77204b33b86`.
+- Tracked-file closure commit: `ca797a1d179b060b602c26664814111b640ffd8a`, adding seven support files omitted from the initial commit.
+- Additional closure suites: `CustomFilterSourceValidatorTest` (9) and `FilterSourceCustomDaoTest` (5).
+- Total targeted JUnit tests: 102 passed, 0 failed, 0 errors, 0 skipped.
+- APK and device UI verification used SHA-256 `39710942B1A17DDB92B2C1F25D8DD6420E2C7411D7ECD011E40F577F16983E36`.
+
+Open findings:
+
+- No user-visible toast currently confirms a filter-generation hot reload after an enable/disable operation.
+- A manual browser test found that web access worked before adding the custom filter, failed with HTTPS inspection enabled after the filter was added, and worked again when HTTPS inspection was disabled.
+- This observation does not prove that custom website filtering works. The controlled OFF → ON → OFF website test is still required.
+- The expected HTTPS policy preset files are not present in the repository, and the current behavior is only a partial hardcoded hybrid policy.
+- B11R confirmed that removal persisted, but its pre-remove XML contradicted the runner output. Treat that run as evidence with an audit caveat, not as a clean end-to-end PASS.
+
+Release implication:
+
+- The Filter Source Manager implementation is committed and pushed.
+- Release-candidate status remains blocked by the HTTPS/browser regression and the missing controlled website-filtering proof.
+
+Do not alter the existing Definition of Done checkboxes. They remain the release-level checklist.
 
 ### Phase 5: Testing, Memory Profiling & Device Verification
 - Device verification on Mi A1 A16 (`3595381c0804`).

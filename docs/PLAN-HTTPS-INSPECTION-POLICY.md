@@ -1,8 +1,8 @@
 # HTTPS Inspection Policy — Authority Document
 
-**Status:** Architecture lock — DOC5 / DECISION-010 (2026-08-15)
+**Status:** Governing architecture lock — full preset-driven policy not yet implemented (2026-08-27)
 **Authority:** `docs/DECISIONS.md` § DECISION-010
-**Baseline branch:** `phase1d-advanced-filter` @ `5ec97f93`
+**Implementation baseline:** `phase1d-advanced-filter` @ `ca797a1d179b060b602c26664814111b640ffd8a`
 **Scope:** This document owns the HTTPS Inspection eligibility, bypass, and
 resource-protection policy layer. No other planning document should contain
 HTTPS policy details; they live here.
@@ -420,28 +420,41 @@ POST-MITM RESOURCE DECISION
 
 ---
 
-## 11. Roadmap position and gates
+## 11. Roadmap position and implementation status
 
 ```
-B1  Data / storage foundation              SEALED  √ (this baseline)
-B2  Downloader + validation                BLOCKED — requires DECISION-010 sealed
-B3  Parser / compiler + diagnostics        PENDING
-B4  Atomic activation + rollback           PENDING
-B4.5  HTTPS Inspection Policy              ← this document governs implementation
-      (known registry / dynamic fallback / per-app opt-in / exclusions /
-       system bypass / domain-port protection / resource protection)
-B5  Manage Filters + Exclusions UI         PENDING
-B6  Full physical-device verification      PENDING
+B1    Data / storage foundation              SEALED
+B2    Downloader + validation                SEALED
+B3    Parser / compiler + diagnostics        SEALED
+B4    Atomic activation + rollback           SEALED
+B4.5  HTTPS Inspection Policy                OPEN — governing design exists; full policy is not implemented
+B5    Manage Filters + custom source UI      IMPLEMENTED — add/edit/remove/enable/disable flows exist
+B6    End-to-end verification                BLOCKED — controlled website filtering has not passed
 ```
 
-**Gate conditions for B2 start:**
+DECISION-010 and this document remain the governing architecture for B4.5.
+That architecture status must not be confused with implementation completion.
 
-- DECISION-010 is sealed.
-- This document (`PLAN-HTTPS-INSPECTION-POLICY.md`) is the sole ownership
-  document for HTTPS policy; no other planning document owns HTTPS policy
-  details.
-- `InspectionPolicyEngine` boundary is reflected in `ARCHITECTURE-MAPPING.md`
-  and `UNIFIED_UI_ARCHITECTURE.md`.
+At the implementation baseline:
+
+* No production `InspectionPolicyEngine` implements the complete documented
+  pre-CONNECT policy.
+* `LocalHttpsProxy` uses a partial hardcoded hybrid of persistent bypass seeds
+  and runtime state.
+* An empty allowed-package set makes all packages eligible.
+* Dynamic TLS failures are not persisted across initialization.
+* The complete preset-driven application, domain, and port policy has not been
+  wired into the runtime.
+
+Custom filter-source management and its transaction path are implemented, with
+102/102 targeted JUnit tests passing. The tracked-file closure baseline is
+`ca797a1d179b060b602c26664814111b640ffd8a`. That progress does not seal B4.5.
+
+Physical-device source-management checks passed, but browser access failed with
+HTTPS Inspection ON after a custom filter was added and recovered when HTTPS
+Inspection was disabled for that browser. A controlled real-website
+OFF → ON → OFF custom-filter test has not passed. B4.5, B6, and
+release-candidate readiness therefore remain open.
 
 ---
 

@@ -2,6 +2,13 @@
 
 This artifact defines the architectural blueprint and packet flow tracing for integrating local **HTTPS MITM Inspection** into RethinkDNS. It incorporates critical feedback regarding `setHttpProxy` limitations, HTTP/2 ALPN, and response compression.
 
+> **Implementation status (2026-08-27):** CA, local proxy, FilterEngine,
+> routing integration, unified Plus UI, and custom filter-source management are
+> implemented. DECISION-010 remains the governing target for HTTPS eligibility
+> and bypass, but its complete preset-driven `InspectionPolicyEngine` is not
+> implemented. The current runtime is a partial hardcoded hybrid. Controlled
+> real-website filtering remains blocked by an HTTPS/browser regression.
+
 ---
 
 ## 1. Packet Flow Routing (Normal vs. Inspected)
@@ -223,17 +230,26 @@ To ensure that the existing DNS Filtering and Firewall capabilities remain entir
 
 ---
 
-## 4. Planned Implementation Phases
+## 4. Implementation Status
 
-| Phase | Description | Components/Files to Create or Modify | Status |
-| :--- | :--- | :--- | :---: |
-| **Phase 1** | Architecture Mapping & Packet Flow Trace | `architecture_mapping.md` (Artifact) | **Completed** âœ… |
-| **Phase 2** | Certificate Authority Module | `core/ca/CertificateAuthority.kt` | *Next* â³ |
-| **Phase 3** | Local MITM Proxy Server | `core/proxy/LocalHttpsProxy.kt` | *Pending* â³ |
-| **Phase 4** | Filter Engine (AdGuard syntax support) | `core/filter/FilterEngine.kt` | *Pending* â³ |
-| **Phase 5** | Routing Integration (setHttpProxy) | `BraveVPNService.kt` | *Pending* â³ |
-| **Phase 6** | UI & CA Installation Flow | `ui/CertificateSetupActivity.kt` | *Pending* â³ |
-| **Phase 7** | Cosmetic CSS Injector | `core/filter/CosmeticFilter.kt` | *Pending* â³ |
+| Area                                     | Components                                                             | Status at `ca797a1d179b060b602c26664814111b640ffd8a`          |
+| :--------------------------------------- | :--------------------------------------------------------------------- | :------------------------------------------------------------ |
+| Architecture and packet-flow mapping     | This document; DECISION-008; DECISION-010                              | **GOVERNING / CURRENT**                                       |
+| Certificate authority                    | `core/ca/CertificateAuthority.kt`                                      | **IMPLEMENTED AND DEVICE-VERIFIED**                           |
+| Local MITM proxy                         | `core/proxy/LocalHttpsProxy.kt`                                        | **IMPLEMENTED; HTTPS REGRESSION OPEN**                        |
+| Filter engine and advanced rule handling | `core/filter/FilterEngine.kt` and subtype handlers                     | **IMPLEMENTED**                                               |
+| Filter-source pipeline                   | Storage, downloader, compiler diagnostics, atomic activation, rollback | **SEALED THROUGH B4**                                         |
+| Filter-source management UI              | Shared Plus UI and Manage Filters surfaces                             | **IMPLEMENTED** for add/edit/remove/enable/disable            |
+| HTTPS eligibility and bypass policy      | Target `InspectionPolicyEngine` and preset-driven policy               | **OPEN** — current runtime is only a partial hardcoded hybrid |
+| End-to-end closure                       | Physical-device source management and controlled website filtering     | **PARTIAL / RC BLOCKED**                                      |
+
+The custom-source implementation passed 102/102 targeted JUnit tests and its
+add/edit/remove/persistence flows were exercised on the Mi A1. Those results do
+not establish controlled rule blocking on a real website.
+
+The remaining runtime investigation must distinguish CA trust, application and
+domain eligibility, upstream TLS handshake, proxy routing or bypass,
+filter compilation/activation, and intended rule blocking.
 
 ---
 

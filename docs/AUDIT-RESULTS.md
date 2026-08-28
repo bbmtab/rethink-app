@@ -506,3 +506,81 @@ LocalHttpsProxy.resolveHostSecurely() [L241-248]
 - `[[phase1d_a3_verdict_20260815]]` — Verdict memory entry
 - `[[project_O7_confirm_relay_dispatched_20260806]]` — O7 firewall test regression confirmed GONE (context: Phase-1c pivot produced the final tree audited here)
 - `[[docs/DECISIONS.md#DECISION-008]]` — Decision ledger entry
+
+---
+
+## 2026-08-27 — Custom Filter Source Manager and Browser Runtime Follow-up
+
+### Repository state
+
+- Branch: `phase1d-advanced-filter`
+- Initial implementation commit: `ed8a0a2b774cf9795b17a44ad52ad77204b33b86`
+- Parent: `e0e2892060518f86f37a7adca433f8f1d68a6940`
+- Initial commit subject: `feat(filter): manage custom filter sources`
+- Tracked-file closure commit: `ca797a1d179b060b602c26664814111b640ffd8a`
+- Closure commit subject: `fix(filter): track custom source support files`
+- The closure commit adds seven support files referenced by the initial implementation.
+- Local and remote branch heads were verified equal after push.
+- Nine application and test files were committed.
+- `.claude/skills/run-rethink-app/SKILL.md` remained unstaged and was not included.
+
+### Automated verification
+
+- `FilterSourceRepositoryTest`: 41 passed.
+- `ManageFilterSourcesViewModelTransactionTest`: 38 passed.
+- `FilterRowFlattenerTest`: 9 passed.
+- Additional closure suites:
+  - `CustomFilterSourceValidatorTest`: 9 passed
+  - `FilterSourceCustomDaoTest`: 5 passed
+- Targeted total: 102 passed, 0 failed, 0 errors, 0 skipped.
+- Final Gradle closure completed with exit code 0 and one `BUILD SUCCESSFUL` marker.
+
+### APK and device verification
+
+- APK SHA-256: `39710942B1A17DDB92B2C1F25D8DD6420E2C7411D7ECD011E40F577F16983E36`.
+- Installed APK was verified byte-identical to the local APK.
+- Device: Mi A1 A16.
+- Add, persistence, edit-dialog, remove-dialog and cold-relaunch flows were exercised.
+- A URL-only edit persisted byte-exactly across two cold relaunches.
+- Removal persisted across cold relaunches.
+- B11R carries an evidence caveat: the pre-remove XML did not contain the target row even though runner output claimed that it did. Do not treat B11R as a clean full-sequence PASS.
+
+### Manual runtime observation
+
+The following is a user-reported manual observation and not yet a controlled automated verdict:
+
+1. No hot-reload toast appeared when a filter source switch was enabled or disabled.
+2. Browser internet access worked before the custom filter was added.
+3. After the custom filter was added, browser web access failed while HTTPS inspection was enabled.
+4. Browser web access worked again when HTTPS inspection was disabled.
+
+Interpretation:
+
+- The observation suggests a regression in the HTTPS inspection or interception path.
+- It does not prove that custom filter rules successfully blocked a controlled target.
+- A missing toast is a UX observability issue; by itself it does not prove that runtime reload failed.
+- The controlled website OFF → ON → OFF test remains outstanding.
+
+### HTTPS policy audit
+
+Repository inspection found:
+
+- No production `InspectionPolicyEngine` implementing the complete DOC5 policy.
+- No repository copies of the expected preset inputs:
+  - `ssl_allow_list.txt`
+  - `ssl_block_list.txt`
+  - `filter_https_traffic_inclusions.txt`
+  - `filter_https_traffic_inclusions_problematic_devices.txt`
+  - `filter_https_traffic_exclusions.json`
+- `LocalHttpsProxy` currently relies on hardcoded persistent bypass seeds plus runtime state.
+- Therefore the current implementation must be described as a partial hardcoded hybrid, not as the completed preset-driven hybrid policy.
+
+### Current verdict
+
+- Custom Filter Source Manager code and UI: PASS.
+- Targeted JUnit gate: PASS.
+- APK installation and UI persistence evidence: PASS.
+- Clean removal audit chain: PASS WITH CAVEAT.
+- Controlled real-website filter behavior: NOT YET PASSED.
+- Full HTTPS preset-driven hybrid policy: NOT IMPLEMENTED.
+- Release-candidate readiness: BLOCKED pending HTTPS regression diagnosis and controlled website verification.

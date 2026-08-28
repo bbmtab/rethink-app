@@ -1,7 +1,7 @@
 # RethinkDNS — Unified UI Architecture
 
 > **Purpose:** Complete map of RethinkDNS UI surface, organized by feature modules and user flows. This is our own architecture — no external references. Use as the single source of truth for Phase 1+ UI work (Plus tab redesign, MITM/adblock integration, auto-restart UX, etc.).
-> **Current state:** Phase 0 complete (CA + MITM + FilterEngine verified). Phase 1 starting: blocklist bridge → Plus tab → auto-restart.
+> **Current state (2026-08-27):** Plus-tab consolidation, auto-restart, the filter-source foundation, and custom-source management are implemented. The full DECISION-010 preset-driven HTTPS policy and controlled website-filtering closure remain open.
 
 ---
 
@@ -46,10 +46,19 @@
 
 ## ➕ PLUS — "RETHINK PLUS" HUB (KEY REDESIGN TARGET)
 
-### Current state (post-Phase-1c / supervisor-audited 2026-08-13)
+### Current state at `ca797a1d179b060b602c26664814111b640ffd8a` (2026-08-27)
 | Flavor | Fragment | Status |
 |--------|----------|--------|
 | **all (fdroid / full / play / website)** | `RethinkPlusFragment.kt` (full flavor — hoisted from fdroid 1b; R100) | **Filters (MITM/adblock)** — HTTPS Inspection / Advanced Filtering / Exclusions |
+
+Custom filter-source management supports add, edit, remove, enable, and disable
+through the existing transaction path. The targeted closure passed 102/102 JUnit
+tests, and add/edit/remove/persistence behavior was exercised on the Mi A1.
+
+This UI completion does not imply HTTPS-policy completion. The runtime still
+uses a partial hardcoded hybrid rather than the complete preset-driven
+DECISION-010 policy. Controlled real-website filtering remains blocked by the
+observed browser regression while HTTPS Inspection is enabled.
 
 ```
 Note: `RethinkPlusDashboardFragment.kt` (RPN subscription UI) and `ServerSelectionFragment.kt` (RPN server picker) are deleted from the working tree (executed pivot 2026-08-09; supervisor-audited 2026-08-10). The fdroid `RethinkPlusFragment.kt` was hoisted to `full/` (R100). Play/website `RethinkPlusFragment.kt` (billing UI) is also deleted; the Plus surface is MITM/adblock-only for all flavors.
@@ -266,7 +275,7 @@ HomeScreenActivity (hosts NavHostFragment)
 | Billing / Play IAB (Plus tab) | — | — | — (retired from Plus; deferred to future billing flow) | — (retired from Plus; deferred) |
 | RPN backend (proxy/protocol engine) | — (engine unchanged) | ✅ (engine) | ✅ (engine) | ✅ (engine) |
 | CA install / HTTPS toggle | ✅ | ✅ | ✅ | ✅ |
-| Advanced Filter Sources (EasyList/AdGuard/Custom) | NEXT/PLANNED | NEXT/PLANNED | NEXT/PLANNED | NEXT/PLANNED |
+| Advanced Filter Sources (EasyList/AdGuard/Custom) | ✅ Managed in shared full-flavor UI | ✅ | ✅ | ✅ |
 | Advanced Filtering (source/category-managed; all rule types) | ✅ | ✅ | ✅ | ✅ |
 | Auto-restart on setting change | ✅ | ✅ | ✅ | ✅ |
 
@@ -414,15 +423,20 @@ app/src/full/java/com/celzero/bravedns/ui/dialog/
 
 ---
 
-## 📋 PHASE 1 IMPLEMENTATION ORDER
+## 📋 PHASE 1 IMPLEMENTATION STATUS
 
-| Phase | Deliverable | Files to Create/Modify |
-|-------|-------------|------------------------|
-| **1a** | Blocklist → MITM bridge | **SUPERSEDED (DECISION-008)** — see `PHASE_1A_IMPLEMENTATION_PLAN.md` (RETIRED). A2 STOP-P2 proved raw-text bridge unimplementable; Phase-1D-A3 proved manual bridge unnecessary for domain blocking. |
-| **1b** | Plus tab fdroid MITM UI | Replace `RethinkPlusFragment` content, add CA status card, HTTPS toggle, per-app filter, exclusions, sync button |
-| **1c** | Plus tab canonicalization (all flavors unified = Filters; RPN UI retired) | `RethinkPlusFragment` (full flavor — hoisted fdroid→full); Plus hero `plus_title`; Filters layout (`fragment_rethink_plus.xml`); `styles.xml` PlusMaterialSwitchFix overlay; crash-seal (Track-D) verified on Mi A1 A16; supervisor audit `docs/AUDIT-RESULTS.md` updated; DECISION-007 recorded |
-| **1d** | Auto-restart framework | `SettingsRestarter` utility, dialog, apply to HTTPS toggle + all non-hot-pluggable toggles |
-| **1e** | Advanced Filter Source Foundation (NEXT/PLANNED) | `FilterSource` entity/model, download manager, filesystem storage, diagnostics, staged compile, atomic swap, rollback, Manage Sources UI. **NOT** DNS blocklist bridge. |
+| Phase  | Deliverable                              | Current status                                                                                                                                                                                                           |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1a** | Blocklist → MITM bridge                  | **SUPERSEDED (DECISION-008).** DNS sinkhole inheritance removed the need for a manual bridge.                                                                                                                            |
+| **1b** | Plus-tab MITM UI                         | **COMPLETED.** HTTPS Inspection, Advanced Filtering, and Exclusions are exposed through the unified Plus surface.                                                                                                        |
+| **1c** | Plus-tab canonicalization across flavors | **SEALED.** The shared full-flavor `RethinkPlusFragment` is the canonical Filters surface.                                                                                                                               |
+| **1d** | Auto-restart framework                   | **IMPLEMENTED AND DEVICE-VERIFIED** for settings that require restart. Filter-source changes use their separate compile/generation transaction path.                                                                     |
+| **1e** | Advanced Filter Source Foundation        | **IMPLEMENTED / PARTIAL CLOSURE.** Storage, downloader, compiler diagnostics, atomic activation, rollback, and custom-source management exist. Full DECISION-010 policy and controlled website verification remain open. |
+
+Custom-source management is implemented at
+`ca797a1d179b060b602c26664814111b640ffd8a`, with 102/102 targeted JUnit tests
+passing. B4.5 and B6 remain open because the complete preset-driven HTTPS policy
+is absent and controlled real-website OFF → ON → OFF filtering has not passed.
 
 ---
 
@@ -439,4 +453,4 @@ app/src/full/java/com/celzero/bravedns/ui/dialog/
 
 ---
 
-**End of Architecture — this is our map. Phase 1 starts at the blocklist bridge.**
+**End of Architecture — current through custom-source management at `ca797a1d179b060b602c26664814111b640ffd8a`; HTTPS-policy and controlled website verification remain open.**

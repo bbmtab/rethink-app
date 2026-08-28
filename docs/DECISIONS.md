@@ -1288,6 +1288,81 @@ Re-open this decision if any of the following occur before implementation:
 implementation-tunable by B4.5 from device and performance evidence without
 reopening DECISION-010. Adjusted values must preserve the locked semantics above.
 
+## DECISION-010 — Implementation Status Addendum (2026-08-27)
+
+This addendum records implementation status only. It does not reopen or alter the governing HTTPS Inspection Policy decision.
+
+### Completed since the original decision
+
+- Filter-source download, validation, compilation and atomic runtime-generation work has been implemented.
+- Manage Filters now supports custom-source add, edit, remove, enable and disable operations.
+- The implementation is committed at `ed8a0a2b774cf9795b17a44ad52ad77204b33b86` on `phase1d-advanced-filter`.
+- Targeted repository, ViewModel and row-flattener tests total 88 passes with no failures.
+- APK installation, source persistence and URL-edit persistence were verified on a physical device.
+
+### Not yet implemented
+
+- The complete DOC5 `InspectionPolicyEngine`.
+- Loading and applying the documented allow, block, inclusion, problematic-device and exclusion preset files.
+- A verified default HTTPS whitelist/eligibility policy matching the full three-tier design.
+- A user-visible reload-status message for source switch operations.
+
+### Open runtime finding
+
+Manual testing reported that browser web access failed with HTTPS inspection enabled after a custom filter was added, while disabling HTTPS inspection restored access.
+
+This is an unresolved HTTPS-path regression. It must not be recorded as proof that the custom filter successfully blocked a website.
+
+Required closure evidence:
+
+1. Diagnose whether the failure is caused by certificate trust, interception eligibility, upstream TLS, policy selection, or filter execution.
+2. Verify a neutral control domain with HTTPS inspection enabled.
+3. Verify a deterministic target using an OFF → ON → OFF custom-filter sequence.
+4. Confirm runtime generation changes and active rules with observable evidence.
+5. Verify that unrelated domains continue to load.
+6. Implement and verify the full preset-driven policy before declaring B4.5 complete.
+
+### Status
+
+- DECISION-010 architecture: GOVERNING.
+- Filter Source Manager: IMPLEMENTED.
+- Full HTTPS policy implementation: OPEN.
+- Controlled browser filtering proof: OPEN.
+- Release-candidate gate: BLOCKED.
+
+---
+
+## DECISION-010 TRACKED-FILE CLOSURE ADDENDUM — 2026-08-28
+
+**Status:** EVIDENCE UPDATE — ORIGINAL DECISION AND EARLIER ADDENDUM UNCHANGED
+**Implementation baseline:** `ca797a1d179b060b602c26664814111b640ffd8a`
+
+The initial custom-source feature commit
+`ed8a0a2b774cf9795b17a44ad52ad77204b33b86` referenced seven support files that
+were present during local testing but were not tracked by that commit.
+
+Closure commit `ca797a1d179b060b602c26664814111b640ffd8a`
+adds exactly those files:
+
+* `FilterRowFlattener.kt`
+* `CustomFilterSourceValidator.kt`
+* `dialog_add_custom_filter.xml`
+* `list_item_filter_add_custom.xml`
+* `FilterRowFlattenerTest.kt`
+* `CustomFilterSourceValidatorTest.kt`
+* `FilterSourceCustomDaoTest.kt`
+
+Five targeted suites pass **102/102 tests**:
+
+* `FilterSourceRepositoryTest`: 41
+* `ManageFilterSourcesViewModelTransactionTest`: 38
+* `FilterRowFlattenerTest`: 9
+* `CustomFilterSourceValidatorTest`: 9
+* `FilterSourceCustomDaoTest`: 5
+
+This closes tracked-file reproducibility for custom-source management. It does
+not seal B4.5, controlled website filtering, or release-candidate readiness.
+
 ---
 
 **End of Decisions — Append Only**
