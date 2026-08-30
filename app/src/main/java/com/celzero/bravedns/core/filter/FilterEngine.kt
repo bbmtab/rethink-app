@@ -63,22 +63,41 @@ object FilterEngine {
         @Volatile
         private var compiledRegex: Regex? = null
 
-        fun getRegex(): Regex {
-            var r = compiledRegex
-            if (r == null) {
-                synchronized(this) {
-                    r = compiledRegex
-                    if (r == null) {
-                        r = if (isRegex) {
+        @Transient
+        @Volatile
+        private var regexCompilationFailed: Boolean = false
+
+        /**
+         * Returns the compiled matcher, or null when this rule contains a malformed
+         * regular expression. A malformed third-party list rule is a non-match; it
+         * must never abort evaluation of the remaining rules or terminate an HTTPS
+         * MITM transaction.
+         *
+         * A failed compilation is memoized so the same malformed rule is not
+         * recompiled for every request.
+         */
+        fun getRegexOrNull(): Regex? {
+            compiledRegex?.let { return it }
+            if (regexCompilationFailed) return null
+
+            return synchronized(this) {
+                compiledRegex ?: if (regexCompilationFailed) {
+                    null
+                } else {
+                    try {
+                        val regex = if (isRegex) {
                             Regex(pattern, RegexOption.IGNORE_CASE)
                         } else {
                             convertWildcardToRegex(pattern)
                         }
-                        compiledRegex = r
+                        compiledRegex = regex
+                        regex
+                    } catch (_: IllegalArgumentException) {
+                        regexCompilationFailed = true
+                        null
                     }
                 }
             }
-            return r!!
         }
     }
 
@@ -420,13 +439,10 @@ object FilterEngine {
             // C. Check resource type
             if ((rule.allowedTypes and resourceType) == 0) continue
 
-            // D. Check pattern matching
-            val isMatch = if (rule.isDomainExact) {
-                // If it is domain anchored, check if URL matches regex pattern
-                rule.getRegex().containsMatchIn(url)
-            } else {
-                rule.getRegex().containsMatchIn(url)
-            }
+            // D. Check pattern matching. A malformed rule is a non-match and must
+            // not abort evaluation of the remaining candidate rules.
+            val regex = rule.getRegexOrNull() ?: continue
+            val isMatch = regex.containsMatchIn(url)
 
             if (isMatch) {
                 if (rule.isWhitelist) {
@@ -711,14 +727,19 @@ object FilterEngine {
                         else -> 0
                     }
 
-                    if (typeMask != 0) {
-                        hasTypeModifier = true
-                        if (isNegatedType) {
-                            if (allowedTypes == 0) allowedTypes = ResourceType.ALL
-                            allowedTypes = allowedTypes and typeMask.inv()
-                        } else {
-                            allowedTypes = allowedTypes or typeMask
-                        }
+                    if (typeMask == 0) {
+                        // Reject the entire rule when any modifier is unsupported. Ignoring an
+                        // unknown modifier widens the rule's scope and can turn an app-scoped
+                        // whitelist or block into a global rule.
+                        return null
+                    }
+
+                    hasTypeModifier = true
+                    if (isNegatedType) {
+                        if (allowedTypes == 0) allowedTypes = ResourceType.ALL
+                        allowedTypes = allowedTypes and typeMask.inv()
+                    } else {
+                        allowedTypes = allowedTypes or typeMask
                     }
                 }
             }
