@@ -908,3 +908,150 @@ decision document.
 - [ ] Plus tab UI clearly separates DNS Blocklists (Configure â†’ DNS) from Filter Sources
       (Plus â†’ Advanced Filtering â†’ Manage Filters) and provides intuitive category-oriented controls.
 - [ ] Zero memory leaks, zero `FATAL` crashes, and clean logcat during full list synchronization.
+
+---
+
+## B4.5 Runtime Filter E2E — CLOSED (2026-08-30)
+
+**Backend status: COMPLETE.**
+
+The real-device `OFF -> ON -> OFF` acceptance gate now returns
+`Allow -> Block -> Allow` for every controlled test host. Compilation,
+artifact publication, runtime matching, disable publication, and cleanup
+have all been verified on the Mi A1 Android 16 device.
+
+### Root cause
+
+The failure was `UNSUPPORTED_MODIFIER_SCOPE_WIDENING` in
+`FilterEngine.parseRule()`.
+
+Unknown modifiers previously fell through the resource-type parser
+without rejecting the rule. Production rules such as
+`@@*$app=...,stealth=...` therefore lost their intended application
+scope and became global whitelist rules. Normal whitelist precedence
+then correctly returned `Allow`, but it was operating on incorrectly
+broadened parser output.
+
+The fix rejects the entire network rule whenever any modifier is
+unsupported. This applies equally to block and whitelist rules so an
+unsupported modifier cannot silently broaden either rule type.
+
+Malformed regular expressions are also isolated through
+`getRegexOrNull()`: a malformed rule becomes a non-match without
+aborting evaluation of the remaining candidates.
+
+### Regression coverage
+
+- `FilterEngineTest`: `16 / 16` passed.
+- `FilterSourceCompilerTest`: `18 / 18` passed.
+- Unsupported whitelist modifiers are rejected.
+- Unsupported block modifiers are rejected.
+- Mixed supported and unsupported modifiers are rejected.
+- Currently supported modifiers remain accepted.
+- A rejected universal whitelist can no longer override
+  `||neverssl.com^`.
+- Malformed regex rules do not abort request evaluation.
+- The production compile, binary-artifact load, and runtime match path
+  were exercised by the final device gate. A new dedicated
+  neverssl-specific binary-cache unit test was not added; existing cache
+  coverage plus the real production artifact round-trip supplied the
+  acceptance evidence.
+
+### Final real-device acceptance — D11C2
+
+Device and build:
+
+- device: Xiaomi Mi A1 / tissot / Android 16;
+- package: `com.celzero.bravedns.plus`;
+- installed APK SHA-256:
+  `7827F716DF0BEAA91AFA25DA4349C3805B246B2E747E537FFB1816CEEB810845`;
+- custom source: `D11C2_6HOST`;
+- controlled rules: `6`.
+
+Controlled hosts:
+
+- `neverssl.com`
+- `httpforever.com`
+- `example.com`
+- `example.net`
+- `example.org`
+- `iana.org`
+
+Observed sequence:
+
+1. **OFF-1 — generation 33**
+   - snapshot ID: `214602691`;
+   - network rules: `470834`;
+   - all six hosts returned `Allow`.
+
+2. **ON — generation 34**
+   - snapshot ID: `18672811`;
+   - network rules: `449304`;
+   - all six hosts returned `Block`;
+   - every result reported the exact `matchedRule=||<host>^`;
+   - `matchingWhitelistsCount=0`;
+   - resolution path: `BLOCK_NORMAL`.
+
+3. **OFF-2 — generation 35**
+   - snapshot ID: `17334238`;
+   - network rules: `449298`;
+   - all six hosts returned `Allow`;
+   - custom-source delta: exactly `-6`;
+   - resolution path: `P2_ALLOW_NO_MATCHING_BLOCK`;
+   - `matchingWhitelistsCount=0`.
+
+The corrected post-D11B baseline is `449298` network rules. Compared
+with the legacy `470834` baseline, `21536` unsupported-modifier rules
+are no longer accepted. The observed generation-33 to generation-34
+net change was `-21530` because the same transition also added the six
+controlled custom rules:
+
+`-21536 + 6 = -21530`.
+
+This count is an aggregate rejected-rule delta. It must not be described
+as the number of universal whitelist rules or attributed only to
+`$app` / `$stealth`.
+
+### Disable publication
+
+The final cycle proved that disabling the custom source:
+
+- committed a new generation;
+- delivered the generation to the running VPN service;
+- loaded and published a new engine snapshot;
+- removed exactly six custom rules;
+- returned every controlled host to `Allow`.
+
+No separate disable-publication code fix was required. The earlier D10B2
+stale-snapshot observation was not reproduced by the final controlled
+cycle and is closed by the D11C2 acceptance evidence.
+
+### Cleanup
+
+- The temporary custom source was disabled and removed.
+- Custom Filters returned to `0`.
+- Aggregate UI state returned to `13 filters enabled / 698892 rules`.
+- Runtime network-rule baseline returned to `449298`.
+- VPN remained active.
+- HTTPS inspection remained enabled.
+- The installed CA was unchanged.
+- Temporary HTTP server and `adb reverse` were removed.
+- Temporary D10A/D10D source diagnostics were removed after acceptance.
+- Post-cleanup compile passed.
+- Post-cleanup focused tests passed `34 / 34`.
+
+### Separate follow-ups
+
+- `APP_UI_SYSTEM_VPN_STATE_DESYNC` remains a separate intermittent UI
+  defect. It was not reproduced during D11C1/D11C2 and is not a runtime
+  filter blocker.
+- Keep the pre-existing test CA installed until all HTTPS/MITM
+  verification outside this runtime-filter gate is complete.
+- Any future appearance of an unsupported modifier as a broadened
+  network rule is a D11B regression.
+- A legitimate supported whitelist may still produce an Allow result;
+  whitelist precedence itself remains intentional behavior.
+
+B4.5 runtime filter E2E is closed. Do not reopen it based solely on the
+historical D8B–D10 failures; those runs used parser output produced
+before the D11B unsupported-modifier guard.
