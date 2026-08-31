@@ -1,0 +1,27 @@
+HTTPS Inspection third-party data notice
+
+Bundled file: ssl_allow_list.txt
+Purpose: protected-domain bypass preset for HTTPS Inspection
+Upstream project: AdGuard HTTPS Exclusions
+Upstream repository: https://github.com/AdguardTeam/HttpsExclusions
+Pinned commit: 5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8
+Generator command: node index.js
+Generated upstream path: dist/android_exclusions.txt
+SHA-256: cf2699dbd93b9a3c6a94e1927bd58803ffbaa61ef2a814df36858b37652ad856
+Git blob (raw bytes): 83d53badac61f0401b9dfbb9423dedb0e8fb9e22
+Byte count: 85173
+Logical line count: 4569
+Local modifications: none
+
+Upstream author: AdGuard
+Upstream license declaration: MIT
+SPDX-License-Identifier: MIT
+Pinned license metadata: https://github.com/AdguardTeam/HttpsExclusions/blob/5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8/package.json
+Pinned package.json SHA-256: 17b71aeb539713b0cc56a639f30a35b2687cda97980b1bc54a033111d9772fe2
+Pinned package.json Git blob: 7795ae94de557b592abcc53d3e1c7e9c2b279afe
+Standalone upstream LICENSE/COPYING/NOTICE file at pinned commit: none
+MIT license reference: https://spdx.org/licenses/MIT.html
+
+This notice records the upstream package metadata and the exact generated artifact
+used by this repository. CompatibilityIssues-derived files and locally transformed
+attachments are not bundled by this slice.

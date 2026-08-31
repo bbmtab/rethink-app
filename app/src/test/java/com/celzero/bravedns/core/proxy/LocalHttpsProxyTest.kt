@@ -6,6 +6,9 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.ServerSocket
@@ -15,6 +18,8 @@ import java.net.Socket
  * JVM-based integration/unit tests for LocalHttpsProxy.
  * Verifies proxy initialization, connect tunneling, error handling, and socket piping.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [28], manifest = Config.NONE)
 class LocalHttpsProxyTest {
 
     private val TEST_PORT = 18443
@@ -50,52 +55,95 @@ class LocalHttpsProxyTest {
 
     @Test
     fun testProxyReturnsBadGatewayOnInvalidUpstream() {
-        LocalHttpsProxy.start(TEST_PORT)
-        Thread.sleep(150)
+        io.mockk.mockkObject(com.celzero.bravedns.service.VpnController)
+        io.mockk.every {
+            com.celzero.bravedns.service.VpnController.protectSocket(any())
+        } returns Unit
 
         try {
+            LocalHttpsProxy.start(TEST_PORT)
+            Thread.sleep(150)
+
             Socket("localhost", TEST_PORT).use { socket ->
                 val out = socket.getOutputStream()
-                // Request a CONNECT tunnel to an unallocated local port (guaranteed to fail connection)
-                out.write("CONNECT localhost:59999 HTTP/1.1\r\nHost: localhost:59999\r\n\r\n".toByteArray())
+                // Request a CONNECT tunnel to an unallocated local port
+                out.write(
+                    (
+                        "CONNECT localhost:59999 HTTP/1.1\r\n" +
+                            "Host: localhost:59999\r\n\r\n"
+                    ).toByteArray()
+                )
                 out.flush()
 
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+                val reader =
+                    BufferedReader(InputStreamReader(socket.getInputStream()))
                 val responseLine = reader.readLine()
-                assertNotNull("Proxy must return an HTTP response line", responseLine)
+                assertNotNull(
+                    "Proxy must return an HTTP response line",
+                    responseLine
+                )
                 assertTrue(
-                    "Unreachable upstream should yield a 502 Bad Gateway response, got: $responseLine",
-                    responseLine.contains("502") || responseLine.contains("Bad Gateway")
+                    "Unreachable upstream should yield a 502 Bad Gateway response, " +
+                        "got: $responseLine",
+                    responseLine.contains("502") ||
+                        responseLine.contains("Bad Gateway")
                 )
             }
         } finally {
             LocalHttpsProxy.stop()
+            io.mockk.unmockkObject(
+                com.celzero.bravedns.service.VpnController
+            )
         }
     }
 
     @Test
-    fun testDynamicBypassAndPersistence() {
-        val mockState = io.mockk.mockk<com.celzero.bravedns.service.PersistentState>(relaxed = true)
-        
-        // Return a pre-saved bypass host string when requested
+    fun testInitializationClearsLegacyBypassAndHandshakeFailureDoesNotPersist() {
+        val mockState =
+            io.mockk.mockk<com.celzero.bravedns.service.PersistentState>(relaxed = true)
+
         var savedHosts = "custom-pinned.com"
         io.mockk.every { mockState.httpsBypassHosts } answers { savedHosts }
-        io.mockk.every { mockState.httpsBypassHosts = any() } answers { savedHosts = firstArg() }
+        io.mockk.every { mockState.httpsBypassHosts = any() } answers {
+            savedHosts = firstArg()
+        }
 
-        // Initialize the proxy with our mockState
         LocalHttpsProxy.initialize(mockState)
 
-        // The pre-saved host should be bypassed
-        assertFalse("custom-pinned.com should be bypassed", LocalHttpsProxy.shouldInspectDomain("custom-pinned.com"))
-        assertFalse("subdomain should also be bypassed", LocalHttpsProxy.shouldInspectDomain("api.custom-pinned.com"))
-        assertTrue("other domain should be inspected", LocalHttpsProxy.shouldInspectDomain("example.com"))
+        assertEquals(
+            "Legacy persisted bypass hosts must be cleared during initialization",
+            "",
+            savedHosts
+        )
+        assertTrue(
+            "A cleared legacy host must remain eligible for inspection",
+            LocalHttpsProxy.shouldInspectDomain("custom-pinned.com")
+        )
+        assertTrue(
+            "A subdomain of a cleared legacy host must remain eligible",
+            LocalHttpsProxy.shouldInspectDomain("api.custom-pinned.com")
+        )
+        assertFalse(
+            "Built-in persistent bypass seeds must remain bypassed",
+            LocalHttpsProxy.shouldInspectDomain("google.com")
+        )
 
-        // Simulate a TLS handshake failure for a domain using reflection to invoke the private helper
-        val method = LocalHttpsProxy::class.java.getDeclaredMethod("addToBypassCache", String::class.java)
+        val method =
+            LocalHttpsProxy::class.java.getDeclaredMethod(
+                "addToBypassCache",
+                String::class.java
+            )
         method.isAccessible = true
         method.invoke(LocalHttpsProxy, "test-failed-handshake.com")
 
-        assertFalse("test-failed-handshake.com should be dynamically bypassed now", LocalHttpsProxy.shouldInspectDomain("test-failed-handshake.com"))
-        assertTrue("mockState should have been updated with the new bypass list", savedHosts.contains("test-failed-handshake.com"))
+        assertTrue(
+            "TLS handshake failure must not create a dynamic bypass",
+            LocalHttpsProxy.shouldInspectDomain("test-failed-handshake.com")
+        )
+        assertEquals(
+            "TLS handshake failure must not be persisted",
+            "",
+            savedHosts
+        )
     }
 }

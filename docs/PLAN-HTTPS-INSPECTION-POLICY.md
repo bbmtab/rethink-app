@@ -458,7 +458,111 @@ release-candidate readiness therefore remain open.
 
 ---
 
-## 12. Document ownership
+## 12. Deferred compatibility verification
+
+**Status:** TODO — remaining tests run only after Windows Gradle/R.jar and
+device-test infrastructure is stable.
+
+AdGuard compatibility data provides regression scenarios, not automatic Rethink
+policy. External exclusions require independent Rethink verification before
+production use.
+
+### 12.1 Locked baseline
+
+- Verified known browsers are inspected by default.
+- Dynamic browsers remain OFF until enabled by the user.
+- General/non-browser applications remain OFF by default.
+- Unknown or unresolved applications default to BYPASS.
+- System and user exclusions beat every MITM inclusion.
+- TLS failure must not create or persist a dynamic bypass.
+- HTTPS MITM policy and QUIC policy are separate.
+- `quic_pkg_exclusions.txt` means QUIC is allowed for matching packages; it does
+  not mean block QUIC or force TCP.
+
+References:
+
+- https://github.com/AdguardTeam/CompatibilityIssues
+- https://github.com/AdguardTeam/AdguardForAndroid/issues/5497
+- https://github.com/AdguardTeam/AdguardForAndroid/issues/5617
+- https://github.com/AdguardTeam/AdguardForAndroid/issues/5689
+- https://github.com/AdguardTeam/AdguardForAndroid/issues/6076
+
+### 12.2 Implementation and verification TODO
+
+- [x] Slice-1R3 Robolectric verification: focused tests 1/1 + 1/1 and complete
+  `LocalHttpsProxyTest` 3/3 PASS.
+- [ ] Rerun `InspectionPolicyEngineTest` 8/8 after Windows Gradle/R.jar
+  infrastructure stabilizes; the last attempt did not reach the test phase.
+- [ ] Load verified app/domain presets into one immutable policy snapshot.
+- [ ] Invoke `InspectionPolicyEngine` before accepting CONNECT.
+- [ ] Preserve package-scoped rules such as
+  `domain.example$app=com.example.app`.
+- [ ] Implement QUIC policy independently from HTTPS BYPASS/MITM.
+- [ ] Atomically reload the complete policy generation.
+- [ ] Log decisions and reasons without logging decrypted payloads.
+
+### 12.3 Deferred compatibility tests
+
+- [ ] General applications such as WeChat receive default BYPASS.
+- [ ] Package exclusion beats browser or user inclusion.
+- [ ] Package-scoped domain bypass does not affect another app.
+- [ ] QUIC allowance does not automatically create HTTPS bypass.
+- [ ] HTTPS bypass does not automatically allow QUIC.
+- [ ] Handshake failure does not mutate or persist policy.
+- [ ] Chrome positive control reaches MITM with the correct reason.
+- [ ] WeChat Mini Program works under default BYPASS (issue #5689).
+- [ ] WeChat/AliExpress media works with verified QUIC policy (issue #5497).
+- [ ] Google Search/Gboard succeeds on the first attempt (issue #5617).
+- [ ] Chrome MoQT/WebTransport is not broken by QUIC policy (issue #6076).
+- [ ] Restart preserves package, domain, QUIC, decision, and reason state.
+
+For each failure, isolate ordinary filtering rules, tracking transformations,
+DNS, QUIC, upstream proxy, and HTTPS interception separately before adding a
+default exclusion.
+
+### Remaining preset intake gates
+
+#### Accepted N3 data baseline
+
+N3D bundles only `app/src/main/assets/https_inspection/ssl_allow_list.txt`. It is the byte-identical generated Android exclusion artifact from `AdguardTeam/HttpsExclusions` commit `5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8`, with SHA-256 `cf2699dbd93b9a3c6a94e1927bd58803ffbaa61ef2a814df36858b37652ad856`.
+
+The bundled asset is limited to protected-domain policy input. N3D did not add Android loading, dependency injection, runtime policy publication, UI integration, QUIC handling, or changes to the default treatment of applications. The consolidated policy suite passed 32 tests with zero failures and zero errors.
+
+#### Remaining inputs are not authorized for bundling
+
+The following external or attached inputs remain research material and must not be copied into application assets by a later implementation slice without satisfying the corresponding gate:
+
+- `pkg_exclusions.txt`: the AdGuard meaning is exclusion from VPN routing and filtering, while the current Rethink policy model describes HTTPS-inspection bypass. These are not equivalent scopes.
+- `filter_https_traffic_inclusions.txt`: its AdGuard meaning enables HTTPS filtering by default for listed browsers. Rethink requires every known-browser entry to be independently verified before it can become a default-ON policy entry.
+- `filter_https_traffic_inclusions_problematic_devices.txt`: device-specific selection criteria and fallback behavior have not been modeled.
+- `filter_https_traffic_exclusions.json`: its schema, selection precedence, and Android integration contract have not been accepted.
+- `quic_pkg_exclusions.txt`: QUIC allow, block, bypass, and fallback behavior are not represented by the current HTTPS inspection decision model.
+- `ssl_block_list.txt`: its authoritative source, redistribution terms, and whitelist-mode semantics have not been accepted.
+
+`AdguardTeam/CompatibilityIssues` may be used as a research reference, but its repository did not expose a `LICENSE`, `COPYING`, `NOTICE`, or package-level license declaration during the 2026-08-31 audit. Project governance therefore does not authorize redistributing those raw lists. A transformed attachment is not an acceptable substitute for an authorized raw upstream artifact.
+
+#### First-party registry TODO
+
+- [ ] Audit every proposed system hard-bypass UID and package against an authoritative platform source and record a concrete operational rationale. Do not copy third-party VPN or OEM package exclusions merely because they appear in another product.
+- [ ] Build the known-browser registry as first-party maintained data. Verify the production package identifier, browser identity, and essential HTTPS-inspection functionality for each entry.
+- [ ] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
+- [ ] Resolve the existing Edge package candidate discrepancy during an authorized runtime-integration slice: `com.microsoft.empath` is not the verified Microsoft Edge package identifier; the verified Google Play identifier is `com.microsoft.emmx`.
+- [ ] Define how problematic-device browser entries are selected before creating any corresponding asset.
+- [ ] Design and approve QUIC policy independently before adding a QUIC package registry.
+- [ ] Define the schema and precedence for `filter_https_traffic_exclusions.json` before parsing or bundling it.
+- [ ] Create each remaining asset only after its provenance, redistribution authorization, semantics, parser contract, and focused tests are accepted.
+- [ ] Connect the preset loader to Android assets and runtime policy publication only after all mandatory registries required by the selected policy mode exist.
+
+#### Locked defaults while these TODOs remain open
+
+- General non-browser applications remain default OFF for HTTPS inspection unless explicitly included by the user.
+- Dynamically detected browsers remain default OFF unless explicitly enabled by the user.
+- A known-browser entry may become default ON only after its individual audit is accepted.
+- No matching rule continues to produce `BYPASS_DEFAULT`.
+- Missing registries must not be hidden by creating empty placeholder assets.
+- The pure-JVM loader and parser implementation remains disconnected from Android runtime policy publication.
+
+## 13. Document ownership
 
 | Document | Role |
 |----------|------|

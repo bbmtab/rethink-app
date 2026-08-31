@@ -1365,4 +1365,166 @@ not seal B4.5, controlled website filtering, or release-candidate readiness.
 
 ---
 
+## DECISION-011: Third-Party HTTPS Preset Data Intake (2026-08-31)
+
+**Status:** GOVERNING — REQUIRED BEFORE PRESET ASSET INTAKE
+**Scope:** Phase-1D-B4.5 HTTPS Inspection policy data only
+**Related decisions:** DECISION-004 and DECISION-010
+
+### Purpose
+
+This decision governs the provenance, licensing, transformation, and update
+rules for bundled HTTPS Inspection preset data. It does not authorize runtime
+integration or change the policy precedence locked by DECISION-010.
+
+### Source and license findings
+
+| Source | Finding | Intake decision |
+|---|---|---|
+| `AdguardTeam/HttpsExclusions` | `package.json` at pinned commit `5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8` declares author `AdGuard` and license `MIT` | Eligible for attributed, hash-pinned domain-data intake |
+| `AdguardTeam/CompatibilityIssues` | Public data repository, but no `LICENSE`, `NOTICE`, or package-level license declaration was found | Research reference only; its files must not be redistributed verbatim without explicit permission |
+| `AdguardTeam/AdguardForAndroid` | Its official README states that AdGuard for Android is not an open-source project | Design and issue reference only; not an implementation or asset source |
+
+Public visibility alone is not treated as redistribution permission.
+
+### Locked domain-source artifact
+
+The only domain corpus authorized for the next asset-intake slice is generated
+from:
+
+- repository:
+  `https://github.com/AdguardTeam/HttpsExclusions`
+- pinned commit:
+  `5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8`
+- generator:
+  `node index.js`
+- generated source artifact:
+  `dist/android_exclusions.txt`
+- expected SHA-256:
+  `cf2699dbd93b9a3c6a94e1927bd58803ffbaa61ef2a814df36858b37652ad856`
+- expected Git blob hash:
+  `4349f8b56fc83f8a0a5ab020ffc0aa2c66ba17b5`
+- expected byte count:
+  `85173`
+- expected logical-line count:
+  `4569`
+
+The generated artifact may later be copied without content modification to:
+
+`app/src/main/assets/https_inspection/ssl_allow_list.txt`
+
+A bundled notice must accompany it at:
+
+`app/src/main/assets/https_inspection/NOTICE.txt`
+
+The notice must record the upstream repository, pinned commit, generator,
+upstream author and MIT declaration, generated hashes, and a direct link to the
+pinned license declaration.
+
+### Prohibited transformed attachment
+
+The separately supplied `ssl_allow_list.txt` with SHA-256
+
+`fe6e2505590e772a00413229c4017802b6d379e97257f294948b96c86f8d42dc`
+
+must not be used as the canonical asset.
+
+It was verified to equal the pinned generated artifact only after:
+
+1. prepending an additional generated-file comment; and
+2. changing `"lastpass.com"` to `lastpass.com`.
+
+Even though another unquoted `lastpass.com` entry currently produces the same
+effective suffix set after deduplication, removing exact-domain quotes is a
+semantic transformation and is not accepted as the canonical provenance path.
+
+### Parser contract for the pinned raw artifact
+
+With the currently accepted `InspectionDomainPresetParser`, the pinned raw
+artifact must produce:
+
+- 4,308 unique global protected domains;
+- 27 package keys;
+- 51 unique package-domain pairs;
+- 2 retained unsupported-rule diagnostics;
+- line 4,302:
+  `"lastpass.com"` → `MALFORMED_RULE`;
+- line 4,542:
+  `ping.*.adguard.io` → `UNSUPPORTED_WILDCARD`.
+
+Unsupported rules must remain visible as diagnostics. They must not be silently
+discarded, widened, converted to global rules, or repaired by modifying donor
+data.
+
+Support for quoted exact-domain rules and embedded wildcards requires a
+separate policy-model decision and test-first implementation slice.
+
+### Browser and system-bypass registries
+
+The following `CompatibilityIssues` files are not authorized for verbatim
+bundling by this decision:
+
+- `filter_https_traffic_inclusions.txt`;
+- `pkg_exclusions.txt`;
+- `filter_https_traffic_inclusions_problematic_devices.txt`;
+- `filter_https_traffic_exclusions.json`;
+- `quic_pkg_exclusions.txt`.
+
+Known-browser and system-hard-bypass assets must instead be created as
+Rethink-owned registries from independently verified package IDs, Android UID
+contracts, and documented operational rationales, unless explicit
+redistribution permission is obtained.
+
+This preserves the existing application defaults:
+
+- independently verified known browsers: eligible for default ON;
+- dynamically discovered browsers: default OFF until explicitly enabled;
+- all general applications: default OFF;
+- unresolved applications: default BYPASS.
+
+### Update policy
+
+Preset updates are compile-time, deliberate, and hash-pinned.
+
+No runtime download, floating branch, unpinned URL, automatic donor refresh, or
+silent corpus replacement is permitted.
+
+Every future update requires:
+
+1. a new pinned upstream commit;
+2. regenerated artifact hashes;
+3. corpus-count and diagnostic review;
+4. focused parser tests;
+5. full policy regression tests;
+6. an append-only decision or evidence addendum.
+
+### Current implementation status
+
+At this decision point:
+
+- the pure policy engine, parsers, snapshot factory, and preset-loader core
+  exist;
+- the loader core has passed 30/30 policy tests;
+- no preset asset exists;
+- no Android adapter or DI binding exists;
+- no runtime call site exists;
+- no browser, system-bypass, JSON, block-list, problematic-device, or QUIC
+  corpus is authorized by this decision.
+
+This decision authorizes only the later hash-pinned domain-asset intake. It does
+not itself add that asset.
+
+### Review triggers
+
+Re-open or append to this decision if:
+
+- the upstream license declaration changes;
+- a standalone upstream license contradicts the package declaration;
+- a transformed donor artifact is proposed;
+- exact-domain or wildcard semantics are added;
+- a `CompatibilityIssues` file is proposed for redistribution;
+- preset data is proposed for runtime download or automatic refresh.
+
+---
+
 **End of Decisions — Append Only**
