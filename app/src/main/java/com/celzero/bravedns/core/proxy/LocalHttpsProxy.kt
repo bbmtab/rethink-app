@@ -6,6 +6,10 @@ import com.celzero.bravedns.core.filter.CspInjector
 import com.celzero.bravedns.core.filter.HtmlFilter
 import com.celzero.bravedns.core.filter.ProceduralFilter
 import com.celzero.bravedns.core.filter.ScriptletFilter
+import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluator
+import com.celzero.bravedns.core.proxy.policy.InspectionDecision
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicyResult
+import com.celzero.bravedns.core.proxy.policy.InspectionReason
 import kotlinx.coroutines.*
 import java.io.*
 import java.net.InetSocketAddress
@@ -38,96 +42,11 @@ object LocalHttpsProxy : KoinComponent {
 
     private val appConfig by inject<com.celzero.bravedns.data.AppConfig>()
 
-    /**
-     * Domains that must bypass MITM inspection.
-     *
-     * Two categories:
-     * 1. Certificate-pinned domains — these use cert pinning so our leaf cert will
-     *    always be rejected regardless of CA trust level.
-     * 2. HSTS preloaded + Chrome hardcoded domains — on non-root devices where our CA
-     *    is only in the user store (not system store), Chrome shows a hard "not private"
-     *    error with NO "proceed" option for HSTS domains. Since we cannot MITM these
-     *    reliably without a system CA, we bypass them to avoid breaking the browser UX.
-     *    DNS-level blocking still applies to all of these via the VPN tunnel.
-     *
-     * AdGuard handles this the same way: they bypass cert-pinned and HSTS-strict domains
-     * at the proxy layer and rely on DNS blocking for those domains instead.
-     */
-    private val PERSISTENT_BYPASS_SEEDS = setOf(
-        // Cert-pinned / Google infrastructure
-        "google.com",
-        "googleapis.com",
-        "gstatic.com",
-        "google-analytics.com",
-        "googletagmanager.com",
-        "play.google.com",
-        "android.clients.google.com",
-        // High-volume media & video streaming CDNs
-        "googlevideo.com",
-        "gvt1.com",
-        "gvt2.com",
-        "ytimg.com",
-        "ggpht.com",
-        // Apple
-        "apple.com",
-        "icloud.com",
-        // HSTS preloaded — Chrome shows no-proceed error without system CA
-        "facebook.com",
-        "instagram.com",
-        "twitter.com",
-        "x.com",
-        "whatsapp.com",
-        "github.com",
-        "microsoft.com",
-        "live.com",
-        "outlook.com",
-        "office.com",
-        "linkedin.com",
-        "amazon.com",
-        "paypal.com",
-        "bankofamerica.com",
-        "chase.com",
-        "cloudflare.com",
-        "mozilla.org",
-        "firefox.com",
-        "wikipedia.org",
-        "wikimedia.org",
-        "dropbox.com",
-        "slack.com",
-        "zoom.us",
-        "netflix.com",
-        "youtube.com",
-        "tiktok.com",
-        "snapchat.com",
-        "pinterest.com",
-        "reddit.com",
-        "tumblr.com",
-        "twitch.tv",
-        "discord.com",
-        "spotify.com",
-        // Media & Content Delivery Networks (CDNs)
-        "nflxvideo.net",
-        "nflxso.net",
-        "nflximg.net",
-        "vimeocdn.com",
-        "ttvnw.net",
-        "ttwstatic.com",
-        "fbcdn.net",
-        "tiktokv.com",
-        "byteoversea.com",
-        "ibyteimg.com",
-        "ibytedtos.com",
-        "sndcdn.com",
-        "fastly.net",
-        "akamaihd.net",
-        "akamai.net",
-        "edgecastcdn.net",
-        "limelight.com",
-        "cloudfront.net"
-    )
-
     private val dynamicBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val allowedPackages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile
+    private var inspectionPolicyEvaluator:
+        InspectionConnectionPolicyEvaluator? = null
 
     /**
      * Initializes the proxy with persistent state to load and persist bypassed hosts.
@@ -164,45 +83,33 @@ object LocalHttpsProxy : KoinComponent {
     }
 
     /**
-     * Sets the package names allowed for HTTPS inspection.
-     * If empty, all packages are allowed.
+     * Configures the policy evaluator that resolves each connection's
+     * identity and decides MITM vs BYPASS for the inspection policy engine.
      */
-    fun setAllowedPackages(packages: Set<String>) {
-        allowedPackages.clear()
-        allowedPackages.addAll(packages)
-        logInfo("HTTPS inspection allowed packages updated: ${packages.size} packages")
+    fun setInspectionPolicyEvaluator(
+        evaluator: InspectionConnectionPolicyEvaluator
+    ) {
+        inspectionPolicyEvaluator = evaluator
+        logInfo("HTTPS inspection policy evaluator configured")
     }
 
-    private fun isConnectionFromAllowedPackage(clientSocket: Socket): Boolean {
-        val context = appContext ?: return true
-        if (allowedPackages.isEmpty()) return true
+    internal suspend fun evaluateInspectionPolicy(
+        clientSocket: Socket,
+        host: String,
+        destinationPort: Int
+    ): InspectionPolicyResult {
+        val evaluator =
+            inspectionPolicyEvaluator
+                ?: return InspectionPolicyResult(
+                    decision = InspectionDecision.BYPASS,
+                    reason = InspectionReason.BYPASS_DEFAULT
+                )
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            try {
-                val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-                if (cm != null) {
-                    val local = InetSocketAddress(clientSocket.inetAddress, clientSocket.port)
-                    val remote = InetSocketAddress(clientSocket.localAddress, clientSocket.localPort)
-                    val uid = cm.getConnectionOwnerUid(6, local, remote) // 6 is IPPROTO_TCP
-                    if (uid != -1) {
-                        val pm = context.packageManager
-                        val packages = pm.getPackagesForUid(uid)
-                        if (packages != null) {
-                            for (pkg in packages) {
-                                if (allowedPackages.contains(pkg)) {
-                                    return true
-                                }
-                            }
-                            logInfo("Connection from package(s) ${packages.joinToString(", ")} is NOT in allowed packages, bypassing MITM")
-                            return false
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                logWarn("Failed to get connection owner UID: ${e.message}")
-            }
-        }
-        return true // Default to inspect if cannot resolve UID/packages
+        return evaluator.evaluate(
+            clientSocket = clientSocket,
+            host = host,
+            destinationPort = destinationPort
+        )
     }
 
     private fun loadBypassCacheFromPreferences() {
@@ -229,7 +136,7 @@ object LocalHttpsProxy : KoinComponent {
         // With suffix matching, one failed subdomain would bypass the entire parent domain
         // for all future connections — defeating MITM entirely (root cause of the ipleak.net bug).
         //
-        // Certificate-pinned domains belong in PERSISTENT_BYPASS_SEEDS, not here.
+        // Certificate-pinned/protected domains are now owned by InspectionPolicyEngine.
         // We log only; next connection will retry MITM normally.
         logInfo("TLS handshake failed for '$host' — not adding to bypass cache (will retry on next connection)")
     }
@@ -390,6 +297,7 @@ object LocalHttpsProxy : KoinComponent {
      */
     @Synchronized
     fun stop() {
+        inspectionPolicyEvaluator = null
         if (!isRunning) return
         isRunning = false
         logInfo("Stopping local HTTPS proxy server...")
@@ -471,7 +379,27 @@ object LocalHttpsProxy : KoinComponent {
                 clientOut.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
                 clientOut.flush()
 
-                val shouldInspect = shouldInspectDomain(host) && isConnectionFromAllowedPackage(clientSocket)
+                val policyResult =
+                    if (shouldInspectDomain(host)) {
+                        evaluateInspectionPolicy(
+                            clientSocket = clientSocket,
+                            host = host,
+                            destinationPort = port
+                        )
+                    } else {
+                        InspectionPolicyResult(
+                            decision = InspectionDecision.BYPASS,
+                            reason = InspectionReason.BYPASS_DOMAIN
+                        )
+                    }
+
+                val shouldInspect =
+                    policyResult.decision == InspectionDecision.MITM
+
+                logInfo(
+                    "HTTPS inspection decision for $host:$port: " +
+                        "${policyResult.decision} (${policyResult.reason})"
+                )
 
                 if (shouldInspect) {
                     performMitmInspection(clientSocket, upstream, host, port)
@@ -1198,19 +1126,13 @@ object LocalHttpsProxy : KoinComponent {
     }
 
     internal fun shouldInspectDomain(domain: String): Boolean {
-        val cleanedDomain = domain.trim().lowercase(Locale.US)
-        
-        // 1. Check pre-seeded known pinned domains
-        if (PERSISTENT_BYPASS_SEEDS.any { cleanedDomain == it || cleanedDomain.endsWith(".$it") }) {
-            return false
+        val cleanedDomain =
+            domain.trim().trimEnd('.').lowercase(Locale.US)
+
+        return dynamicBypassSet.none {
+            cleanedDomain == it ||
+                cleanedDomain.endsWith(".$it")
         }
-        
-        // 2. Check dynamic bypass cache
-        if (dynamicBypassSet.any { cleanedDomain == it || cleanedDomain.endsWith(".$it") }) {
-            return false
-        }
-        
-        return true
     }
 
     private fun readLineByteByByte(inputStream: InputStream): String {

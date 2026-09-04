@@ -584,3 +584,173 @@ Repository inspection found:
 - Controlled real-website filter behavior: NOT YET PASSED.
 - Full HTTPS preset-driven hybrid policy: NOT IMPLEMENTED.
 - Release-candidate readiness: BLOCKED pending HTTPS regression diagnosis and controlled website verification.
+
+---
+
+## Phase-1D N4E HTTPS Policy / Device Closure — 2026-09-04
+
+### Scope
+
+This addendum records the final N4E controlled-device evidence for HTTPS
+Inspection policy eligibility, dynamic-browser discovery, compatibility bypass,
+package lifecycle inventory refresh, and final clean-state restoration.
+
+It does not rewrite the historical Phase-0 audit above.
+
+### Device
+
+```text
+Device: Xiaomi Mi A1 / tissot
+Android: 16
+SDK: 36
+Serial: 3595381c0804
+Package: com.celzero.bravedns.plus
+```
+
+### Dynamic-browser root cause
+
+The controlled dynamic-browser fixture was lost at the Android PackageManager
+query boundary because browser capability discovery used
+`PackageManager.MATCH_DEFAULT_ONLY`.
+
+Literal comparison established:
+
+```text
+ACTION_MAIN + CATEGORY_APP_BROWSER, flags=0
+→ fixture present
+
+same selector + MATCH_DEFAULT_ONLY
+→ fixture absent
+```
+
+The detector repair removed the default-handler restriction.
+
+### Runtime policy evidence
+
+General controlled fixture:
+
+```text
+Decision: BYPASS_DEFAULT
+Transport: raw TCP pass-through
+HTTP: 200
+Certificate: public Cloudflare chain
+```
+
+Compatibility controlled fixture (`com.facebook.katana` fixture APK):
+
+```text
+Decision: BYPASS_COMPATIBILITY
+Transport: raw TCP pass-through
+HTTP: 200
+Certificate: public Cloudflare chain
+```
+
+Dynamic controlled browser fixture:
+
+```text
+Policy snapshot: dynamicBrowsers=1
+Decision: MITM_DYNAMIC_BROWSER
+TLS MITM: established
+HTTP: 200
+Issuer: RethinkDNS Root CA
+Subject: RethinkDNS Local / example.com
+```
+
+### Inventory lifecycle defect and repair
+
+The first cleanup attempt exposed a burst-removal defect:
+
+* first removed fixture disappeared;
+* two later removed fixtures remained queryable in Rethink Apps;
+* `RefreshAppsJob` used `ACTION_REFRESH_AUTO`;
+* `RefreshDatabase` suppresses AUTO/INTERACTIVE refreshes within its one-minute
+  refresh interval.
+
+The repair keeps ordinary RefreshAppsJob callers defaulting to AUTO but gives
+package lifecycle requests an explicit `ACTION_REFRESH_FORCE`.
+
+The package receiver continues using `ExistingWorkPolicy.REPLACE`.
+
+### Verification
+
+Temporary GHA verification commit:
+
+`78fb25576cd5d52b5674aedfebbc55f2794bfaf8`
+
+Targeted GHA result:
+
+```text
+BravePackageChangeReceiverTest
+tests=10
+failures=0
+errors=0
+
+production Kotlin compile=PASS
+```
+
+Real-device regression:
+
+```text
+Android package-event window ≈ 3.579 seconds
+
+general:
+delete app → refresh done
+
+compatibility:
+delete app → refresh done
+
+dynamic:
+delete app → refresh done
+
+post-removal PackageManager:
+absent / absent / absent
+
+post-removal Configure → Apps search:
+0 / 0 / 0
+```
+
+The earlier host-side `82.209 s` measurement is not the package-event burst
+interval; it included Windows/ADB command-dispatch overhead and is not used as
+the throttle-regression metric.
+
+### Final restoration
+
+Final Protection restart completed with no additional tap after the allowed
+stabilization period.
+
+Newest clean policy snapshot:
+
+```text
+systemPackages=4
+systemUids=2
+compatibility=201
+protectedDomains=4308
+knownBrowsers=147
+dynamicBrowsers=0
+```
+
+Final state:
+
+```text
+fixtures installed = NO
+Protection = ON / protected
+VPN = tun1
+network = healthy
+patch preserved = YES
+```
+
+### Audit verdict
+
+```text
+N4E_POLICY_RUNTIME=PASS
+N4E_DYNAMIC_BROWSER_DISCOVERY=PASS
+N4E_COMPATIBILITY_BYPASS=PASS
+N4E_GENERAL_DEFAULT_BYPASS=PASS
+N4E_PACKAGE_LIFECYCLE_REFRESH=PASS
+N4E_DEVICE_FULLY_SEALED=YES
+```
+
+Repository integration remains pending: this evidence was produced from the
+verified local working tree. Do not reinterpret committed HEAD
+`43e02cd0956d6aefc487eac0d534eaefa99c769d` as already containing every N4E
+working-tree file.

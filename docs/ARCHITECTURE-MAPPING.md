@@ -2,12 +2,14 @@
 
 This artifact defines the architectural blueprint and packet flow tracing for integrating local **HTTPS MITM Inspection** into RethinkDNS. It incorporates critical feedback regarding `setHttpProxy` limitations, HTTP/2 ALPN, and response compression.
 
-> **Implementation status (2026-08-27):** CA, local proxy, FilterEngine,
-> routing integration, unified Plus UI, and custom filter-source management are
-> implemented. DECISION-010 remains the governing target for HTTPS eligibility
-> and bypass, but its complete preset-driven `InspectionPolicyEngine` is not
-> implemented. The current runtime is a partial hardcoded hybrid. Controlled
-> real-website filtering remains blocked by an HTTPS/browser regression.
+> **Implementation status (2026-09-04):** CA, local proxy, FilterEngine,
+> routing integration, unified Plus UI, filter-source management, and the N4E
+> HTTPS eligibility/runtime policy are implemented in the verified local
+> working tree. Dynamic-browser discovery, policy resolution, TLS MITM, bypass
+> branches, and package-lifecycle inventory reconciliation are device-verified
+> on the Mi A1. Final branch integration/commit remains pending; this status
+> does not claim that committed HEAD `43e02cd0956d6aefc487eac0d534eaefa99c769d`
+> already contains every verified working-tree file.
 
 ---
 
@@ -178,10 +180,14 @@ Responsibility boundaries (DECISION-010):
 4. `PROTECTED_APP_AND_PORT` → `BYPASS_APP_PORT`
 5. `KNOWN_BROWSER_INSTALLED` → `MITM_KNOWN_BROWSER`
 6. `USER_APP_INCLUDE` → `MITM_USER_APP`
-7. `DYNAMIC_BROWSER + USER_ENABLED` → `MITM_DYNAMIC_BROWSER`
-   (discovery signals: `ACTION_VIEW` + `CATEGORY_BROWSABLE` + `https://` URI
-   — `CATEGORY_APP_BROWSER` and `ROLE_BROWSER` are supplementary only)
+7. `DYNAMIC_BROWSER_DETECTED` → `MITM_DYNAMIC_BROWSER`
+   (capability classifier: browser-app capability OR both HTTP and HTTPS probes;
+   package-manager queries are not restricted by `MATCH_DEFAULT_ONLY`)
 8. No match → `BYPASS`
+
+`USER_APP_EXCLUSION` remains above all browser eligibility. Therefore known and
+dynamic browsers are inspected by default only when they are not explicitly
+excluded. Dynamic browsers do not require a separate user-enabled set.
 
 **Key invariants:**
 - MITM bypass and FilterEngine rules are independent (DECISION-010 §6). A
@@ -195,6 +201,37 @@ Responsibility boundaries (DECISION-010):
   as ordinary user-editable exclusions.
 - Dynamic browser discovery is best-effort: results depend on Android package
   visibility. Known-registry browsers are not affected by an empty discovery result.
+
+### A++. Installed-App Inventory Lifecycle Boundary (N4E)
+
+HTTPS Inspection does not own a second installed-app database.
+
+```text
+Android PACKAGE_* lifecycle broadcast
+        ↓
+BravePackageChangeReceiver
+        ↓
+RefreshAppsJob
+        ↓
+package-change refresh action = ACTION_REFRESH_FORCE
+        ↓
+RefreshDatabase full reconciliation
+        ↓
+existing AppInfo / FirewallManager inventory
+        ↓
+HTTPS browser classification overlays that inventory
+```
+
+Package lifecycle events are authoritative inventory changes. They bypass the
+normal one-minute AUTO/INTERACTIVE refresh throttle so rapid install/remove
+bursts cannot leave stale app rows.
+
+Real-device N4E burst evidence removed three controlled fixtures within an
+Android package-event window of approximately 3.579 seconds. All three produced
+automatic Room deletion and final Configure → Apps exact-search counts of
+`0 / 0 / 0`.
+
+---
 
 ### B. TCP Connection Injection Point
 To avoid interfering with the heavy Cgo-compiled packet capture, we inject a system HTTP/HTTPS proxy.
@@ -236,12 +273,12 @@ To ensure that the existing DNS Filtering and Firewall capabilities remain entir
 | :--------------------------------------- | :--------------------------------------------------------------------- | :------------------------------------------------------------ |
 | Architecture and packet-flow mapping     | This document; DECISION-008; DECISION-010                              | **GOVERNING / CURRENT**                                       |
 | Certificate authority                    | `core/ca/CertificateAuthority.kt`                                      | **IMPLEMENTED AND DEVICE-VERIFIED**                           |
-| Local MITM proxy                         | `core/proxy/LocalHttpsProxy.kt`                                        | **IMPLEMENTED; HTTPS REGRESSION OPEN**                        |
+| Local MITM proxy                         | `core/proxy/LocalHttpsProxy.kt`                                        | **IMPLEMENTED AND N4E DEVICE-VERIFIED**                       |
 | Filter engine and advanced rule handling | `core/filter/FilterEngine.kt` and subtype handlers                     | **IMPLEMENTED**                                               |
 | Filter-source pipeline                   | Storage, downloader, compiler diagnostics, atomic activation, rollback | **SEALED THROUGH B4**                                         |
 | Filter-source management UI              | Shared Plus UI and Manage Filters surfaces                             | **IMPLEMENTED** for add/edit/remove/enable/disable            |
-| HTTPS eligibility and bypass policy      | Target `InspectionPolicyEngine` and preset-driven policy               | **OPEN** — current runtime is only a partial hardcoded hybrid |
-| End-to-end closure                       | Physical-device source management and controlled website filtering     | **PARTIAL / RC BLOCKED**                                      |
+| HTTPS eligibility and bypass policy      | `InspectionPolicyEngine`, preset snapshot inputs, browser capability discovery | **SEALED LOCALLY / N4E DEVICE-VERIFIED; final branch commit pending** |
+| End-to-end closure                       | Filter runtime E2E + HTTPS policy controlled-device matrix              | **CURRENT PHASE-1D ACCEPTANCE SEALED**                        |
 
 The custom-source implementation passed 102/102 targeted JUnit tests and its
 add/edit/remove/persistence flows were exercised on the Mi A1. Those results do

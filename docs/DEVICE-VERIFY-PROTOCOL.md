@@ -171,3 +171,162 @@ compilation/activation, and intended rule blocking.
 ---
 
 **End of Device-Verify Protocol**
+
+---
+
+## 8. N4E HTTPS Policy Runtime + Inventory Closure (2026-09-04)
+
+This section is a later evidence addendum. It does not rewrite the historical
+DV1–DV5 protocol.
+
+### Device
+
+* Xiaomi Mi A1 / `tissot`
+* Android 16 / SDK 36
+* serial `3595381c0804`
+* Rethink package `com.celzero.bravedns.plus`
+
+### Repository provenance
+
+Committed working branch at closure preparation:
+
+`phase1d-advanced-filter` @
+`43e02cd0956d6aefc487eac0d534eaefa99c769d`
+
+A temporary verification branch was used for the package-refresh repair:
+
+`temp/n4e-r2e-r2-gha-20260904` @
+`78fb25576cd5d52b5674aedfebbc55f2794bfaf8`
+
+The temporary commit contained the package-refresh repair plus a temporary GHA
+workflow. GitHub Actions production compilation and
+`BravePackageChangeReceiverTest` passed with:
+
+```text
+tests=10
+failures=0
+errors=0
+```
+
+The temporary workflow is not part of the target working branch.
+
+Important provenance rule: the final device APK also contained the pre-existing
+local N4E working-tree implementation. Therefore the device evidence is tied to
+the verified local working tree plus the stated HEAD, not falsely attributed to
+a clean committed tree containing every N4E file.
+
+### Dynamic-browser discovery repair
+
+Controlled dynamic-browser discovery initially failed because the
+package-manager query used `PackageManager.MATCH_DEFAULT_ONLY`.
+
+The controlled fixture was returned by the browser-app capability selector when
+queried with flags `0`, but disappeared with `MATCH_DEFAULT_ONLY`.
+
+After repair:
+
+```text
+dynamic fixture installed → dynamicBrowsers=1
+dynamic fixture removed   → dynamicBrowsers=0
+```
+
+### Controlled policy matrix
+
+```text
+dev.rethink.fixture.general
+→ BYPASS_DEFAULT
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+com.facebook.katana
+(controlled compatibility fixture, not the real Facebook application)
+→ BYPASS_COMPATIBILITY
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+dev.rethink.fixture.dynamicbrowser
+→ MITM_DYNAMIC_BROWSER
+→ TLS MITM established
+→ HTTP 200
+→ issuer RethinkDNS Root CA
+```
+
+### Package inventory lifecycle repair
+
+Package lifecycle broadcasts now request a forced app reconciliation so they are
+not suppressed by the one-minute automatic-refresh throttle.
+
+Three controlled package removals were observed within approximately 3.579
+seconds at the Android package-event layer.
+
+Each produced:
+
+```text
+packagesToDelete
+sizes: rmv: 1 ... action: 4
+delete app
+refresh done
+```
+
+After removal:
+
+```text
+PackageManager:
+general        absent
+compatibility  absent
+dynamic        absent
+
+Configure → Apps exact searches:
+general        0
+compatibility  0
+dynamic        0
+```
+
+No manual Refresh, app restart, or one-minute retry was needed.
+
+### Final clean policy snapshot
+
+The three fixtures remained absent.
+
+One final Protection OFF → ON cycle completed naturally:
+
+```text
+OFF: START / not protected
+ON:  STOP / protected
+```
+
+Fresh policy log:
+
+```text
+systemPackages=4
+systemUids=2
+compatibility=201
+protectedDomains=4308
+knownBrowsers=147
+dynamicBrowsers=0
+```
+
+Final health:
+
+```text
+Protection = ON / protected
+Wi-Fi      = enabled
+ping        = success
+VPN         = tun1
+fixtures    = absent
+```
+
+### N4E closure
+
+```text
+N4E_INVENTORY_REFRESH_REPAIR_SEALED=YES
+N4E_DYNAMIC_BROWSER_RUNTIME_SEALED=YES
+N4E_DV2_RUNTIME_SEALED=YES
+N4E_DEVICE_FULLY_SEALED=YES
+N4E_DEVICE_TESTING_COMPLETE=YES
+```
+
+No additional N4E device test is required unless subsequent implementation
+changes invalidate this evidence.

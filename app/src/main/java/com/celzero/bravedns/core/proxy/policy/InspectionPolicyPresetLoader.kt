@@ -9,7 +9,9 @@ fun interface InspectionPolicyPresetSource {
 class InspectionPolicyPresetLoader(
     private val source: InspectionPolicyPresetSource,
     private val packageParser: InspectionPackagePresetParser =
-        InspectionPackagePresetParser()
+        InspectionPackagePresetParser(),
+    private val appExclusionParser: InspectionAppExclusionPresetParser =
+        InspectionAppExclusionPresetParser()
 ) {
     fun load(): InspectionPolicyPresetBundle {
         val systemHardBypass =
@@ -24,11 +26,21 @@ class InspectionPolicyPresetLoader(
             packageParser.parsePackages(
                 source.open(KNOWN_BROWSERS_ASSET_PATH)
             )
+        val compatibilityExclusions =
+            appExclusionParser.parse(
+                source.open(COMPATIBILITY_EXCLUSIONS_ASSET_PATH)
+            )
+        val includedDomainMitm =
+            InspectionDomainPresetParser.parse(
+                source.open(INCLUDED_DOMAIN_MITM_ASSET_PATH)
+            )
 
         return InspectionPolicyPresetBundle(
             systemHardBypass = systemHardBypass,
             protectedDomainBypass = protectedDomainBypass,
-            knownBrowsers = knownBrowsers
+            knownBrowsers = knownBrowsers,
+            compatibilityExclusions = compatibilityExclusions,
+            includedDomainMitm = includedDomainMitm
         )
     }
 
@@ -41,5 +53,11 @@ class InspectionPolicyPresetLoader(
 
         const val KNOWN_BROWSERS_ASSET_PATH =
             "https_inspection/filter_https_traffic_inclusions.txt"
+
+        const val COMPATIBILITY_EXCLUSIONS_ASSET_PATH =
+            "https_inspection/filter_https_traffic_exclusions.json"
+
+        const val INCLUDED_DOMAIN_MITM_ASSET_PATH =
+            "https_inspection/ssl_block_list.txt"
     }
 }

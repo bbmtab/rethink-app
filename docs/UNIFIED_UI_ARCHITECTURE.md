@@ -1,7 +1,7 @@
 # RethinkDNS — Unified UI Architecture
 
 > **Purpose:** Complete map of RethinkDNS UI surface, organized by feature modules and user flows. This is our own architecture — no external references. Use as the single source of truth for Phase 1+ UI work (Plus tab redesign, MITM/adblock integration, auto-restart UX, etc.).
-> **Current state (2026-08-27):** Plus-tab consolidation, auto-restart, the filter-source foundation, and custom-source management are implemented. The full DECISION-010 preset-driven HTTPS policy and controlled website-filtering closure remain open.
+> **Current state (2026-09-04):** Plus-tab consolidation, auto-restart, filter-source management, and the N4E HTTPS eligibility/runtime policy are device-verified locally. Known and capability-detected browsers are default-ON unless explicitly excluded. Final branch integration remains pending; dedicated final per-app HTTPS management UI must reuse the existing Rethink installed-app inventory.
 
 ---
 
@@ -55,10 +55,12 @@ Custom filter-source management supports add, edit, remove, enable, and disable
 through the existing transaction path. The targeted closure passed 102/102 JUnit
 tests, and add/edit/remove/persistence behavior was exercised on the Mi A1.
 
-This UI completion does not imply HTTPS-policy completion. The runtime still
-uses a partial hardcoded hybrid rather than the complete preset-driven
-DECISION-010 policy. Controlled real-website filtering remains blocked by the
-observed browser regression while HTTPS Inspection is enabled.
+The N4E HTTPS eligibility/runtime policy is now device-verified locally.
+Controlled tests proved general-app default bypass, compatibility bypass, and
+dynamic-browser MITM, including RethinkDNS CA certificate presentation. Final
+branch integration is still pending. The dedicated final per-app HTTPS
+management UI remains follow-up UI work and must reuse Rethink's existing
+installed-app inventory rather than creating a duplicate app database.
 
 ```
 Note: `RethinkPlusDashboardFragment.kt` (RPN subscription UI) and `ServerSelectionFragment.kt` (RPN server picker) are deleted from the working tree (executed pivot 2026-08-09; supervisor-audited 2026-08-10). The fdroid `RethinkPlusFragment.kt` was hoisted to `full/` (R100). Play/website `RethinkPlusFragment.kt` (billing UI) is also deleted; the Plus surface is MITM/adblock-only for all flavors.
@@ -74,9 +76,13 @@ Plus (bottom nav tab) → RethinkPlusFragment (full flavor, hoisted fdroid→ful
 │   ├── CA status badge (✅ INSTALLED / ⚠️ NOT INSTALLED)
 │   ├── CA actions: Install / Re-install / Export to Downloads
 │   └── Apps (three-tier eligibility — DECISION-010)
-        ├── Known browsers      default ON  (maintained hardcoded package registry)
-        ├── Detected browsers   default OFF (dynamic fallback; user enables individually)
+        ├── Known browsers      default ON  unless explicitly excluded
+        ├── Detected browsers   default ON  unless explicitly excluded
         └── Other apps          default OFF (explicit user opt-in required)
+
+    App inventory source: reuse existing Rethink installed-app inventory.
+    Browser OFF = app exclusion escape hatch; browser ON = exclusion removed.
+    No separate dynamic-browser enabled registry is required.
 │
 ├── 2. Advanced Filtering
 │   ├── Enabled filter source summary — e.g. `2 lists enabled • 48,210 rules • updated 1h ago`
@@ -133,7 +139,7 @@ Plus (bottom nav tab) → RethinkPlusFragment (full flavor, hoisted fdroid→ful
 | CA status card | `CertificateAuthority.isCaInstalled()` polling | Live badge + actions |
 | CA install flow | `CertificateAuthority` + `KeyChain`/`ACTION_VIEW` | System CA installer |
 | HTTPS toggle | `persistentState.httpsInspectionEnabled` | Master on/off (disabled until CA installed) |
-| Per-app HTTPS filter | **NEW** (pattern: `HttpsFilteredAppsFragment`) | Allowlist apps for MITM |
+| Per-app HTTPS policy | **FOLLOW-UP UI — reuse existing Rethink Apps inventory** | Known/dynamic browsers are ON unless excluded; non-browser apps remain default-OFF unless explicitly included |
 | Exclusions | **NEW** | Domains/apps to skip MITM |
 
 ### CA Install Mechanics (preserve, just relocate)

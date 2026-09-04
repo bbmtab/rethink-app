@@ -31,7 +31,16 @@ class RefreshAppsJob(val context: Context, workerParameters: WorkerParameters) :
 
     override suspend fun doWork(): Result {
         Logger.d(LOG_TAG_SCHEDULER, "starting refresh-database job")
-        refreshDatabase.refresh(RefreshDatabase.ACTION_REFRESH_AUTO)
+        val refreshAction =
+            inputData.getInt(
+                INPUT_REFRESH_ACTION,
+                RefreshDatabase.ACTION_REFRESH_AUTO,
+            )
+        refreshDatabase.refresh(refreshAction)
         return Result.success()
+    }
+
+    companion object {
+        const val INPUT_REFRESH_ACTION: String = "refresh_action"
     }
 }

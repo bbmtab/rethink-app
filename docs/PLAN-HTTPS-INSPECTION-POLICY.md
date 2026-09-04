@@ -1,8 +1,9 @@
 # HTTPS Inspection Policy — Authority Document
 
-**Status:** Governing architecture lock — full preset-driven policy not yet implemented (2026-08-27)
-**Authority:** `docs/DECISIONS.md` § DECISION-010
-**Implementation baseline:** `phase1d-advanced-filter` @ `ca797a1d179b060b602c26664814111b640ffd8a`
+**Status:** Governing architecture + N4E runtime/device policy sealed locally (2026-09-04); final branch commit pending
+**Authority:** `docs/DECISIONS.md` § DECISION-010 plus the 2026-09-04 N4E superseding addendum
+**Committed branch baseline:** `phase1d-advanced-filter` @ `43e02cd0956d6aefc487eac0d534eaefa99c769d`
+**Local sealed implementation:** N4E policy/runtime/device verification complete; the verified working-tree implementation has not yet been finalized into the branch commit
 **Scope:** This document owns the HTTPS Inspection eligibility, bypass, and
 resource-protection policy layer. No other planning document should contain
 HTTPS policy details; they live here.
@@ -92,45 +93,52 @@ KNOWN BROWSER
 registry and is currently installed is placed in the MITM-eligible set with no
 further user action required.
 
-### 3.2 Dynamic browser fallback — default OFF
+### 3.2 Dynamic browser fallback — default ON unless explicitly excluded
 
-Applications not in the known registry but discoverable via Android browser
-capability signals:
+Applications not in the maintained known-browser registry but detected through
+Android browser capability signals are MITM-eligible by default.
 
-```
+```text
 DYNAMIC BROWSER DISCOVERY
-├── fallback for browser not present in known registry
-├── detected through Android browser capability signals
-└── OFF by default until user enables it
+├── fallback for a browser not present in the known registry
+├── capability-based Android package discovery
+├── if detected and not user-excluded → HTTPS Inspection ON
+└── user exclusion is the explicit escape hatch for compatibility failures
 ```
 
-**Discovery mechanism (best-effort — no guarantee of completeness):**
+**Implemented capability model:**
 
-The primary signal is an intent query for activities that handle
-`ACTION_VIEW` + `CATEGORY_BROWSABLE` with an `https://` URI scheme.
-Additional signals that may supplement the primary query (where available):
-- `ROLE_BROWSER` (Android API 29+ / `RoleManager`)
-- `CATEGORY_APP_BROWSER` (secondary signal only; see rejection note below)
+The dynamic classifier accepts a package when either:
 
-> `CATEGORY_APP_BROWSER` **alone** is REJECTED as the primary discovery signal.
-> Android's documentation explicitly warns that this category is not intended as
-> a primary intent-filter key for action resolution. It is used here only as a
-> supplementary signal alongside an `ACTION_VIEW` + `CATEGORY_BROWSABLE` query.
+1. Android reports the package through the browser-app capability query
+   (`ACTION_MAIN` + `CATEGORY_APP_BROWSER`), or
+2. the package independently resolves both HTTP and HTTPS browser probes.
 
-**Best-effort characteristics:**
+The package-manager queries are intentionally not restricted by
+`PackageManager.MATCH_DEFAULT_ONLY`. N4E real-device evidence proved that
+`MATCH_DEFAULT_ONLY` incorrectly removed a valid controlled dynamic-browser
+fixture from the `CATEGORY_APP_BROWSER` result set.
 
-- Dynamic discovery results depend on Android **package visibility** (API 30+).
-  Apps without a matching `<queries>` block in their manifest will receive an
-  empty result set from `queryIntentActivities()` even when browsers are
-  installed — this is a framework limitation, not a bug.
-- As a best-effort fallback: a non-empty or empty result set does not block MITM
-  for known-registry browsers. Missing dynamic results simply mean fewer choices
-  appear in the Plus-tab Apps list; the user is not prevented from using HTTPS
-  Inspection for known-registry browsers.
-- Discovered browsers appear in the Plus-tab Apps list but start in the OFF state.
-- The user must flip each detected browser to ON individually; no bulk-enable.
-- If a browser later graduates to the known registry, its stored user preference
-  (ON/OFF) is respected; it is not force-ON.
+Dynamic discovery remains best-effort and is subject to Android package
+visibility and the package's declared intent capabilities.
+
+**Default behavior:**
+
+* A discovered dynamic browser is MITM-eligible immediately.
+* There is no required per-browser "enabled" registry for dynamic browsers.
+* There is no dedicated dynamic-browser opt-in storage requirement.
+* User app exclusion has higher precedence than browser classification.
+* If a browser breaks under MITM, the user turns HTTPS Inspection OFF for that
+  app, which records/uses the app exclusion path.
+* Turning the app back ON removes that exclusion and restores normal browser
+  MITM eligibility.
+* Classification tier and exclusion state are independent: moving between
+  dynamic and known-browser classification must not erase an explicit user
+  exclusion.
+
+The final dedicated HTTPS-app management UI must reuse Rethink's existing
+installed-app inventory (package/UID/name/icon/install/remove refresh). It must
+not create a second installed-app database solely for HTTPS Inspection.
 
 ### 3.3 Other (non-browser) applications — default OFF, explicit opt-in
 
@@ -159,12 +167,16 @@ connection
 4. PROTECTED APP + PORT?         YES → BYPASS_APP_PORT
 5. KNOWN BROWSER INSTALLED?      YES → MITM_KNOWN_BROWSER
 6. USER EXPLICIT APP INCLUDE?    YES → MITM_USER_APP
-7. DYNAMIC BROWSER + ENABLED?    YES → MITM_DYNAMIC_BROWSER
+7. DYNAMIC BROWSER DETECTED?     YES → MITM_DYNAMIC_BROWSER
 8. (no match)                             BYPASS             (lowest)
 ```
 
 **Contract:** Step N is only evaluated if steps 1..N-1 all resolved NO. The
 first YES wins.
+
+Because `USER APP EXCLUSION` is evaluated at step 2, an explicit browser
+exclusion always wins before either known-browser or dynamic-browser default-ON
+eligibility is evaluated.
 
 ---
 
@@ -347,7 +359,7 @@ BYPASS_APP_PORT         — protected (app, port) tuple (step 4)
 
 MITM_KNOWN_BROWSER      — matched known registry (step 5)
 MITM_USER_APP           — user explicitly included non-browser app (step 6)
-MITM_DYNAMIC_BROWSER    — dynamic browser discovery + user enabled (step 7)
+MITM_DYNAMIC_BROWSER    — capability-detected dynamic browser, inspected by default unless excluded (step 7)
 
 MITM_STREAM_ONLY        — MITM established but body degraded to stream-only
 ```
@@ -405,7 +417,7 @@ POST-MITM RESOURCE DECISION
 
 | Component | Responsibility | Data source |
 |-----------|---------------|-------------|
-| `HttpsInspectionPolicy` | App eligibility: known registry, dynamic discovery, user includes/excludes | `HttpsInspectionPolicyRepository` (or equivalent) backed by `PersistentState` + registry |
+| `HttpsInspectionPolicy` | App eligibility: known registry, dynamic capability discovery, user includes, and user exclusions; browsers are default-ON unless excluded | `HttpsInspectionPolicyRepository` (or equivalent) backed by `PersistentState` + registry |
 | `SystemBypassPolicy` | Internal safety bypass: protected packages, optional UIDs, domains, (app, port) tuples | Internal registry; **not** user-editable |
 | `ResourceProtectionPolicy` | Post-MITM body-size thresholds; downgrades MITM_FULL → MITM_STREAM_ONLY once response body is available. Does not produce BYPASS decisions. | Tunable constants (see §8.4) |
 | `InspectionPolicyEngine` | Orchestrator: evaluates precedence, returns `(decision, reason)` | Calls the three policies above |
@@ -427,41 +439,92 @@ B1    Data / storage foundation              SEALED
 B2    Downloader + validation                SEALED
 B3    Parser / compiler + diagnostics        SEALED
 B4    Atomic activation + rollback           SEALED
-B4.5  HTTPS Inspection Policy                OPEN — governing design exists; full policy is not implemented
+B4.5  HTTPS Inspection Policy                SEALED LOCALLY — preset-driven policy/runtime/device gates closed by N4E; final branch commit pending
 B5    Manage Filters + custom source UI      IMPLEMENTED — add/edit/remove/enable/disable flows exist
-B6    End-to-end verification                BLOCKED — controlled website filtering has not passed
+B6    End-to-end verification                SEALED FOR CURRENT PHASE-1D ACCEPTANCE — filter runtime E2E closed 2026-08-30; HTTPS-policy/device N4E closed 2026-09-04
 ```
 
-DECISION-010 and this document remain the governing architecture for B4.5.
-That architecture status must not be confused with implementation completion.
+The remaining work is branch integration/documentation finalization, not an
+open N4E runtime/device defect. Dedicated final per-app HTTPS management UI work
+may continue separately, but it must reuse the existing Rethink app inventory
+and the exclusion semantics documented above.
 
-At the implementation baseline:
+DECISION-010 plus its 2026-09-04 N4E superseding addendum remain the governing
+architecture and product contract for B4.5.
 
-* No production `InspectionPolicyEngine` implements the complete documented
-  pre-CONNECT policy.
-* `LocalHttpsProxy` uses a partial hardcoded hybrid of persistent bypass seeds
-  and runtime state.
-* An empty allowed-package set makes all packages eligible.
-* Dynamic TLS failures are not persisted across initialization.
-* The complete preset-driven application, domain, and port policy has not been
-  wired into the runtime.
+### N4E implementation/runtime closure
 
-Custom filter-source management and its transaction path are implemented, with
-102/102 targeted JUnit tests passing. The tracked-file closure baseline is
-`ca797a1d179b060b602c26664814111b640ffd8a`. That progress does not seal B4.5.
+The verified local working tree now contains the preset-driven HTTPS eligibility
+and bypass runtime used by the N4E physical-device acceptance tests.
 
-Physical-device source-management checks passed, but browser access failed with
-HTTPS Inspection ON after a custom filter was added and recovered when HTTPS
-Inspection was disabled for that browser. A controlled real-website
-OFF → ON → OFF custom-filter test has not passed. B4.5, B6, and
-release-candidate readiness therefore remain open.
+The verified runtime includes:
+
+* `InspectionPolicyEngine` as the pre-CONNECT MITM/BYPASS authority;
+* immutable policy snapshot construction from the accepted preset inputs;
+* known-browser and dynamic-browser eligibility;
+* dynamic browser capability discovery without
+  `PackageManager.MATCH_DEFAULT_ONLY`;
+* compatibility bypass;
+* protected-domain policy input;
+* user/system exclusion precedence;
+* decision/reason diagnostics;
+* automatic installed-app inventory reconciliation for Android package
+  lifecycle changes.
+
+The controlled Mi A1 / Android 16 matrix proved:
+
+```text id="p5otkq"
+general application
+→ BYPASS_DEFAULT
+→ raw TCP
+→ HTTP 200
+→ public certificate
+
+compatibility fixture
+→ BYPASS_COMPATIBILITY
+→ raw TCP
+→ HTTP 200
+→ public certificate
+
+dynamic browser fixture
+→ MITM_DYNAMIC_BROWSER
+→ TLS MITM
+→ HTTP 200
+→ RethinkDNS Root CA
+```
+
+Dynamic-browser discovery and package-lifecycle inventory defects found during
+N4E were repaired and retested.
+
+The final clean policy snapshot after fixture removal and one Protection
+OFF → ON restart reported:
+
+```text id="3rswjb"
+systemPackages=4
+systemUids=2
+compatibility=201
+protectedDomains=4308
+knownBrowsers=147
+dynamicBrowsers=0
+```
+
+The remaining work for this document is repository integration/documentation
+finalization and separately scoped follow-up UI/compatibility work. It is not an
+open N4E browser-runtime blocker.
+
+The verified implementation still resides partly in the local working tree.
+Do not interpret committed HEAD
+`43e02cd0956d6aefc487eac0d534eaefa99c769d` as already containing every
+verified N4E implementation file until the final code integration commit is
+created.
 
 ---
 
-## 12. Deferred compatibility verification
+## 12. Deferred compatibility and follow-up verification
 
-**Status:** TODO — remaining tests run only after Windows Gradle/R.jar and
-device-test infrastructure is stable.
+**Status:** N4E core policy/runtime/device acceptance is sealed. The items in
+this section are follow-up compatibility, QUIC, UI, and hardening work; they do
+not reopen the completed N4E runtime/device gate.
 
 AdGuard compatibility data provides regression scenarios, not automatic Rethink
 policy. External exclusions require independent Rethink verification before
@@ -469,9 +532,10 @@ production use.
 
 ### 12.1 Locked baseline
 
-- Verified known browsers are inspected by default.
-- Dynamic browsers remain OFF until enabled by the user.
-- General/non-browser applications remain OFF by default.
+- Verified known browsers are inspected by default unless explicitly excluded.
+- Capability-detected dynamic browsers are inspected by default unless explicitly excluded.
+- Dynamic browsers do not require a separate user-enabled set.
+- General/non-browser applications remain OFF by default unless explicitly included.
 - Unknown or unresolved applications default to BYPASS.
 - System and user exclusions beat every MITM inclusion.
 - TLS failure must not create or persist a dynamic bypass.
@@ -487,19 +551,27 @@ References:
 - https://github.com/AdguardTeam/AdguardForAndroid/issues/5689
 - https://github.com/AdguardTeam/AdguardForAndroid/issues/6076
 
-### 12.2 Implementation and verification TODO
+### 12.2 Remaining follow-up work
 
-- [x] Slice-1R3 Robolectric verification: focused tests 1/1 + 1/1 and complete
-  `LocalHttpsProxyTest` 3/3 PASS.
-- [ ] Rerun `InspectionPolicyEngineTest` 8/8 after Windows Gradle/R.jar
-  infrastructure stabilizes; the last attempt did not reach the test phase.
-- [ ] Load verified app/domain presets into one immutable policy snapshot.
-- [ ] Invoke `InspectionPolicyEngine` before accepting CONNECT.
-- [ ] Preserve package-scoped rules such as
-  `domain.example$app=com.example.app`.
-- [ ] Implement QUIC policy independently from HTTPS BYPASS/MITM.
-- [ ] Atomically reload the complete policy generation.
-- [ ] Log decisions and reasons without logging decrypted payloads.
+The core N4E runtime integration items that were formerly listed here are now
+implemented and device-verified: policy snapshot publication,
+`InspectionPolicyEngine` pre-CONNECT resolution, dynamic-browser capability
+discovery, compatibility bypass, protected-domain input, and decision/reason
+logging.
+
+Remaining work is intentionally narrower:
+
+* [ ] Complete QUIC-policy implementation and verification independently from
+  HTTPS BYPASS/MITM semantics.
+* [ ] Complete the remaining external compatibility scenarios in §12.3.
+* [ ] Verify package-scoped domain/app edge cases not exercised by the controlled
+  N4E three-fixture matrix.
+* [ ] Complete the dedicated per-app HTTPS management UI by reusing Rethink's
+  existing installed-app inventory.
+* [ ] Continue first-party browser-registry maintenance and production package
+  identity verification.
+* [ ] Tune post-MITM resource thresholds from device/performance evidence while
+  preserving `MITM_STREAM_ONLY` semantics.
 
 ### 12.3 Deferred compatibility tests
 
@@ -553,14 +625,19 @@ The following external or attached inputs remain research material and must not 
 - [ ] Create each remaining asset only after its provenance, redistribution authorization, semantics, parser contract, and focused tests are accepted.
 - [ ] Connect the preset loader to Android assets and runtime policy publication only after all mandatory registries required by the selected policy mode exist.
 
-#### Locked defaults while these TODOs remain open
+#### Locked defaults for remaining follow-up work
 
-- General non-browser applications remain default OFF for HTTPS inspection unless explicitly included by the user.
-- Dynamically detected browsers remain default OFF unless explicitly enabled by the user.
-- A known-browser entry may become default ON only after its individual audit is accepted.
-- No matching rule continues to produce `BYPASS_DEFAULT`.
-- Missing registries must not be hidden by creating empty placeholder assets.
-- The pure-JVM loader and parser implementation remains disconnected from Android runtime policy publication.
+* General non-browser applications remain default OFF for HTTPS inspection
+  unless explicitly included by the user.
+* Known browsers are default ON unless an earlier system/user exclusion wins.
+* Capability-detected dynamic browsers are default ON unless an earlier
+  system/user exclusion wins.
+* Dynamic browsers do not require a separate per-package enabled registry.
+* No matching eligibility rule continues to produce `BYPASS_DEFAULT`.
+* Missing or unsupported registries must not be hidden by creating fabricated
+  placeholder policy.
+* Android runtime policy publication is implemented; future preset additions
+  must preserve the same immutable-snapshot and precedence contract.
 
 ## 13. Document ownership
 

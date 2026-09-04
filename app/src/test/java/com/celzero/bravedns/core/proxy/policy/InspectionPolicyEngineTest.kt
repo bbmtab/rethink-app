@@ -18,6 +18,8 @@ class InspectionPolicyEngineTest {
         val policy =
             InspectionPolicySnapshot(
                 systemHardBypassPackages = setOf("com.example.system"),
+                compatibilityExcludedPackages =
+                    setOf("com.example.system"),
                 knownBrowserPackages = setOf("com.example.system"),
                 userIncludedPackages = setOf("com.example.system"),
                 enabledDynamicBrowserPackages = setOf("com.example.system")
@@ -263,6 +265,236 @@ class InspectionPolicyEngineTest {
                 InspectionReason.BYPASS_DOMAIN
             ),
             engine.evaluate(connection, policy)
+        )
+    }
+
+    @Test
+    fun compatibilityExclusionWinsOverEveryMitmInclusion() {
+        val packageName = "com.example.compatibility"
+        val policy =
+            InspectionPolicySnapshot(
+                compatibilityExcludedPackages = setOf(packageName),
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                includedDomains = setOf("example.com"),
+                knownBrowserPackages = setOf(packageName),
+                userIncludedPackages = setOf(packageName),
+                enabledDynamicBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_COMPATIBILITY
+            ),
+            engine.evaluate(
+                connection(packageName = packageName),
+                policy
+            )
+        )
+    }
+
+    @Test
+    fun userExclusionKeepsPrecedenceOverCompatibilityExclusion() {
+        val packageName = "com.example.excluded"
+        val policy =
+            InspectionPolicySnapshot(
+                userExcludedPackages = setOf(packageName),
+                compatibilityExcludedPackages = setOf(packageName),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_USER
+            ),
+            engine.evaluate(
+                connection(packageName = packageName),
+                policy
+            )
+        )
+    }
+
+    @Test
+    fun sharedUidUsesAnyCompatibilityExcludedPackage() {
+        val connection =
+            InspectionConnection(
+                packageNames =
+                    setOf(
+                        "com.example.included",
+                        " COM.EXAMPLE.COMPATIBILITY "
+                    ),
+                uid = 10077,
+                host = "example.com",
+                destinationPort = 443
+            )
+        val policy =
+            InspectionPolicySnapshot(
+                compatibilityExcludedPackages =
+                    setOf("com.example.compatibility"),
+                knownBrowserPackages =
+                    setOf("com.example.included"),
+                userIncludedPackages =
+                    setOf("com.example.included")
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_COMPATIBILITY
+            ),
+            engine.evaluate(connection, policy)
+        )
+    }
+
+    @Test
+    fun allExceptProtectedModeDoesNotUseIncludedDomainsAsAGate() {
+        val packageName = "com.example.browser"
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode =
+                    InspectionDomainMode.ALL_EXCEPT_PROTECTED,
+                includedDomains = setOf("different.example"),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionReason.MITM_KNOWN_BROWSER,
+            engine.evaluate(
+                connection(
+                    packageName = packageName,
+                    host = "example.com"
+                ),
+                policy
+            ).reason
+        )
+    }
+
+    @Test
+    fun onlyIncludedModeBypassesEligibleAppOnUnlistedDomain() {
+        val packageName = "com.example.browser"
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                includedDomains = setOf("included.example"),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_DOMAIN_MODE
+            ),
+            engine.evaluate(
+                connection(
+                    packageName = packageName,
+                    host = "unlisted.example"
+                ),
+                policy
+            )
+        )
+    }
+
+    @Test
+    fun onlyIncludedModeAllowsEligibleAppOnExactAndSubdomain() {
+        val packageName = "com.example.browser"
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                includedDomains = setOf("included.example"),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionReason.MITM_KNOWN_BROWSER,
+            engine.evaluate(
+                connection(
+                    packageName = packageName,
+                    host = "included.example"
+                ),
+                policy
+            ).reason
+        )
+        assertEquals(
+            InspectionReason.MITM_KNOWN_BROWSER,
+            engine.evaluate(
+                connection(
+                    packageName = packageName,
+                    host = "Api.Included.Example."
+                ),
+                policy
+            ).reason
+        )
+    }
+
+    @Test
+    fun onlyIncludedModeDoesNotEnableGeneralApplication() {
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                includedDomains = setOf("included.example")
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_DEFAULT
+            ),
+            engine.evaluate(
+                connection(
+                    packageName = "com.example.general",
+                    host = "included.example"
+                ),
+                policy
+            )
+        )
+    }
+
+    @Test
+    fun onlyIncludedModeWithEmptyRegistryBypassesSafely() {
+        val packageName = "com.example.browser"
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                includedDomains = emptySet(),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_DOMAIN_MODE
+            ),
+            engine.evaluate(
+                connection(packageName = packageName),
+                policy
+            )
+        )
+    }
+
+    @Test
+    fun onlyIncludedModeDoesNotApplyProtectedDomainRegistry() {
+        val packageName = "com.example.browser"
+        val policy =
+            InspectionPolicySnapshot(
+                domainMode = InspectionDomainMode.ONLY_INCLUDED,
+                protectedDomains = setOf("protected.example"),
+                includedDomains = setOf("included.example"),
+                knownBrowserPackages = setOf(packageName)
+            )
+
+        assertEquals(
+            InspectionPolicyResult(
+                InspectionDecision.BYPASS,
+                InspectionReason.BYPASS_DOMAIN_MODE
+            ),
+            engine.evaluate(
+                connection(
+                    packageName = packageName,
+                    host = "protected.example"
+                ),
+                policy
+            )
         )
     }
 

@@ -1,6 +1,10 @@
 package com.celzero.bravedns.core.proxy
 
 import com.celzero.bravedns.core.ca.CertificateAuthority
+import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluator
+import com.celzero.bravedns.core.proxy.policy.InspectionConnectionIdentity
+import com.celzero.bravedns.core.proxy.policy.InspectionDecision
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshot
 import kotlinx.coroutines.*
 import org.junit.After
 import org.junit.Assert.*
@@ -123,8 +127,8 @@ class LocalHttpsProxyTest {
             "A subdomain of a cleared legacy host must remain eligible",
             LocalHttpsProxy.shouldInspectDomain("api.custom-pinned.com")
         )
-        assertFalse(
-            "Built-in persistent bypass seeds must remain bypassed",
+        assertTrue(
+            "Static domain policy is now owned by InspectionPolicyEngine",
             LocalHttpsProxy.shouldInspectDomain("google.com")
         )
 
@@ -145,5 +149,54 @@ class LocalHttpsProxyTest {
             "",
             savedHosts
         )
+    }
+
+    @Test
+    fun missingPolicyEvaluatorBypassesByDefault() {
+        LocalHttpsProxy.stop()
+
+        val dummySocket = Socket()
+
+        val result = runBlocking {
+            LocalHttpsProxy.evaluateInspectionPolicy(
+                clientSocket = dummySocket,
+                host = "example.com",
+                destinationPort = 443
+            )
+        }
+
+        assertEquals(InspectionDecision.BYPASS, result.decision)
+    }
+
+    @Test
+    fun configuredPolicyEvaluatorControlsDecision() {
+        LocalHttpsProxy.stop()
+
+        val evaluator =
+            InspectionConnectionPolicyEvaluator(
+                policySnapshot =
+                    InspectionPolicySnapshot(
+                        knownBrowserPackages = setOf("com.example.browser")
+                    ),
+                identityResolver = {
+                    InspectionConnectionIdentity(
+                        uid = 1000,
+                        packageNames = setOf("com.example.browser")
+                    )
+                }
+            )
+        LocalHttpsProxy.setInspectionPolicyEvaluator(evaluator)
+
+        val dummySocket = Socket()
+
+        val result = runBlocking {
+            LocalHttpsProxy.evaluateInspectionPolicy(
+                clientSocket = dummySocket,
+                host = "example.com",
+                destinationPort = 443
+            )
+        }
+
+        assertEquals(InspectionDecision.MITM, result.decision)
     }
 }

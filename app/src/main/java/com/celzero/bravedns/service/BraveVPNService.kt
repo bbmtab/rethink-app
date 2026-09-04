@@ -70,6 +70,12 @@ import com.celzero.bravedns.R
 import com.celzero.bravedns.RethinkDnsApplication.Companion.DEBUG
 import com.celzero.bravedns.customdownloader.IpInfoDownloader
 import com.celzero.bravedns.core.filter.FilterSourceCompiler
+import com.celzero.bravedns.core.proxy.policy.InspectionAndroidBrowserCapabilityDetector
+import com.celzero.bravedns.core.proxy.policy.InspectionBrowserRuntimePackageResolver
+import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluator
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetLoader
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetSource
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshotFactory
 import com.celzero.bravedns.data.AppConfig
 import com.celzero.bravedns.data.ConnTrackerMetaData
 import com.celzero.bravedns.data.ConnectionSummary
@@ -3918,39 +3924,67 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                         }
                     }
 
-                    // 3. Start proxy sebelum VPN establish
+                    // 3. Resolve known and dynamically detected browser packages.
+                    val detectedBrowserCapabilities =
+                        InspectionAndroidBrowserCapabilityDetector(
+                            packageManager
+                        ).detect()
+                    val browserRuntimePackages =
+                        InspectionBrowserRuntimePackageResolver.resolve(
+                            capabilities = detectedBrowserCapabilities,
+                            selfPackageName = packageName
+                        )
+
+                    // 4. Load the complete preset bundle and build the runtime snapshot.
+                    val presetBundle =
+                        InspectionPolicyPresetLoader(
+                            InspectionPolicyPresetSource { assetPath ->
+                                assets.open(assetPath)
+                            }
+                        ).load()
+                    val policySnapshot =
+                        InspectionPolicySnapshotFactory()
+                            .create(
+                                bundle = presetBundle,
+                                enabledDynamicBrowserPackages =
+                                    browserRuntimePackages
+                                        .enabledDynamicBrowserPackages
+                            )
+                            .snapshot
+
+                    // 5. Connect socket identity resolution to the policy engine.
+                    val connectionIdentityResolver =
+                        InspectionConnectionIdentityResolver(this)
+                    val policyEvaluator =
+                        InspectionConnectionPolicyEvaluator(
+                            policySnapshot = policySnapshot,
+                            identityResolver =
+                                connectionIdentityResolver::resolve
+                        )
+
+                    com.celzero.bravedns.core.proxy.LocalHttpsProxy
+                        .setInspectionPolicyEvaluator(policyEvaluator)
+
+                    // 6. Start only after the complete policy is configured.
                     com.celzero.bravedns.core.proxy.LocalHttpsProxy.start()
 
-                    // 4. Inject browser packages ke proxy whitelist
-                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
-                    val queriedBrowsers = packageManager
-                        .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                        .map { it.activityInfo.packageName }
-                        .toSet()
-                    val commonBrowsers = setOf(
-                        "com.android.chrome",
-                        "org.mozilla.firefox",
-                        "com.microsoft.empath",
-                        "com.opera.browser",
-                        "com.opera.mini.native",
-                        "com.brave.browser",
-                        "com.duckduckgo.mobile.android",
-                        "com.sec.android.app.sbrowser",
-                        "org.torproject.torbrowser",
-                        "com.android.browser",
-                        "com.mi.globalbrowser",
-                        "com.huawei.browser",
-                        "com.coloros.browser",
-                        "com.vivo.browser",
-                        "mark.via.gp",
-                        "com.kiwibrowser.browser",
-                        "com.yandex.browser"
+                    Logger.i(
+                        LOG_TAG_VPN,
+                        "HTTPS inspection policy configured: " +
+                            "systemPackages=${policySnapshot.systemHardBypassPackages.size}, " +
+                            "systemUids=${policySnapshot.systemHardBypassUids.size}, " +
+                            "compatibility=${policySnapshot.compatibilityExcludedPackages.size}, " +
+                            "protectedDomains=${policySnapshot.protectedDomains.size}, " +
+                            "knownBrowsers=${policySnapshot.knownBrowserPackages.size}, " +
+                            "dynamicBrowsers=${policySnapshot.enabledDynamicBrowserPackages.size}"
                     )
-                    val browserPackages = queriedBrowsers + commonBrowsers
-                    com.celzero.bravedns.core.proxy.LocalHttpsProxy.setAllowedPackages(browserPackages)
 
-                    // 5. Register system proxy
-                    val proxyInfo = android.net.ProxyInfo.buildDirectProxy("localhost", 8443)
+                    // 7. Register system proxy.
+                    val proxyInfo =
+                        android.net.ProxyInfo.buildDirectProxy(
+                            "localhost",
+                            8443
+                        )
                     builder.setHttpProxy(proxyInfo)
                     
                     Logger.i(LOG_TAG_VPN, "HTTPS Inspection Proxy started and registered with VPN interface")

@@ -233,6 +233,19 @@
         <receiver
             android:name=".receiver.BubbleDismissReceiver"
             android:exported="false" />
+        <receiver
+            android:name="com.celzero.bravedns.receiver.BravePackageChangeReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_CHANGED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"

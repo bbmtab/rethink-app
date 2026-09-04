@@ -19,7 +19,11 @@ class InspectionPolicyPresetLoaderTest {
                 InspectionPolicyPresetLoader.PROTECTED_DOMAIN_BYPASS_ASSET_PATH to
                     "protected.example\nbound.example\$app=com.example.bound\n",
                 InspectionPolicyPresetLoader.KNOWN_BROWSERS_ASSET_PATH to
-                    "com.Example.Browser\n"
+                    "com.Example.Browser\n",
+                InspectionPolicyPresetLoader.COMPATIBILITY_EXCLUSIONS_ASSET_PATH to
+                    "[{\"package_name\": \"com.example.breaks\", \"public\": true}]",
+                InspectionPolicyPresetLoader.INCLUDED_DOMAIN_MITM_ASSET_PATH to
+                    "force.example\n"
             )
         val loader =
             InspectionPolicyPresetLoader(
@@ -66,11 +70,25 @@ class InspectionPolicyPresetLoaderTest {
             ),
             bundle.knownBrowsers
         )
+        assertEquals(1, bundle.compatibilityExclusions.rules.size)
+        assertEquals(
+            setOf("com.example.breaks"),
+            bundle.compatibilityExclusions.excludedPackages
+        )
+        assertTrue(bundle.compatibilityExclusions.diagnostics.isEmpty())
+        assertEquals(
+            setOf("force.example"),
+            bundle.includedDomainMitm.protectedDomains
+        )
+        assertTrue(bundle.includedDomainMitm.protectedDomainsByPackage.isEmpty())
+        assertTrue(bundle.includedDomainMitm.unsupportedRules.isEmpty())
         assertEquals(
             listOf(
                 InspectionPolicyPresetLoader.SYSTEM_HARD_BYPASS_ASSET_PATH,
                 InspectionPolicyPresetLoader.PROTECTED_DOMAIN_BYPASS_ASSET_PATH,
-                InspectionPolicyPresetLoader.KNOWN_BROWSERS_ASSET_PATH
+                InspectionPolicyPresetLoader.KNOWN_BROWSERS_ASSET_PATH,
+                InspectionPolicyPresetLoader.COMPATIBILITY_EXCLUSIONS_ASSET_PATH,
+                InspectionPolicyPresetLoader.INCLUDED_DOMAIN_MITM_ASSET_PATH
             ),
             openedPaths
         )
@@ -86,7 +104,11 @@ class InspectionPolicyPresetLoaderTest {
                 InspectionPolicyPresetLoader.PROTECTED_DOMAIN_BYPASS_ASSET_PATH to
                     "ping.*.adguard.io\n",
                 InspectionPolicyPresetLoader.KNOWN_BROWSERS_ASSET_PATH to
-                    "1001\n"
+                    "1001\n",
+                InspectionPolicyPresetLoader.COMPATIBILITY_EXCLUSIONS_ASSET_PATH to
+                    "[",
+                InspectionPolicyPresetLoader.INCLUDED_DOMAIN_MITM_ASSET_PATH to
+                    "ping.*.adguard.io\n"
             )
         val loader =
             InspectionPolicyPresetLoader(
@@ -112,6 +134,14 @@ class InspectionPolicyPresetLoaderTest {
         assertEquals(
             listOf(InspectionPackageRuleIssue.UNEXPECTED_UID),
             bundle.knownBrowsers.unsupportedRules.map { it.issue }
+        )
+        assertEquals(
+            listOf(InspectionAppExclusionIssue.MALFORMED_JSON),
+            bundle.compatibilityExclusions.diagnostics.map { it.issue }
+        )
+        assertEquals(
+            listOf(InspectionDomainRuleIssue.UNSUPPORTED_WILDCARD),
+            bundle.includedDomainMitm.unsupportedRules.map { it.issue }
         )
     }
 

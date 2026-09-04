@@ -746,12 +746,14 @@ no preset-seeding path from worker context.
 
 ### B4.5 HTTPS Inspection Policy — Architecture Layer (documented in DECISION-010)
 
-Architecture lock only; implementation deferred to B4.5 implementation phase.
+HTTPS-policy detail remains owned by `PLAN-HTTPS-INSPECTION-POLICY.md` and
+DECISION-010. N4E policy/runtime/device verification is sealed locally as of
+2026-09-04; final branch integration is pending.
 
 | Sub-feature | Scope | Status |
 |-------------|-------|--------|
 | Known browser registry | Maintained hardcoded package IDs; default ON when installed | DOCUMENTED |
-| Dynamic browser fallback | `ACTION_VIEW` + `CATEGORY_BROWSABLE` + `https://` query (supplementary: `ROLE_BROWSER`, `CATEGORY_APP_BROWSER`). Best-effort, depends on package visibility. Default OFF. | DOCUMENTED |
+| Dynamic browser fallback | Capability-based discovery; browser-app capability OR both HTTP+HTTPS probes. `MATCH_DEFAULT_ONLY` is not used. Default ON unless explicitly user-excluded. | DEVICE-VERIFIED N4E |
 | Per-app opt-in | Other apps: default OFF, user opts in individually | DOCUMENTED |
 | System hard bypass | Internal safety list (Play Services / GSF / IMS …); not user-editable | DOCUMENTED |
 | Domain + app-port protection | Scoped, not global-port | DOCUMENTED |
@@ -780,12 +782,16 @@ B1    Data / storage foundation              SEALED
 B2    Downloader + validation                SEALED
 B3    Parser / compiler + diagnostics        SEALED
 B4    Atomic activation + rollback           SEALED
-B4.5  HTTPS Inspection Policy                OPEN — DOC5 governs the design; full preset-driven policy is not implemented
-B5    Manage Filters + custom source UI       IMPLEMENTED — add, edit, remove, enable and disable flows committed
-B6    End-to-end verification                 BLOCKED — unit and device UI gates pass; controlled website filtering has not passed
+B4.5  HTTPS Inspection Policy                SEALED LOCALLY — N4E policy/runtime/device gates complete; final branch commit pending
+B5    Manage Filters + custom source UI       IMPLEMENTED — add, edit, remove, enable and disable flows exist
+B6    End-to-end verification                 SEALED FOR CURRENT PHASE-1D ACCEPTANCE — filter runtime E2E closed 2026-08-30; HTTPS-policy/device N4E closed 2026-09-04
 ```
 
-DECISION-010 is already GOVERNING, so the former B2 architecture block is closed. B4.5 remains open: the repository does not yet contain the complete preset-driven HTTPS inspection policy or a production `InspectionPolicyEngine`.
+DECISION-010 remains the governing HTTPS-policy authority. The N4E
+preset-driven eligibility/runtime implementation is device-verified locally.
+This Filter Source Manager document records only roadmap status and does not own
+the HTTPS-policy semantics. Final repository integration/commit remains
+separate.
 
 ---
 
@@ -810,18 +816,33 @@ Completed evidence:
 - Total targeted JUnit tests: 102 passed, 0 failed, 0 errors, 0 skipped.
 - APK and device UI verification used SHA-256 `39710942B1A17DDB92B2C1F25D8DD6420E2C7411D7ECD011E40F577F16983E36`.
 
-Open findings:
+Current follow-up findings:
 
-- No user-visible toast currently confirms a filter-generation hot reload after an enable/disable operation.
-- A manual browser test found that web access worked before adding the custom filter, failed with HTTPS inspection enabled after the filter was added, and worked again when HTTPS inspection was disabled.
-- This observation does not prove that custom website filtering works. The controlled OFF → ON → OFF website test is still required.
-- The expected HTTPS policy preset files are not present in the repository, and the current behavior is only a partial hardcoded hybrid policy.
-- B11R confirmed that removal persisted, but its pre-remove XML contradicted the runner output. Treat that run as evidence with an audit caveat, not as a clean end-to-end PASS.
+* No user-visible toast currently confirms a filter-generation hot reload after
+  an enable/disable operation. This remains a UX/diagnostic follow-up and is not
+  used as proof that runtime activation failed.
+* The historical B11R removal run confirmed persistence but its pre-remove XML
+  contradicted runner stdout. Keep that run with its existing audit caveat.
+* The historical browser-regression observation has been superseded by later
+  controlled runtime evidence: Filter runtime E2E closed on 2026-08-30 and the
+  N4E HTTPS eligibility/runtime/device matrix closed on 2026-09-04.
+* HTTPS policy semantics remain owned by DECISION-010 and
+  `PLAN-HTTPS-INSPECTION-POLICY.md`; this Filter Source Manager plan records
+  roadmap status only.
+* Final repository integration of the verified N4E working-tree changes remains
+  pending.
 
 Release implication:
 
-- The Filter Source Manager implementation is committed and pushed.
-- Release-candidate status remains blocked by the HTTPS/browser regression and the missing controlled website-filtering proof.
+* The Filter Source Manager implementation is committed and pushed.
+* Controlled Filter runtime E2E is closed as of 2026-08-30.
+* N4E HTTPS policy/runtime/device acceptance is closed as of 2026-09-04.
+* The former HTTPS/browser regression and missing controlled-filtering proof are
+  no longer active blockers.
+* Final N4E branch integration/documentation commit remains pending.
+* Any remaining release-candidate blockers must come from the current
+  release-level Definition of Done, not from the superseded browser-regression
+  finding above.
 
 Do not alter the existing Definition of Done checkboxes. They remain the release-level checklist.
 

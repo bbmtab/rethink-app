@@ -1528,3 +1528,178 @@ Re-open or append to this decision if:
 ---
 
 **End of Decisions — Append Only**
+
+---
+
+## DECISION-010 — N4E POLICY SEMANTICS AND DEVICE CLOSURE ADDENDUM (2026-09-04)
+
+**Status:** GOVERNING SUPERSEDING ADDENDUM — original DECISION-010 remains historical; only the explicitly listed semantics below are superseded
+**Scope:** HTTPS Inspection application eligibility, dynamic-browser default behavior, installed-app inventory ownership, and N4E runtime/device closure
+**Committed branch baseline:** `phase1d-advanced-filter` @ `43e02cd0956d6aefc487eac0d534eaefa99c769d`
+**Implementation state:** verified local working-tree implementation; final branch commit pending
+
+### Why this addendum exists
+
+The original DECISION-010 defined known browsers as default-ON but dynamic
+browsers as default-OFF until individually enabled. N4E implementation and
+real-device verification established the final product contract differently.
+
+This addendum supersedes only the original dynamic-browser opt-in semantics and
+the corresponding `DYNAMIC_BROWSER + USER_ENABLED` precedence condition.
+All unrelated DECISION-010 architecture — system hard bypass, user exclusion
+precedence, protected domains, protected app+port tuples, FilterEngine
+separation, and post-MITM resource semantics — remains governing.
+
+### Final browser eligibility contract
+
+```text
+KNOWN BROWSER
+→ MITM by default
+→ unless USER APP EXCLUSION wins first
+
+DYNAMIC BROWSER
+→ capability-detected
+→ MITM by default
+→ unless USER APP EXCLUSION wins first
+
+GENERAL / NON-BROWSER APP
+→ BYPASS by default
+→ explicit user inclusion may enable MITM
+
+UNKNOWN / UNRESOLVED APP
+→ BYPASS
+```
+
+Dynamic browsers do not require a separate per-package enabled set.
+
+For a browser, the user-visible OFF state is an exclusion escape hatch:
+OFF adds/uses the app exclusion; ON removes that exclusion and restores the
+browser's normal default MITM eligibility.
+
+### Revised precedence portion
+
+The governing application-related order is:
+
+```text
+1. SYSTEM HARD BYPASS?           YES → BYPASS_SYSTEM
+2. USER APP EXCLUSION?           YES → BYPASS_USER
+3. PROTECTED DOMAIN?             YES → BYPASS_DOMAIN
+4. PROTECTED APP + PORT?         YES → BYPASS_APP_PORT
+5. KNOWN BROWSER INSTALLED?      YES → MITM_KNOWN_BROWSER
+6. USER EXPLICIT APP INCLUDE?    YES → MITM_USER_APP
+7. DYNAMIC BROWSER DETECTED?     YES → MITM_DYNAMIC_BROWSER
+8. NO MATCH                            → BYPASS_DEFAULT
+```
+
+User exclusion therefore remains the compatibility escape hatch and wins before
+either known-browser or dynamic-browser default-ON eligibility.
+
+### Dynamic-browser capability discovery
+
+N4E uses Android browser capability signals rather than browser-name guessing.
+
+The classifier accepts a package when either:
+
+* the browser-app capability query resolves it, or
+* both HTTP and HTTPS browser probes resolve it.
+
+Real-device diagnosis identified `PackageManager.MATCH_DEFAULT_ONLY` as the
+first-loss mechanism for the controlled dynamic-browser fixture. Removing that
+restriction restored the fixture to discovery.
+
+Observed snapshot transition:
+
+```text
+before detector repair / controlled failure: dynamicBrowsers=0
+controlled dynamic fixture after repair:     dynamicBrowsers=1
+final clean device after fixture removal:    dynamicBrowsers=0
+```
+
+### Installed-app inventory ownership
+
+HTTPS Inspection must reuse Rethink's existing installed-app inventory for
+package/UID/name/icon/install/remove lifecycle state.
+
+Do not create a second installed-app inventory for HTTPS Inspection.
+
+The future dedicated HTTPS app management surface should layer browser
+capability classification and HTTPS inclusion/exclusion state over the existing
+Rethink app inventory.
+
+### N4E runtime matrix — physical Mi A1 / Android 16
+
+Controlled fixtures proved all three primary branches:
+
+```text
+GENERAL
+→ BYPASS_DEFAULT
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+COMPATIBILITY
+→ BYPASS_COMPATIBILITY
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+DYNAMIC BROWSER
+→ MITM_DYNAMIC_BROWSER
+→ TLS MITM established
+→ HTTP 200
+→ RethinkDNS Root CA
+
+```
+
+### Package lifecycle inventory repair
+
+N4E also verified automatic app-inventory reconciliation.
+
+Package lifecycle broadcasts enqueue `RefreshAppsJob`. Package-change requests
+use `ACTION_REFRESH_FORCE` so authoritative install/remove events cannot be
+suppressed by the normal one-minute AUTO/INTERACTIVE refresh throttle.
+
+The controlled three-package removal test produced Android package-removal
+events within approximately 3.579 seconds. Each package was independently
+removed from Rethink's Room inventory and the final Configure → Apps exact
+search counts were:
+
+```text
+general fixture        0
+compatibility fixture  0
+dynamic fixture        0
+```
+
+### Final clean device state
+
+Device:
+Xiaomi Mi A1 (`tissot`), Android 16 / SDK 36, serial `3595381c0804`.
+
+Final N4E state:
+
+```text
+controlled fixtures installed = NO
+Protection                  = ON / protected
+VPN interface               = tun1
+network                     = healthy
+dynamicBrowsers             = 0
+HTTPS state changed by cleanup = NO
+```
+
+The final clean Protection OFF→ON restart produced a fresh policy snapshot with
+`dynamicBrowsers=0`.
+
+### Closure
+
+```text
+N4E_INVENTORY_REFRESH_REPAIR_SEALED=YES
+N4E_DYNAMIC_BROWSER_RUNTIME_SEALED=YES
+N4E_DV2_RUNTIME_SEALED=YES
+N4E_DEVICE_FULLY_SEALED=YES
+N4E_DEVICE_TESTING_COMPLETE=YES
+```
+
+This closure records verified runtime/device behavior. It does not claim that
+HEAD `43e02cd0956d6aefc487eac0d534eaefa99c769d` already contains every verified
+working-tree implementation file. Final code integration/commit remains a
+separate repository operation.

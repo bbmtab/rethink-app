@@ -7,10 +7,17 @@ enum class InspectionDecision {
     MITM
 }
 
+enum class InspectionDomainMode {
+    ALL_EXCEPT_PROTECTED,
+    ONLY_INCLUDED
+}
+
 enum class InspectionReason {
     BYPASS_SYSTEM,
     BYPASS_USER,
+    BYPASS_COMPATIBILITY,
     BYPASS_DOMAIN,
+    BYPASS_DOMAIN_MODE,
     BYPASS_APP_PORT,
     MITM_KNOWN_BROWSER,
     MITM_USER_APP,
@@ -29,8 +36,12 @@ data class InspectionPolicySnapshot(
     val systemHardBypassPackages: Set<String> = emptySet(),
     val systemHardBypassUids: Set<Int> = emptySet(),
     val userExcludedPackages: Set<String> = emptySet(),
+    val compatibilityExcludedPackages: Set<String> = emptySet(),
+    val domainMode: InspectionDomainMode =
+        InspectionDomainMode.ALL_EXCEPT_PROTECTED,
     val protectedDomains: Set<String> = emptySet(),
     val protectedDomainsByPackage: Map<String, Set<String>> = emptyMap(),
+    val includedDomains: Set<String> = emptySet(),
     val protectedAppPorts: Map<String, Set<Int>> = emptyMap(),
     val knownBrowserPackages: Set<String> = emptySet(),
     val userIncludedPackages: Set<String> = emptySet(),
@@ -60,15 +71,39 @@ class InspectionPolicyEngine {
             return bypass(InspectionReason.BYPASS_USER)
         }
 
-        if (
-            matchesDomain(connection.host, policy.protectedDomains) ||
-                matchesPackageScopedDomain(
-                    connection.host,
-                    packages,
-                    policy.protectedDomainsByPackage
-                )
-        ) {
-            return bypass(InspectionReason.BYPASS_DOMAIN)
+        if (packages.matchesAny(policy.compatibilityExcludedPackages)) {
+            return bypass(InspectionReason.BYPASS_COMPATIBILITY)
+        }
+
+        when (policy.domainMode) {
+            InspectionDomainMode.ALL_EXCEPT_PROTECTED -> {
+                if (
+                    matchesDomain(
+                        connection.host,
+                        policy.protectedDomains
+                    ) ||
+                        matchesPackageScopedDomain(
+                            connection.host,
+                            packages,
+                            policy.protectedDomainsByPackage
+                        )
+                ) {
+                    return bypass(InspectionReason.BYPASS_DOMAIN)
+                }
+            }
+
+            InspectionDomainMode.ONLY_INCLUDED -> {
+                if (
+                    !matchesDomain(
+                        connection.host,
+                        policy.includedDomains
+                    )
+                ) {
+                    return bypass(
+                        InspectionReason.BYPASS_DOMAIN_MODE
+                    )
+                }
+            }
         }
 
         if (
