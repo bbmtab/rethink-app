@@ -76,6 +76,7 @@ import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluato
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetLoader
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetSource
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshotFactory
+import com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepository
 import com.celzero.bravedns.data.AppConfig
 import com.celzero.bravedns.data.ConnTrackerMetaData
 import com.celzero.bravedns.data.ConnectionSummary
@@ -3940,15 +3941,24 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                         InspectionPolicyPresetLoader(
                             InspectionPolicyPresetSource { assetPath ->
                                 assets.open(assetPath)
-                            }
-                        ).load()
+                    val userAppPolicy =
+                        InspectionUserAppPolicyRepository(
+                            persistentState
+                        ).snapshot()
+
                     val policySnapshot =
                         InspectionPolicySnapshotFactory()
                             .create(
                                 bundle = presetBundle,
+                                userExcludedPackages =
+                                    userAppPolicy.excludedPackages,
+                                userIncludedPackages =
+                                    userAppPolicy.includedPackages,
                                 enabledDynamicBrowserPackages =
                                     browserRuntimePackages
                                         .enabledDynamicBrowserPackages
+                            )
+                            .snapshot
                             )
                             .snapshot
 
