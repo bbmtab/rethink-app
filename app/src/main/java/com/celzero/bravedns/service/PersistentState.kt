@@ -90,8 +90,12 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
         const val FIREWALL_BUBBLE = "pref_firewall_bubble_enabled"
 
-        // HTTPS Inspection (MITM) toggle
+        // HTTPS Inspection (MITM)
         const val HTTPS_INSPECTION_ENABLED = "https_inspection_enabled"
+        const val HTTPS_INSPECTION_EXCLUDED_PACKAGES =
+            "https_inspection_excluded_packages"
+        const val HTTPS_INSPECTION_INCLUDED_PACKAGES =
+            "https_inspection_included_packages"
 
         // RPN server-side DNS mode (0=Default, 1=AntiAd, 2=Parental, 3=Security)
         const val RPN_DNS_URL = "rpn_dns_mode"
@@ -208,6 +212,15 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
             _httpsInspectionEnabled = value
             httpsInspectionEnabledLiveData.postValue(value)
         }
+
+    // serialized package-name sets used by InspectionUserAppPolicyRepository
+    var httpsInspectionExcludedPackagesRaw by
+        stringPref(HTTPS_INSPECTION_EXCLUDED_PACKAGES)
+            .withDefault<String>("")
+
+    var httpsInspectionIncludedPackagesRaw by
+        stringPref(HTTPS_INSPECTION_INCLUDED_PACKAGES)
+            .withDefault<String>("")
 
     // comma-separated list of hosts to bypass HTTPS inspection
     var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
