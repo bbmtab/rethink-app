@@ -2650,4 +2650,12 @@
     <string name="custom_filter_error_create_failed">Could not save this custom filter: %1$s</string>
     <string name="custom_filter_saved">Custom filter saved</string>
 
+    <!-- HTTPS Inspection per-app management -->
+    <string name="https_inspection_apps_search_hint">Search installed apps</string>
+    <string name="https_inspection_apps_summary">Browsers are inspected by default. Other apps require explicit opt-in.</string>
+    <string name="https_inspection_known_browser">Known browser · inspected by default</string>
+    <string name="https_inspection_dynamic_browser">Detected browser · inspected by default</string>
+    <string name="https_inspection_other_app">App · inspection off by default</string>
+    <string name="https_inspection_app_switch_desc">HTTPS inspection for %1$s</string>
+
 </resources>

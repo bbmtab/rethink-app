@@ -1,0 +1,137 @@
+name: 'N9C-B R3 Android16 Switch Fix Verification'
+
+on:
+  push:
+    branches:
+      - temp/n9c-b-r3-a16-switch-fix-20260905
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Neutralize checkout-local Windows Java path leak
+        run: |
+          set -e
+          if grep -q '^org\.gradle\.java\.home=' gradle.properties; then
+            sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+            echo "N9CBR3_JAVA_HOME_NEUTRALIZED=YES"
+          else
+            echo "N9CBR3_JAVA_HOME_NEUTRALIZED=NO_NEUTRALIZATION_NEEDED"
+          fi
+          echo "N9CBR3_JAVA_HOME_NEUTRALIZED=$([ \"$(grep -c '^org\.gradle\.java\.home=' gradle.properties || true)\" = \"0\" ] && echo YES || echo NO)"
+
+      - name: Source contract gate — PlusMaterialSwitchFix style on the N9 row
+        run: |
+          set -e
+          F='app/src/full/res/layout/list_item_https_inspection_app.xml'
+          if [ ! -f "$F" ]; then
+            echo "MISSING_LAYOUT=$F"
+            exit 1
+          fi
+          CNT=$(grep -c -F 'style="@style/PlusMaterialSwitchFix"' "$F")
+          echo "N9CBR3_PLUS_SWITCH_STYLE_COUNT=$CNT"
+          if [ "$CNT" != "1" ]; then
+            echo "Source contract gate FAILED — expected 1 occurrence of style=\"@style/PlusMaterialSwitchFix\" in $F"
+            exit 1
+          fi
+          ADDED_TA=$(git diff -- "$F" | grep -E '^\+.*android:textAppearance' | wc -l || true)
+          echo "N9CBR3_ADDED_TEXT_APPEARANCE_COUNT=$ADDED_TA"
+          if [ "$ADDED_TA" != "0" ]; then
+            echo "Source contract gate FAILED — android:textAppearance must not be ADDED to $F (added=$ADDED_TA)"
+            exit 1
+          fi
+          echo "N9CBR3_SOURCE_STYLE_GATE=PASS"
+
+      - name: Setup Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Compile fdroidFullDebug Kotlin
+        run: |
+          set -e
+          ./gradlew :app:compileFdroidFullDebugKotlin --no-daemon --stacktrace
+          echo "COMPILE_BUILD_SUCCESSFUL=YES"
+
+      - name: Run sealed N9 targeted tests
+        run: |
+          set -e
+          ./gradlew :app:testFdroidFullDebugUnitTest \
+            --tests "com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepositoryTest" \
+            --tests "com.celzero.bravedns.core.proxy.policy.InspectionAppPolicyControllerTest" \
+            --no-daemon --stacktrace
+          echo "TARGETED_TESTS_BUILD_SUCCESSFUL=YES"
+
+      - name: Aggregate JUnit XML
+        run: |
+          set -e
+          ROOT="app/build/test-results/testFdroidFullDebugUnitTest"
+          SUITES="$ROOT/TEST-com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepositoryTest.xml"
+          SUITES="$SUITES $ROOT/TEST-com.celzero.bravedns.core.proxy.policy.InspectionAppPolicyControllerTest.xml"
+          T=0; F=0; E=0; S=0
+          for f in $SUITES; do
+            if [ -f "$f" ]; then
+              line=$(grep -m1 -E 'testsuite ' "$f")
+              tt=$(echo "$line" | sed -E 's/.* tests="([0-9]+)".*/\1/')
+              ff=$(echo "$line" | sed -E 's/.* failures="([0-9]+)".*/\1/')
+              ee=$(echo "$line" | sed -E 's/.* errors="([0-9]+)".*/\1/')
+              ss=$(echo "$line" | sed -E 's/.* skipped="([0-9]+)".*/\1/')
+              T=$((T + ${tt:-0}))
+              F=$((F + ${ff:-0}))
+              E=$((E + ${ee:-0}))
+              S=$((S + ${ss:-0}))
+            fi
+          done
+          echo "N9CBR3_TESTS=$T"
+          echo "N9CBR3_FAILURES=$F"
+          echo "N9CBR3_ERRORS=$E"
+          echo "N9CBR3_SKIPPED=$S"
+          if [ "$T" != "14" ] || [ "$F" != "0" ] || [ "$E" != "0" ] || [ "$S" != "0" ]; then
+            echo "Test aggregation FAILED — expected 14/0/0/0"
+            exit 1
+          fi
+
+      - name: Assemble fdroidFullDebug APK
+        run: |
+          set -e
+          ./gradlew :app:assembleFdroidFullDebug --no-daemon --stacktrace
+          echo "ASSEMBLE_BUILD_SUCCESSFUL=YES"
+
+      - name: Stage and report APK
+        run: |
+          set -e
+          APK="app/build/outputs/apk/fdroidFull/debug/app-fdroid-full-universal-debug.apk"
+          if [ ! -f "$APK" ]; then
+            echo "N9CBR3_APK_PRESENT=NO"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$APK")
+          SHA=$(sha256sum "$APK" | awk '{print $1}')
+          echo "N9CBR3_APK_PRESENT=YES"
+          echo "N9CBR3_APK_SIZE_BYTES=$SIZE"
+          echo "N9CBR3_APK_SHA256=$SHA"
+
+      - name: Upload universal APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n9c-b-r3-a16-fix-fdroid-universal-apk
+          path: app/build/outputs/apk/fdroidFull/debug/app-fdroid-full-universal-debug.apk
+          retention-days: 7
+          if-no-files-found: error
