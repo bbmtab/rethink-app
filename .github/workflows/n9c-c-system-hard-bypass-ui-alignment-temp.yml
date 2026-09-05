@@ -114,5 +114,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: n9c-c-system-hard-bypass-ui-alignment-${{ github.sha }}
-          path: app/build/outputs/apk/fdroidFull/debug/app-universal-debug.apk
+          path: app/build/outputs/apk/fdroidFull/debug/app-fdroid-full-universal-debug.apk
           retention-days: 7
