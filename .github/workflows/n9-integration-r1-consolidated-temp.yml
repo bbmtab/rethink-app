@@ -1,0 +1,202 @@
+name: N9 Consolidated Integration Verification
+
+on:
+  push:
+    branches:
+      - temp/n9-phase-integration-r1-verify-20260905
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Neutralize local Windows Gradle Java home
+        shell: bash
+        run: |
+          echo "Before:"
+          grep -n '^org\.gradle\.java\.home=' gradle.properties || true
+
+          sed -i \
+            '/^org\.gradle\.java\.home=/d' \
+            gradle.properties
+
+          echo "After:"
+          if grep -n '^org\.gradle\.java\.home=' gradle.properties; then
+            echo "N9INT_JAVA_HOME_NEUTRALIZED=NO"
+            exit 1
+          fi
+
+          echo "N9INT_JAVA_HOME_NEUTRALIZED=YES"
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+
+      - name: Source contract gates
+        shell: bash
+        run: |
+          set -u
+
+          BRAVE_VPN_SERVICE_PATH=app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt
+          PLUS_FRAGMENT_PATH=app/src/fdroid/java/com/celzero/bravedns/ui/fragment/RethinkPlusFragment.kt
+          PLUS_LAYOUT_PATH=app/src/full/res/layout/list_item_https_inspection_app.xml
+          STRINGS_PATH=app/src/main/res/values/strings.xml
+          CONTROLLER_PATH=app/src/main/java/com/celzero/bravedns/core/proxy/policy/InspectionAppPolicyController.kt
+
+          EXPECTED_VPN_BLOB=e9de4635494e928d8e6dc25963d32b89a984c75a
+          EXPECTED_PLUS_BLOB=f7db262425c801750afca49666ba78704fc726ba
+
+          VPN_BLOB=$(git hash-object "$BRAVE_VPN_SERVICE_PATH")
+          PLUS_BLOB=$(git hash-object "$PLUS_FRAGMENT_PATH")
+
+          echo "BRAVE_VPN_SERVICE_BLOB=$VPN_BLOB"
+          echo "EXPECTED_VPN_BLOB=$EXPECTED_VPN_BLOB"
+          echo "PLUS_FRAGMENT_BLOB=$PLUS_BLOB"
+          echo "EXPECTED_PLUS_BLOB=$EXPECTED_PLUS_BLOB"
+
+          if [ "$VPN_BLOB" != "$EXPECTED_VPN_BLOB" ]; then
+            echo "N9INT_BRAVE_VPN_SERVICE_BLOB_MISMATCH=YES"
+            exit 1
+          fi
+          if [ "$PLUS_BLOB" != "$EXPECTED_PLUS_BLOB" ]; then
+            echo "N9INT_PLUS_FRAGMENT_BLOB_MISMATCH=YES"
+            exit 1
+          fi
+
+          N9CA_HOT_APPLY_OBSERVER_PRESENT=$(grep -F -c "httpsInspectionAppPolicy" "$BRAVE_VPN_SERVICE_PATH" || true)
+          N9CA_RUNTIME_USER_POLICY_PRESENT=$(grep -F -c "InspectionUserAppPolicyRepository" "$BRAVE_VPN_SERVICE_PATH" || true)
+          R4R_MASTER_RESTORE_RAW=$(grep -n -F "updateHttpsInspectionToggle(persistentState.httpsInspectionEnabled)" "$PLUS_FRAGMENT_PATH" || true)
+          R4R_MASTER_RESTORE_PRESENT=$(echo "$R4R_MASTER_RESTORE_RAW" | grep -c . || true)
+          LISTENER_LINE=$(grep -n -F "switchHttpsInspection.setOnCheckedChangeListener" "$PLUS_FRAGMENT_PATH" | head -1 | cut -d: -f1 || echo 0)
+          RESTORE_LINE=$(echo "$R4R_MASTER_RESTORE_RAW" | head -1 | cut -d: -f1 || echo 0)
+
+          echo "N9CA_HOT_APPLY_OBSERVER_PRESENT=$N9CA_HOT_APPLY_OBSERVER_PRESENT"
+          echo "N9CA_RUNTIME_USER_POLICY_PRESENT=$N9CA_RUNTIME_USER_POLICY_PRESENT"
+          echo "R4R_MASTER_RESTORE_PRESENT=$R4R_MASTER_RESTORE_PRESENT"
+          echo "R4R_MASTER_RESTORE_LINE=$RESTORE_LINE"
+          echo "R4R_LISTENER_LINE=$LISTENER_LINE"
+
+          if [ "$N9CA_HOT_APPLY_OBSERVER_PRESENT" -lt 1 ]; then
+            echo "N9INT_HOT_APPLY_OBSERVER_MISSING=YES"
+            exit 1
+          fi
+          if [ "$N9CA_RUNTIME_USER_POLICY_PRESENT" -lt 1 ]; then
+            echo "N9INT_RUNTIME_USER_POLICY_MISSING=YES"
+            exit 1
+          fi
+          if [ "$R4R_MASTER_RESTORE_PRESENT" -ne 1 ]; then
+            echo "N9INT_MASTER_RESTORE_COUNT=$R4R_MASTER_RESTORE_PRESENT (expected 1)"
+            exit 1
+          fi
+          if [ "$RESTORE_LINE" -ge "$LISTENER_LINE" ]; then
+            echo "N9INT_MASTER_RESTORE_ORDER=WRONG (restore=$RESTORE_LINE listener=$LISTENER_LINE)"
+            exit 1
+          fi
+
+          N9CC_SYSTEM_BYPASS_PRESENT=$(grep -r -F "SYSTEM_BYPASS" app/src/main/java/com/celzero/bravedns/ | wc -l || true)
+          N9CC_SYSTEM_PROTECTED_STRING_PRESENT=$(grep -F -c "System protected · HTTPS inspection unavailable" "$STRINGS_PATH" || true)
+          ANDROID16_SWITCH_FIX_PRESENT=$(grep -F -c "style=\"@style/PlusMaterialSwitchFix\"" "$PLUS_LAYOUT_PATH" || true)
+
+          echo "N9CC_SYSTEM_BYPASS_PRESENT=$N9CC_SYSTEM_BYPASS_PRESENT"
+          echo "N9CC_SYSTEM_PROTECTED_STRING_PRESENT=$N9CC_SYSTEM_PROTECTED_STRING_PRESENT"
+          echo "ANDROID16_SWITCH_FIX_PRESENT=$ANDROID16_SWITCH_FIX_PRESENT"
+
+          if [ "$N9CC_SYSTEM_BYPASS_PRESENT" -lt 1 ]; then
+            echo "N9INT_SYSTEM_BYPASS_MISSING=YES"
+            exit 1
+          fi
+          if [ "$N9CC_SYSTEM_PROTECTED_STRING_PRESENT" -lt 1 ]; then
+            echo "N9INT_SYSTEM_PROTECTED_STRING_MISSING=YES"
+            exit 1
+          fi
+          if [ "$ANDROID16_SWITCH_FIX_PRESENT" -ne 1 ]; then
+            echo "N9INT_ANDROID16_SWITCH_FIX_COUNT=$ANDROID16_SWITCH_FIX_PRESENT (expected 1)"
+            exit 1
+          fi
+
+          echo "N9INT_SOURCE_CONTRACT_PASS=YES"
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Compile fdroidFullDebug production Kotlin
+        run: >
+          ./gradlew
+          :app:compileFdroidFullDebugKotlin
+          --no-daemon
+          --stacktrace
+
+      - name: Run targeted tests
+        run: >
+          ./gradlew
+          :app:testFdroidFullDebugUnitTest
+          --tests
+          "com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepositoryTest"
+          --tests
+          "com.celzero.bravedns.core.proxy.policy.InspectionAppPolicyControllerTest"
+          --no-daemon
+          --stacktrace
+
+      - name: Verify targeted JUnit totals
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          files = glob.glob(
+              "app/build/test-results/"
+              "testFdroidFullDebugUnitTest/*.xml"
+          )
+
+          if not files:
+              print("N9INT_JUNIT_XML=NOT_FOUND")
+              sys.exit(1)
+
+          tests = 0
+          failures = 0
+          errors = 0
+          skipped = 0
+
+          for path in files:
+              root = ET.parse(path).getroot()
+              tests += int(root.attrib.get("tests", 0))
+              failures += int(root.attrib.get("failures", 0))
+              errors += int(root.attrib.get("errors", 0))
+              skipped += int(root.attrib.get("skipped", 0))
+
+          print(f"N9INT_REPOSITORY_TESTS={tests}")
+          print(f"N9INT_FAILURES={failures}")
+          print(f"N9INT_ERRORS={errors}")
+          print(f"N9INT_SKIPPED={skipped}")
+
+          if (tests, failures, errors, skipped) != (17, 0, 0, 0):
+              sys.exit(1)
+          PY
+
+      - name: Assemble fdroidFullDebug APK
+        run: >
+          ./gradlew
+          :app:assembleFdroidFullDebug
+          --no-daemon
+          --stacktrace
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: n9-integration-r1-consolidated-fdroid-universal-apk
+          path: app/build/outputs/apk/fdroidFull/debug/app-fdroid-full-universal-debug.apk
+          retention-days: 7
