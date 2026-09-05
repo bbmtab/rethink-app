@@ -95,6 +95,10 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     // ========== HTTPS INSPECTION SECTION ==========
 
     private fun initHttpsInspectionSection() {
+        // Restore the persisted master state before installing the listener.
+        // LiveData is process-local and may not have emitted after process recreation.
+        updateHttpsInspectionToggle(persistentState.httpsInspectionEnabled)
+
         // Master toggle
         b.switchHttpsInspection.setOnCheckedChangeListener { _, isChecked ->
             // DECISION-006/D: HTTPS Inspection is hot-pluggable — setting
