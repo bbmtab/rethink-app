@@ -1,0 +1,115 @@
+name: N9D-A R4R Master State Restore Verification
+
+on:
+  push:
+    branches:
+      - temp/n9d-a-r4r-master-state-restore-20260905
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Verify source contract
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          PLUS_FILE="app/src/fdroid/java/com/celzero/bravedns/ui/fragment/RethinkPlusFragment.kt"
+          ANDROID16_FILE="app/src/full/res/layout/list_item_https_inspection_app.xml"
+
+          # Contract 1: master restore call count = 1
+          MASTER_RESTORE_COUNT=$(grep -c 'updateHttpsInspectionToggle(persistentState\.httpsInspectionEnabled)' "$PLUS_FILE" || true)
+          echo "MASTER_RESTORE_CALL_COUNT=$MASTER_RESTORE_COUNT"
+
+          # Contract 2: call line < listener line
+          MASTER_RESTORE_LINE=$(grep -n 'updateHttpsInspectionToggle(persistentState\.httpsInspectionEnabled)' "$PLUS_FILE" | head -1 | cut -d: -f1)
+          LISTENER_LINE=$(grep -n 'b\.switchHttpsInspection\.setOnCheckedChangeListener' "$PLUS_FILE" | head -1 | cut -d: -f1)
+          echo "MASTER_RESTORE_LINE=$MASTER_RESTORE_LINE"
+          echo "LISTENER_LINE=$LISTENER_LINE"
+          if [ -n "$MASTER_RESTORE_LINE" ] && [ -n "$LISTENER_LINE" ] && [ "$MASTER_RESTORE_LINE" -lt "$LISTENER_LINE" ]; then
+            MASTER_RESTORE_BEFORE_LISTENER=YES
+          else
+            MASTER_RESTORE_BEFORE_LISTENER=NO
+          fi
+          echo "MASTER_RESTORE_BEFORE_LISTENER=$MASTER_RESTORE_BEFORE_LISTENER"
+
+          # Contract 3: Android16-safe switch fix
+          ANDROID16_SWITCH_FIX_COUNT=$(grep -c 'style="@style/PlusMaterialSwitchFix"' "$ANDROID16_FILE" || true)
+          echo "ANDROID16_SWITCH_FIX_COUNT=$ANDROID16_SWITCH_FIX_COUNT"
+          if [ "$ANDROID16_SWITCH_FIX_COUNT" = "1" ]; then
+            ANDROID16_SWITCH_FIX_PRESENT=YES
+          else
+            ANDROID16_SWITCH_FIX_PRESENT=NO
+          fi
+          echo "ANDROID16_SWITCH_FIX_PRESENT=$ANDROID16_SWITCH_FIX_PRESENT"
+
+          # Gate
+          if [ "$MASTER_RESTORE_COUNT" = "1" ] && [ "$MASTER_RESTORE_BEFORE_LISTENER" = "YES" ] && [ "$ANDROID16_SWITCH_FIX_PRESENT" = "YES" ]; then
+            echo "SOURCE_CONTRACT_PASS=YES"
+          else
+            echo "SOURCE_CONTRACT_PASS=NO"
+            exit 1
+          fi
+
+      - name: Neutralize gradle.properties Windows java.home
+        shell: bash
+        run: |
+          if grep -q '^org\.gradle\.java\.home=' gradle.properties 2>/dev/null; then
+            grep -v '^org\.gradle\.java\.home=' gradle.properties > gradle.properties.tmp
+            mv gradle.properties.tmp gradle.properties
+            echo "JAVA_HOME_NEUTRALIZED=YES (removed org.gradle.java.home line)"
+          else
+            echo "JAVA_HOME_NEUTRALIZED=YES (no org.gradle.java.home line present)"
+          fi
+
+      - name: Compile fdroid-full-debug Kotlin
+        shell: bash
+        run: |
+          ./gradlew :app:compileFdroidFullDebugKotlin --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: -Xmx2g
+
+      - name: Run sealed N9 tests
+        shell: bash
+        run: |
+          ./gradlew :app:testFdroidFullDebugUnitTest \
+            --tests "com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepositoryTest" \
+            --tests "com.celzero.bravedns.core.proxy.policy.InspectionAppPolicyControllerTest" \
+            --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: -Xmx2g
+
+      - name: Assemble fdroid-full-debug APK
+        shell: bash
+        run: |
+          ./gradlew :app:assembleFdroidFullDebug --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: -Xmx2g
+
+      - name: Locate universal APK
+        id: locate_apk
+        shell: bash
+        run: |
+          APK=$(find app/build/outputs/apk/fdroidFull/debug -type f -name '*universal*.apk' | head -1)
+          echo "apk_path=$APK"
+          echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
+          ls -la "$APK"
+          sha256sum "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n9d-a-r4r-master-state-restore-fdroid-universal-apk
+          path: ${{ steps.locate_apk.outputs.apk_path }}
+          retention-days: 7
+          if-no-files-found: error

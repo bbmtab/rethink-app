@@ -36,16 +36,22 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.lifecycleScope
+import androidx.paging.filter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import by.kirich1409.viewbindingdelegate.viewBinding
 import com.celzero.bravedns.R
 import com.celzero.bravedns.adapter.FirewallAppListAdapter
+import com.celzero.bravedns.adapter.HttpsInspectionAppListAdapter
 import com.celzero.bravedns.database.EventSource
 import com.celzero.bravedns.database.EventType
 import com.celzero.bravedns.database.RefreshDatabase
 import com.celzero.bravedns.database.Severity
 import com.celzero.bravedns.databinding.ActivityAppListBinding
+import com.celzero.bravedns.core.proxy.policy.InspectionAndroidBrowserCapabilityDetector
+import com.celzero.bravedns.core.proxy.policy.InspectionAppPolicyController
+import com.celzero.bravedns.core.proxy.policy.InspectionBrowserRuntimePackageResolver
+import com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepository
 import com.celzero.bravedns.service.EventLogger
 import com.celzero.bravedns.service.PersistentState
 import com.celzero.bravedns.ui.BaseActivity
@@ -82,6 +88,10 @@ class AppListActivity :
 
     private lateinit var animation: Animation
 
+    private val isHttpsInspectionMode: Boolean by lazy {
+        intent?.getStringExtra(EXTRA_MODE) == MODE_HTTPS_EXCLUSIONS
+    }
+
     companion object {
         val filters = MutableLiveData<Filters>()
 
@@ -93,6 +103,9 @@ class AppListActivity :
 
         private const val REFRESH_TIMEOUT: Long = 4000
         private const val QUERY_TEXT_DELAY: Long = 1000
+
+        const val EXTRA_MODE = "mode"
+        const val MODE_HTTPS_EXCLUSIONS = "https_exclusions"
     }
 
     // enum class for bulk ui update
@@ -218,7 +231,12 @@ class AppListActivity :
             window.isNavigationBarContrastEnforced = false
         }
 
-        filters.value = Filters()
+        filters.value =
+            Filters().apply {
+                if (isHttpsInspectionMode) {
+                    topLevelFilter = TopLevelFilter.ALL
+                }
+            }
         initView()
         initObserver()
         setupClickListener()
@@ -226,8 +244,16 @@ class AppListActivity :
 
     override fun onResume() {
         super.onResume()
-        setFirewallFilter(filters.value?.firewallFilter)
-        filters.value = filters.value ?: Filters()
+        if (!isHttpsInspectionMode) {
+            setFirewallFilter(filters.value?.firewallFilter)
+        }
+        filters.value =
+            filters.value
+                ?: Filters().apply {
+                    if (isHttpsInspectionMode) {
+                        topLevelFilter = TopLevelFilter.ALL
+                    }
+                }
         b.ffaAppList.requestFocus()
     }
 
@@ -241,6 +267,12 @@ class AppListActivity :
     }
 
     private fun updateFilterText(filter: Filters) {
+        if (isHttpsInspectionMode) {
+            b.firewallAppLabelTv.text =
+                getString(R.string.https_inspection_apps_summary)
+            b.firewallAppLabelTv.isSelected = false
+            return
+        }
         val filterLabel = filter.topLevelFilter.getLabel(this)
         val firewallLabel = filter.firewallFilter.getLabel(this)
         if (filter.categoryFilters.isEmpty()) {
@@ -768,8 +800,27 @@ class AppListActivity :
         initListAdapter()
         b.ffaSearch.setOnQueryTextListener(this)
         addAnimation()
-        remakeFirewallChipsUi()
+
+        if (isHttpsInspectionMode) {
+            configureHttpsInspectionModeUi()
+        } else {
+            remakeFirewallChipsUi()
+        }
+
         handleKeyboardEvent()
+    }
+
+    private fun configureHttpsInspectionModeUi() {
+        b.ffaSearch.queryHint =
+            getString(R.string.https_inspection_apps_search_hint)
+
+        b.ffaFilterIcon.visibility = View.GONE
+        b.ffaSortChipLl.visibility = View.GONE
+        b.ffaToggleAllContainer.visibility = View.GONE
+
+        b.firewallAppLabelTv.text =
+            getString(R.string.https_inspection_apps_summary)
+        b.firewallAppLabelTv.isSelected = false
     }
 
     private fun handleKeyboardEvent() {
@@ -810,19 +861,84 @@ class AppListActivity :
     }
 
     private fun initListAdapter() {
-        val recyclerAdapter = FirewallAppListAdapter(this, this, eventLogger)
         b.ffaAppList.setHasFixedSize(true)
         layoutManager = LinearLayoutManager(this)
         b.ffaAppList.layoutManager = layoutManager
+
+        if (isHttpsInspectionMode) {
+            initHttpsInspectionListAdapter()
+        } else {
+            initFirewallListAdapter()
+        }
+
+        setQueryFilter()
+    }
+
+    private fun initFirewallListAdapter() {
+        val recyclerAdapter =
+            FirewallAppListAdapter(
+                this,
+                this,
+                eventLogger
+            )
+
         recyclerAdapter.stateRestorationPolicy =
             RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
 
         appInfoViewModel.appInfo.observe(this) {
-            b.ffaAppList.post { recyclerAdapter.submitData(lifecycle, it) }
+            b.ffaAppList.post {
+                recyclerAdapter.submitData(
+                    lifecycle,
+                    it
+                )
+            }
         }
 
         b.ffaAppList.adapter = recyclerAdapter
-        setQueryFilter()
+    }
+
+    private fun initHttpsInspectionListAdapter() {
+        val capabilities =
+            InspectionAndroidBrowserCapabilityDetector(
+                packageManager
+            ).detect()
+
+        val browserPackages =
+            InspectionBrowserRuntimePackageResolver.resolve(
+                capabilities = capabilities,
+                selfPackageName = packageName
+            )
+
+        val controller =
+            InspectionAppPolicyController(
+                InspectionUserAppPolicyRepository(
+                    persistentState
+                )
+            )
+
+        val recyclerAdapter =
+            HttpsInspectionAppListAdapter(
+                context = this,
+                lifecycleOwner = this,
+                controller = controller,
+                browserPackages = browserPackages
+            )
+
+        recyclerAdapter.stateRestorationPolicy =
+            RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+
+        appInfoViewModel.appInfo.observe(this) { pagingData ->
+            b.ffaAppList.post {
+                recyclerAdapter.submitData(
+                    lifecycle,
+                    pagingData.filter { appInfo ->
+                        appInfo.tombstoneTs <= 0
+                    }
+                )
+            }
+        }
+
+        b.ffaAppList.adapter = recyclerAdapter
     }
 
     private fun openFilterBottomSheet() {
