@@ -1244,6 +1244,7 @@
     <string name="firewall_rule_foreground" translatable="true">App Not-in-Use</string>
     <string name="firewall_rule_unknown" translatable="true">Source Unknown</string>
     <string name="firewall_rule_block_udp_ntp" translatable="true">UDP Blocked</string>
+    <string name="firewall_rule_https_inspection_force_tcp" translatable="true">HTTPS Inspection</string>
     <string name="firewall_rule_block_dns_bypass" translatable="true">DNS Bypassed</string>
     <string name="firewall_rule_exempt_app_bypass_univ" translatable="true">Bypassed App</string>
     <string name="firewall_rule_exempt_dns_proxied" translatable="true">DNS Proxied</string>
@@ -1279,6 +1280,7 @@
     <string name="firewall_rule_foreground_desc" translatable="true"><![CDATA[This connection was firewalled because the source app was <i>not in the foreground</i>.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_unknown_desc" translatable="true"><![CDATA[This connection was firewalled because the <i>source app</i> could not be determined.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_block_udp_ntp_desc" translatable="true"><![CDATA[A user-set firewall rule blocked this <i>UDP</i> connection.<br/><br/> To change go to <i>Universal</i> tab.]]></string>
+    <string name="firewall_rule_https_inspection_force_tcp_desc" translatable="true"><![CDATA[This <i>UDP/443</i> connection was blocked so the app can retry HTTPS over TCP for inspection.]]></string>
     <string name="firewall_rule_block_dns_bypass_desc" translatable="true"><![CDATA[This connection was blocked because the <i>source app</i> bypassed user-preferred DNS.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_exempt_app_bypass_univ_desc" translatable="true"><![CDATA[This connection was allowed because the <i>source app</i> is set to <i>bypass universal</i> firewall rules.<br/><br/> To change go to <i>App-specific Firewall</i> screen.]]></string>
     <string name="firewall_rule_exempt_dns_proxied_desc" translatable="true"><![CDATA[This DNS connection was proxied and forwarded to user-preferred DNS endpoint.<br/><br/> To change disable <i>Prevent DNS leaks</i> from DNS <i>Configure</i> screen.]]></string>
