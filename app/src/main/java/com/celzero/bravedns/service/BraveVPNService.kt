@@ -1909,6 +1909,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     private val vpnRestartTrigger: MutableStateFlow<String> = MutableStateFlow("startVpn")
+    private val httpsInspectionAppPolicyRestartSequence = AtomicInteger(0)
     @OptIn(FlowPreview::class)
     private fun observeVpnRestartRequests() {
         vpnScope.launch {
@@ -2302,8 +2303,10 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
             PersistentState.HTTPS_INSPECTION_EXCLUDED_PACKAGES,
             PersistentState.HTTPS_INSPECTION_INCLUDED_PACKAGES -> {
                 if (persistentState.httpsInspectionEnabled) {
+                    val sequence = httpsInspectionAppPolicyRestartSequence.incrementAndGet()
+
                     vpnRestartTrigger.value =
-                        "httpsInspectionAppPolicy: $key"
+                        "httpsInspectionAppPolicy[$sequence]: $key"
                 }
             }
 
