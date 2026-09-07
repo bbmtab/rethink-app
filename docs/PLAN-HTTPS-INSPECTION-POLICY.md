@@ -1,9 +1,9 @@
 # HTTPS Inspection Policy — Authority Document
 
-**Status:** Governing architecture + N4E runtime/device policy sealed locally (2026-09-04); final branch commit pending
-**Authority:** `docs/DECISIONS.md` § DECISION-010 plus the 2026-09-04 N4E superseding addendum
-**Committed branch baseline:** `phase1d-advanced-filter` @ `43e02cd0956d6aefc487eac0d534eaefa99c769d`
-**Local sealed implementation:** N4E policy/runtime/device verification complete; the verified working-tree implementation has not yet been finalized into the branch commit
+**Status:** Governing architecture + N9 canonical HTTPS policy/transport integration sealed (2026-09-07); direct RULE20 device execution is deferred because no natural UDP/443 control fixture was available
+**Authority:** `docs/DECISIONS.md` § DECISION-010 plus the 2026-09-04 N4E superseding addendum and the 2026-09-07 N9 transport/hot-apply addendum
+**Canonical branch baseline:** `phase1d-advanced-filter` @ `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`
+**Canonical sealed implementation:** N4E policy/runtime, N9 per-app policy state/UI, repeated-toggle hot apply, runtime policy-snapshot publication, and policy-driven UDP/443 force-TCP enforcement are committed. Source/GHA gates are closed; R4D hot apply is real-device proven. RULE20 direct device execution remains a deferred evidence item, not a source/GHA failure.
 **Scope:** This document owns the HTTPS Inspection eligibility, bypass, and
 resource-protection policy layer. No other planning document should contain
 HTTPS policy details; they live here.
@@ -158,25 +158,31 @@ manually add an application via the Plus-tab Apps list.
 `InspectionPolicyEngine` resolves decisions in the following order. **Hard bypass
 entries always beat user inclusion; a user cannot override a system hard bypass.**
 
-```
+```text
 connection
     ↓
-1. SYSTEM HARD BYPASS?           YES → BYPASS_SYSTEM       (highest)
+1. SYSTEM HARD BYPASS?           YES → BYPASS_SYSTEM
 2. USER APP EXCLUSION?           YES → BYPASS_USER
-3. PROTECTED DOMAIN?             YES → BYPASS_DOMAIN
-4. PROTECTED APP + PORT?         YES → BYPASS_APP_PORT
-5. KNOWN BROWSER INSTALLED?      YES → MITM_KNOWN_BROWSER
-6. USER EXPLICIT APP INCLUDE?    YES → MITM_USER_APP
-7. DYNAMIC BROWSER DETECTED?     YES → MITM_DYNAMIC_BROWSER
-8. (no match)                             BYPASS             (lowest)
+3. COMPATIBILITY EXCLUSION?      YES → BYPASS_COMPATIBILITY
+4. PROTECTED DOMAIN?             YES → BYPASS_DOMAIN
+   DOMAIN MODE REJECTS HOST?     YES → BYPASS_DOMAIN_MODE
+5. PROTECTED APP + PORT?         YES → BYPASS_APP_PORT
+6. KNOWN BROWSER INSTALLED?      YES → MITM_KNOWN_BROWSER
+7. USER EXPLICIT APP INCLUDE?    YES → MITM_USER_APP
+8. DYNAMIC BROWSER DETECTED?     YES → MITM_DYNAMIC_BROWSER
+9. NO MATCH                            → BYPASS_DEFAULT
 ```
 
-**Contract:** Step N is only evaluated if steps 1..N-1 all resolved NO. The
-first YES wins.
+**Contract:** Each later branch is evaluated only if every earlier branch did
+not resolve the connection. The first applicable result wins.
 
-Because `USER APP EXCLUSION` is evaluated at step 2, an explicit browser
-exclusion always wins before either known-browser or dynamic-browser default-ON
-eligibility is evaluated.
+`USER APP EXCLUSION` therefore remains the user compatibility escape hatch for
+known and dynamic browsers. `COMPATIBILITY EXCLUSION` is a separate project
+policy layer and also wins before protected-domain and MITM eligibility logic.
+
+The compatibility and domain-mode rows above are a documentation precision
+sync with the already accepted canonical runtime; they do not introduce new
+behavior in this documentation slice.
 
 ---
 
@@ -351,18 +357,24 @@ Conceptual reason codes resolved by `InspectionPolicyEngine`. Used for
 diagnostics and device evidence; exact enumeration names may differ in
 implementation.
 
-```
-BYPASS_SYSTEM           — system hard bypass (step 1)
-BYPASS_USER             — user explicit exclusion (step 2)
-BYPASS_DOMAIN           — protected domain (step 3)
-BYPASS_APP_PORT         — protected (app, port) tuple (step 4)
+```text
+BYPASS_SYSTEM           — system hard bypass
+BYPASS_USER             — user explicit application exclusion
+BYPASS_COMPATIBILITY    — compatibility exclusion
+BYPASS_DOMAIN           — protected global/package-scoped domain
+BYPASS_DOMAIN_MODE      — current domain mode does not permit MITM for host
+BYPASS_APP_PORT         — protected (app, destination-port) tuple
+BYPASS_DEFAULT          — no MITM eligibility rule matched
 
-MITM_KNOWN_BROWSER      — matched known registry (step 5)
-MITM_USER_APP           — user explicitly included non-browser app (step 6)
-MITM_DYNAMIC_BROWSER    — capability-detected dynamic browser, inspected by default unless excluded (step 7)
+MITM_KNOWN_BROWSER      — matched maintained known-browser registry
+MITM_USER_APP           — user explicitly included non-browser application
+MITM_DYNAMIC_BROWSER    — capability-detected dynamic browser
 
-MITM_STREAM_ONLY        — MITM established but body degraded to stream-only
+MITM_STREAM_ONLY        — post-MITM processing mode; large body degraded to
+                          streaming without raw-TCP mid-flow conversion
 ```
+
+Do not rename Kotlin enums.
 
 ---
 
@@ -434,28 +446,37 @@ POST-MITM RESOURCE DECISION
 
 ## 11. Roadmap position and implementation status
 
-```
+```text
 B1    Data / storage foundation              SEALED
 B2    Downloader + validation                SEALED
 B3    Parser / compiler + diagnostics        SEALED
 B4    Atomic activation + rollback           SEALED
-B4.5  HTTPS Inspection Policy                SEALED LOCALLY — preset-driven policy/runtime/device gates closed by N4E; final branch commit pending
-B5    Manage Filters + custom source UI      IMPLEMENTED — add/edit/remove/enable/disable flows exist
-B6    End-to-end verification                SEALED FOR CURRENT PHASE-1D ACCEPTANCE — filter runtime E2E closed 2026-08-30; HTTPS-policy/device N4E closed 2026-09-04
+B4.5  HTTPS Inspection Policy                SEALED — canonical policy/per-app/transport integration at a3c6a00b
+B5    Manage Filters + custom source UI      IMPLEMENTED
+B6    End-to-end verification                SEALED FOR CURRENT PHASE-1D ACCEPTANCE
+                                              — N4E policy/device closed
+                                              — N9 repeated-toggle hot apply device-closed
+                                              — RULE20 direct execution deferred for lack of natural UDP/443 stimulus
 ```
 
-The remaining work is branch integration/documentation finalization, not an
-open N4E runtime/device defect. Dedicated final per-app HTTPS management UI work
-may continue separately, but it must reuse the existing Rethink app inventory
-and the exclusion semantics documented above.
+Canonical repository integration is complete. The N4E policy/runtime stack,
+N9 per-app management stack, repeated-toggle hot-apply repair, and
+policy-driven inspection transport enforcement are now committed on
+`phase1d-advanced-filter`.
 
-DECISION-010 plus its 2026-09-04 N4E superseding addendum remain the governing
+The remaining device item is narrower: direct execution evidence for RULE20
+requires a real application flow that naturally reaches Rethink as UDP/443
+while the same flow is MITM-eligible. Multiple installed control fixtures did
+not produce such traffic. This is recorded as deferred verification, not as an
+implementation failure.
+
+DECISION-010 plus its 2026-09-04 and 2026-09-07 addenda remain the governing
 architecture and product contract for B4.5.
 
 ### N4E implementation/runtime closure
 
-The verified local working tree now contains the preset-driven HTTPS eligibility
-and bypass runtime used by the N4E physical-device acceptance tests.
+The canonical branch contains the preset-driven HTTPS eligibility and bypass
+runtime used by the N4E physical-device acceptance tests.
 
 The verified runtime includes:
 
@@ -508,15 +529,14 @@ knownBrowsers=147
 dynamicBrowsers=0
 ```
 
-The remaining work for this document is repository integration/documentation
-finalization and separately scoped follow-up UI/compatibility work. It is not an
-open N4E browser-runtime blocker.
+N4E repository integration is complete. Remaining work is limited to separately
+scoped compatibility/resource follow-up and the deferred direct-device RULE20
+execution evidence described below.
 
-The verified implementation still resides partly in the local working tree.
-Do not interpret committed HEAD
-`43e02cd0956d6aefc487eac0d534eaefa99c769d` as already containing every
-verified N4E implementation file until the final code integration commit is
-created.
+The verified implementation is now canonical at
+`a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`.
+The temporary GHA workflow used to verify the transport implementation remains
+temp-branch-only and is intentionally absent from the canonical tree.
 
 ---
 
@@ -559,10 +579,111 @@ implemented and device-verified: policy snapshot publication,
 discovery, compatibility bypass, protected-domain input, and decision/reason
 logging.
 
+#### N9 canonical transport + hot-apply closure — 2026-09-07
+
+Canonical commit:
+
+`a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`
+(`feat(https): enforce inspection transport policy`)
+
+The committed N9 transport boundary is:
+
+```text
+firestack connection metadata
+        ↓
+ordinary FirewallRuleset evaluation
+        ↓
+existing firewall rule grounded?
+        ├── YES → existing firewall block wins unchanged
+        └── NO
+             ↓
+active immutable HTTPS policy snapshot available?
+        ├── NO  → ordinary firewall result unchanged
+        └── YES
+             ↓
+UDP destination port 443?
+        ├── NO  → ordinary firewall result unchanged
+        └── YES
+             ↓
+InspectionTransportPolicy
+        ↓
+InspectionPolicyEngine
+        ├── BYPASS → ordinary firewall result unchanged
+        └── MITM
+             ↓
+          RULE20
+          stall UDP/443
+             ↓
+          application may retry over TCP
+             ↓
+          LocalHttpsProxy inspection path
+```
+
+The transport rule is package-agnostic. It does not hardcode Chrome, YouTube,
+or the donor `quic_pkg_exclusions.txt` package set. Its source of truth is the
+same immutable policy snapshot currently installed in `LocalHttpsProxy`.
+
+`RULE20` is a dedicated `stall` firewall result labelled HTTPS Inspection. It is
+not RULE6 and does not change ordinary global UDP-block semantics.
+
+The repeated per-app policy restart event was also repaired. Consecutive
+ON→OFF and OFF→ON changes can mutate the same preference key, so equal
+`MutableStateFlow<String>` values previously risked conflation. App-policy
+restart reasons now carry a monotonically increasing process-local sequence:
+
+```text
+httpsInspectionAppPolicy[1]: <key>
+httpsInspectionAppPolicy[2]: <key>
+...
+```
+
+The existing 3000 ms debounce remains unchanged. Multiple rapid preference
+changes may still coalesce to one final VPN rebuild because only the latest
+persisted policy state needs activation.
+
+Verification:
+
+```text
+GHA run                 = 34046896707
+InspectionTransportPolicyTest = 11/11 PASS
+fdroidFullDebug compile = PASS
+fdroidFullDebug assemble = PASS
+artifact                = 9993434969
+
+Brave ON→OFF:
+  unique app-policy restart event
+  public certificate after exclusion
+
+Brave OFF→ON:
+  second distinct app-policy restart event
+  no manual Protection restart
+  RethinkDNS Root CA restored
+  MITM_KNOWN_BROWSER + TLS MITM tunnel restored
+```
+
+Direct RULE20 execution is not yet device-proven. The following natural-control
+fixtures produced zero qualifying UDP/443 flows during the captured control
+windows:
+
+```text
+Chrome          0
+YouTube         0
+YouTube Music   0
+Google Play     0
+```
+
+Additional donor-preset QUIC fixtures were not installed on the device. No
+RULE20 failure was observed because no real UDP/443 control stimulus reached
+the rule gate.
+
 Remaining work is intentionally narrower:
 
-* [ ] Complete QUIC-policy implementation and verification independently from
-  HTTPS BYPASS/MITM semantics.
+* [x] Implement policy-driven HTTPS transport enforcement for MITM-eligible
+  UDP/443 using the active immutable policy snapshot (`InspectionTransportPolicy`
+  + dedicated `FirewallRuleset.RULE20`).
+* [ ] Capture direct real-device RULE20 execution when a natural fixture emits
+  qualifying UDP/443 traffic. Current status: deferred because all available
+  installed control fixtures produced zero UDP/443.
 * [ ] Complete the remaining external compatibility scenarios in §12.3.
 * [ ] Verify package-scoped domain/app edge cases not exercised by the controlled
   N4E three-fixture matrix.
@@ -608,7 +729,11 @@ The following external or attached inputs remain research material and must not 
 - `filter_https_traffic_inclusions.txt`: its AdGuard meaning enables HTTPS filtering by default for listed browsers. Rethink requires every known-browser entry to be independently verified before it can become a default-ON policy entry.
 - `filter_https_traffic_inclusions_problematic_devices.txt`: device-specific selection criteria and fallback behavior have not been modeled.
 - `filter_https_traffic_exclusions.json`: its schema, selection precedence, and Android integration contract have not been accepted.
-- `quic_pkg_exclusions.txt`: QUIC allow, block, bypass, and fallback behavior are not represented by the current HTTPS inspection decision model.
+- `quic_pkg_exclusions.txt`: remains donor research/compatibility data and is
+  not the runtime authority for inspection force-TCP. Canonical N9 transport
+  enforcement is package-agnostic and derives its result from
+  `InspectionPolicyEngine`. Any future package-specific QUIC exception registry
+  requires separate provenance, compatibility, and policy approval.
 - `ssl_block_list.txt`: its authoritative source, redistribution terms, and whitelist-mode semantics have not been accepted.
 
 `AdguardTeam/CompatibilityIssues` may be used as a research reference, but its repository did not expose a `LICENSE`, `COPYING`, `NOTICE`, or package-level license declaration during the 2026-08-31 audit. Project governance therefore does not authorize redistributing those raw lists. A transformed attachment is not an acceptable substitute for an authorized raw upstream artifact.
@@ -620,7 +745,10 @@ The following external or attached inputs remain research material and must not 
 - [ ] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
 - [ ] Resolve the existing Edge package candidate discrepancy during an authorized runtime-integration slice: `com.microsoft.empath` is not the verified Microsoft Edge package identifier; the verified Google Play identifier is `com.microsoft.emmx`.
 - [ ] Define how problematic-device browser entries are selected before creating any corresponding asset.
-- [ ] Design and approve QUIC policy independently before adding a QUIC package registry.
+- [ ] Do not add a package-specific QUIC registry merely to implement HTTPS
+  inspection force-TCP; that enforcement is already policy-driven. Add a
+  package registry only if separately verified compatibility exceptions require
+  one, with its own provenance and policy decision.
 - [ ] Define the schema and precedence for `filter_https_traffic_exclusions.json` before parsing or bundling it.
 - [ ] Create each remaining asset only after its provenance, redistribution authorization, semantics, parser contract, and focused tests are accepted.
 - [ ] Connect the preset loader to Android assets and runtime policy publication only after all mandatory registries required by the selected policy mode exist.

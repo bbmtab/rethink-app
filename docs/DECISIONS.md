@@ -1703,3 +1703,182 @@ This closure records verified runtime/device behavior. It does not claim that
 HEAD `43e02cd0956d6aefc487eac0d534eaefa99c769d` already contains every verified
 working-tree implementation file. Final code integration/commit remains a
 separate repository operation.
+
+---
+
+## DECISION-010 — N9 PER-APP HOT-APPLY AND HTTPS TRANSPORT ENFORCEMENT ADDENDUM (2026-09-07)
+
+**Status:** GOVERNING IMPLEMENTATION/TRANSPORT ADDENDUM — does not reopen unrelated DECISION-010 semantics
+**Canonical implementation:** `phase1d-advanced-filter` @ `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`
+**Verification:** GHA source/build gates sealed; repeated per-app hot apply real-device sealed; direct RULE20 execution deferred for lack of a natural UDP/443 control fixture
+
+### Canonical precedence precision
+
+The canonical engine evaluates:
+
+```text
+1. SYSTEM HARD BYPASS             → BYPASS_SYSTEM
+2. USER APP EXCLUSION             → BYPASS_USER
+3. COMPATIBILITY EXCLUSION        → BYPASS_COMPATIBILITY
+4. PROTECTED DOMAIN               → BYPASS_DOMAIN
+   DOMAIN MODE REJECTION          → BYPASS_DOMAIN_MODE
+5. PROTECTED APP + PORT           → BYPASS_APP_PORT
+6. KNOWN BROWSER                  → MITM_KNOWN_BROWSER
+7. USER APP INCLUDE               → MITM_USER_APP
+8. DYNAMIC BROWSER                → MITM_DYNAMIC_BROWSER
+9. NO MATCH                       → BYPASS_DEFAULT
+```
+
+The compatibility and domain-mode rows are a documentation precision correction
+for already accepted runtime behavior. They are not new behavior introduced by
+this addendum.
+
+### HTTPS transport invariant
+
+An effective MITM decision must also be transport-inspectable.
+
+For traffic that traverses the firestack connection path:
+
+```text
+existing firewall block?
+    YES → preserve existing firewall result
+
+otherwise:
+active HTTPS runtime snapshot?
+    NO → preserve ordinary firewall result
+
+otherwise:
+UDP destination port 443?
+    NO → preserve ordinary firewall result
+
+otherwise:
+InspectionPolicyEngine result
+    BYPASS → preserve ordinary firewall result
+    MITM   → dedicated RULE20 stall
+```
+
+`RULE20` exists only to stop an MITM-eligible UDP/443 attempt so the application
+can retry HTTPS over an inspectable TCP path.
+
+This rule:
+
+* does not replace ordinary firewall precedence;
+* does not reuse RULE6;
+* does not hardcode browser package names;
+* does not use the donor `quic_pkg_exclusions.txt` file as its decision source;
+* reuses the exact immutable policy snapshot installed in `LocalHttpsProxy`.
+
+### Repeated per-app hot-apply semantics
+
+Per-app ON/OFF writes mutate the HTTPS included/excluded package preferences.
+
+Two consecutive changes may target the same preference key. A
+`MutableStateFlow<String>` suppresses an assignment equal to its current value,
+so the original fixed reason string could lose a legitimate second restart
+event.
+
+Canonical N9 uses a process-local monotonic sequence:
+
+```text
+httpsInspectionAppPolicy[<sequence>]: <preference-key>
+```
+
+Each real per-app preference event therefore publishes a distinct StateFlow
+value.
+
+The existing 3000 ms debounce remains intentional. Rapid changes may collapse
+to one final VPN rebuild because the rebuilt VPN consumes the latest persisted
+policy state.
+
+### Verification closure
+
+Source/build verification:
+
+```text
+temporary verification head = 7c9408616aef8120356b4d4b06c6161abb21030d
+GHA run                    = 34046896707
+transport tests            = 11/11 PASS
+fdroidFullDebug compile    = PASS
+fdroidFullDebug assemble   = PASS
+artifact ID                = 9993434969
+```
+
+The temporary verification workflow is not part of canonical history.
+
+Canonical commit contains exactly the five verified implementation/test files:
+
+```text
+InspectionTransportPolicy.kt
+InspectionTransportPolicyTest.kt
+BraveVPNService.kt
+FirewallRuleset.kt
+strings.xml
+```
+
+### Real-device per-app hot-apply closure
+
+Mi A1 / Android 16 proved:
+
+```text
+browser ON
+→ ON→OFF
+→ distinct app-policy restart event
+→ VPN rebuilt
+→ public certificate
+
+browser OFF
+→ OFF→ON
+→ second distinct app-policy restart event
+→ VPN rebuilt without manual Protection restart
+→ RethinkDNS Root CA
+→ MITM_KNOWN_BROWSER
+→ TLS MITM tunnels
+```
+
+The Rethink process PID remained alive; this is a VPN hot rebuild, not a process
+restart.
+
+### RULE20 device-verification status
+
+Direct RULE20 execution remains deferred, not failed.
+
+Natural control traffic produced zero qualifying UDP/443 flows for:
+
+```text
+Chrome
+YouTube
+YouTube Music
+Google Play Store
+```
+
+TikTok, AliExpress, and Shadow Fight Arena donor-preset fixture candidates were
+not installed.
+
+YouTube separately proved that explicit non-browser opt-in reaches
+`MITM_USER_APP`, but its captured traffic did not produce a qualifying UDP/443
+flow, so RULE20 could not be exercised.
+
+No source or GHA failure is inferred from absence of a runtime stimulus.
+
+Future direct RULE20 device verification requires a fixture that first proves a
+real control flow containing the same connection metadata:
+
+```text
+uid=<fixture uid>
+destination port=443
+protocol=UDP
+```
+
+Only after that control exists may absence of RULE20 in the corresponding
+MITM-eligible ON arm be treated as a transport-enforcement failure.
+
+### Closure
+
+```text
+N9_CANONICAL_INTEGRATION_SEALED=YES
+N9_PER_APP_HOT_APPLY_SOURCE_GHA_SEALED=YES
+N9_PER_APP_HOT_APPLY_DEVICE_SEALED=YES
+N9_TRANSPORT_POLICY_SOURCE_GHA_SEALED=YES
+N9_RULE20_DEVICE_EXECUTION=DEFERRED_NO_NATURAL_UDP443_FIXTURE
+N9_RULE20_DEVICE_FAILURE_PROVEN=NO
+```

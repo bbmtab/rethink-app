@@ -330,3 +330,178 @@ N4E_DEVICE_TESTING_COMPLETE=YES
 
 No additional N4E device test is required unless subsequent implementation
 changes invalidate this evidence.
+---
+
+## 9. N9 Per-App Hot-Apply + Transport Verification Closure (2026-09-07)
+
+This is a later evidence addendum. Historical DV1–DV5 above remains preserved
+as historical protocol and must not be silently rewritten.
+
+### Canonical provenance
+
+```text
+branch = phase1d-advanced-filter
+HEAD   = a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82
+commit = feat(https): enforce inspection transport policy
+```
+
+Canonical transport/hot-apply implementation consists of the verified blobs for:
+
+```text
+InspectionTransportPolicy.kt
+InspectionTransportPolicyTest.kt
+BraveVPNService.kt
+FirewallRuleset.kt
+strings.xml
+```
+
+The temporary verification workflow was excluded from canonical.
+
+### GHA seal
+
+```text
+run ID       = 34046896707
+transport tests = 11
+passed       = 11
+failed       = 0
+errors       = 0
+skipped      = 0
+compile      = PASS
+assemble     = PASS
+artifact ID  = 9993434969
+GHA APK SHA256 =
+ed97f2e92b39febcf1b578d55ea40c8e8d1715e7aedcc5513512a23d462de98f
+```
+
+### APK re-sign evidence correction
+
+The GHA APK and locally re-signed APK are intentionally different full files:
+
+```text
+GHA APK SHA256 =
+ed97f2e92b39febcf1b578d55ea40c8e8d1715e7aedcc5513512a23d462de98f
+
+local re-signed APK SHA256 =
+ea8a04bd2ed947152f5c19baa6815fb94a0fff8ecb38304ee35bb558aa98ae34
+```
+
+Their 1532 non-signature ZIP payload entries were byte-identical:
+
+```text
+non-signature name mismatches    = 0
+non-signature content mismatches = 0
+```
+
+Installed/local signer certificate:
+
+```text
+046E80FAFF0342F30D0FBC0B08DAF8AFB987B368545C81E8672C34C37F24D114
+```
+
+The signer certificate value must be obtained with
+`apksigner verify --print-certs`; it must not be confused with the full APK file
+SHA256.
+
+### R4D repeated-toggle device seal
+
+Device:
+
+```text
+Xiaomi Mi A1 / tissot
+Android 16 / SDK 36
+serial 3595381c0804
+```
+
+Controlled Brave policy sequence:
+
+```text
+baseline ON
+→ ON→OFF
+→ httpsInspectionAppPolicy[1]
+→ VPN hot rebuild
+→ public certificate
+
+OFF
+→ OFF→ON
+→ httpsInspectionAppPolicy[2]
+→ second VPN hot rebuild
+→ no manual Protection restart
+→ RethinkDNS Root CA
+→ MITM_KNOWN_BROWSER
+→ TLS MITM tunnels
+```
+
+The Rethink PID remained unchanged through both toggles. N9 therefore treats
+this as a VPN hot rebuild, not a process restart.
+
+```text
+N9_REPEATED_TOGGLE_EVENT_FIX_DEVICE_PROVEN=YES
+N9_BROWSER_OFF_PUBLIC_CERT_DEVICE_PROVEN=YES
+N9_BROWSER_RESTORED_ON_MITM_DEVICE_PROVEN=YES
+```
+
+### RULE20 direct execution status
+
+The source/GHA transport implementation is sealed, but direct RULE20 execution
+is device-verification deferred.
+
+Natural control attempts produced no qualifying UDP/443 flow for:
+
+```text
+Chrome          0
+YouTube         0
+YouTube Music   0
+Google Play     0
+```
+
+The donor-preset candidates TikTok, AliExpress, and Shadow Fight Arena were not
+installed.
+
+YouTube did separately produce `MITM_USER_APP` decisions after explicit opt-in,
+demonstrating the per-app non-browser MITM policy path, but its captured traffic
+did not produce a real qualifying UDP/443 flow.
+
+Therefore:
+
+```text
+RULE20_SOURCE_GHA_SEALED=YES
+RULE20_DEVICE_EXECUTION_PROVEN=NO
+RULE20_DEVICE_FAILURE_PROVEN=NO
+RULE20_DEVICE_STATUS=DEFERRED_NO_NATURAL_UDP443_FIXTURE
+```
+
+### Future RULE20 device gate
+
+Do not hunt arbitrary applications indefinitely.
+
+Retry this gate only when a fixture first proves a real control connection whose
+same logical metadata identifies:
+
+```text
+uid=<fixture uid>
+destPort=443
+protocol=17
+```
+
+with HTTPS inspection OFF for that fixture.
+
+Only then enable inspection for the same fixture and require:
+
+```text
+effective inspection reason = MITM_*
+HTTPS inspection force-TCP log
+FirewallRuleset.RULE20 / Rule #20
+```
+
+If the ON arm contains a real MITM-eligible UDP/443 flow but lacks the force-TCP
+and RULE20 evidence, that is a valid transport-enforcement failure.
+
+Absence of a control UDP/443 stimulus is a blocked verification condition, not
+a RULE20 failure.
+
+### Procedural note
+
+One R4E3-R1 fixture run used `force-stop` despite the relay prohibition. That
+procedural violation did not create a positive RULE20 result and does not change
+the zero-UDP/443 blocker classification. Future fixture verification must obey
+the explicit no-force-stop constraint unless separately authorized.

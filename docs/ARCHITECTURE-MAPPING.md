@@ -2,20 +2,29 @@
 
 This artifact defines the architectural blueprint and packet flow tracing for integrating local **HTTPS MITM Inspection** into RethinkDNS. It incorporates critical feedback regarding `setHttpProxy` limitations, HTTP/2 ALPN, and response compression.
 
-> **Implementation status (2026-09-04):** CA, local proxy, FilterEngine,
-> routing integration, unified Plus UI, filter-source management, and the N4E
-> HTTPS eligibility/runtime policy are implemented in the verified local
-> working tree. Dynamic-browser discovery, policy resolution, TLS MITM, bypass
-> branches, and package-lifecycle inventory reconciliation are device-verified
-> on the Mi A1. Final branch integration/commit remains pending; this status
-> does not claim that committed HEAD `43e02cd0956d6aefc487eac0d534eaefa99c769d`
-> already contains every verified working-tree file.
+> **Implementation status (2026-09-07):** CA, LocalHttpsProxy, FilterEngine,
+> routing integration, unified Plus UI, per-app HTTPS policy management, N4E
+> eligibility/runtime policy, repeated-toggle hot apply, and policy-driven
+> UDP/443 force-TCP enforcement are canonical on `phase1d-advanced-filter` at
+> `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`. Dynamic-browser policy,
+> browser/general-app MITM and bypass branches, per-app OFF→ON hot rebuild, and
+> package-lifecycle inventory are real-device verified on Mi A1 / Android 16.
+> `InspectionTransportPolicy` / RULE20 passed source, targeted tests, compile,
+> and assemble gates; direct RULE20 device execution remains deferred because no
+> available natural control fixture emitted qualifying UDP/443.
 
 ---
 
 ## 1. Packet Flow Routing (Normal vs. Inspected)
 
 In a non-root environment, we leverage Android's `VpnService.Builder` capability to declare a system-wide HTTP proxy that routes HTTP and HTTPS connections directly to our local proxy server. Un-inspected traffic (UDP, non-HTTP/HTTPS TCP, or traffic from apps explicitly bypassed) continues to route via the Go-based `firestack` tunnel interface.
+
+UDP continues through the firestack path. For UDP destination port 443, the
+ordinary firewall result is evaluated first. If that result is allowed and an
+active HTTPS policy snapshot says the connection is MITM-eligible,
+`InspectionTransportPolicy` returns the dedicated `RULE20` stall result so the
+application may retry over TCP. BYPASS decisions, non-UDP traffic, non-443 UDP,
+and pre-existing firewall blocks retain their ordinary result.
 
 ### Packet Flow Diagram â€” Overall Architecture
 
@@ -173,17 +182,21 @@ Responsibility boundaries (DECISION-010):
 | `ResourceProtectionPolicy` | Post-MITM only: body-size thresholds; downgrades MITM_FULL → MITM_STREAM_ONLY. Never produces BYPASS decisions. |
 | `InspectionPolicyEngine` | Pre-MITM orchestrator: resolves precedence, returns (BYPASS | MITM, reason). Must not consult body size. |
 
-**Precedence order (resolved top-down, hard bypass always wins):**
+**Precedence order:**
+
 1. `SYSTEM_HARD_BYPASS` → `BYPASS_SYSTEM`
 2. `USER_APP_EXCLUSION` → `BYPASS_USER`
-3. `PROTECTED_DOMAIN` → `BYPASS_DOMAIN`
-4. `PROTECTED_APP_AND_PORT` → `BYPASS_APP_PORT`
-5. `KNOWN_BROWSER_INSTALLED` → `MITM_KNOWN_BROWSER`
-6. `USER_APP_INCLUDE` → `MITM_USER_APP`
-7. `DYNAMIC_BROWSER_DETECTED` → `MITM_DYNAMIC_BROWSER`
-   (capability classifier: browser-app capability OR both HTTP and HTTPS probes;
-   package-manager queries are not restricted by `MATCH_DEFAULT_ONLY`)
-8. No match → `BYPASS`
+3. `COMPATIBILITY_EXCLUSION` → `BYPASS_COMPATIBILITY`
+4. `PROTECTED_DOMAIN` → `BYPASS_DOMAIN`
+   or domain-mode rejection → `BYPASS_DOMAIN_MODE`
+5. `PROTECTED_APP_AND_PORT` → `BYPASS_APP_PORT`
+6. `KNOWN_BROWSER_INSTALLED` → `MITM_KNOWN_BROWSER`
+7. `USER_APP_INCLUDE` → `MITM_USER_APP`
+8. `DYNAMIC_BROWSER_DETECTED` → `MITM_DYNAMIC_BROWSER`
+9. No match → `BYPASS_DEFAULT`
+
+The compatibility/domain-mode rows reflect canonical runtime behavior already
+accepted by N4E; this documentation sync does not introduce new precedence.
 
 `USER_APP_EXCLUSION` remains above all browser eligibility. Therefore known and
 dynamic browsers are inspected by default only when they are not explicitly
@@ -201,6 +214,64 @@ excluded. Dynamic browsers do not require a separate user-enabled set.
   as ordinary user-editable exclusions.
 - Dynamic browser discovery is best-effort: results depend on Android package
   visibility. Known-registry browsers are not affected by an empty discovery result.
+
+### A+1. InspectionTransportPolicy / UDP443 Boundary (N9)
+
+HTTPS eligibility and transport inspectability are separate questions but reuse
+the same policy authority.
+
+```text
+firestack flow
+    ↓
+ConnTrackerMetaData
+(uid / package / host / port / protocol)
+    ↓
+ordinary firewall()
+    ↓
+existing result grounded?
+    ├── YES → preserve it
+    └── NO
+         ↓
+inspectionRuntimePolicySnapshot
+    ├── null → preserve ordinary result
+    └── active
+         ↓
+InspectionTransportPolicy.evaluate()
+    ├── TCP or non-443 UDP → no transport override
+    └── UDP/443
+          ↓
+     InspectionPolicyEngine
+       ├── BYPASS → no override
+       └── MITM
+            ↓
+        FirewallRuleset.RULE20
+        action = stall
+            ↓
+        app may retry TCP
+            ↓
+        system HTTP proxy / LocalHttpsProxy
+```
+
+The runtime snapshot is published only after `LocalHttpsProxy` starts and
+`VpnService.Builder.setHttpProxy()` succeeds. It is cleared while the HTTPS
+runtime is rebuilt and on service destroy/revoke so the packet path cannot use
+stale policy.
+
+`RULE20` is lower priority than an already-grounded ordinary firewall result.
+It is a dedicated HTTPS Inspection transport result and is not RULE6.
+
+The implementation is package-agnostic. Browser packages and donor preset
+QUIC lists
+are not hardcoded into this transport layer. The decision remains
+`InspectionPolicyEngine.evaluate(...)`.
+
+Targeted transport tests cover known browser, dynamic browser, explicit user
+include, user/system/compatibility/domain/default bypass, TCP/443, and
+non-443 UDP behavior.
+
+Direct RULE20 device execution is currently verification-deferred because no
+available natural fixture emitted a qualifying control UDP/443 flow. This does
+not alter the architecture above.
 
 ### A++. Installed-App Inventory Lifecycle Boundary (N4E)
 

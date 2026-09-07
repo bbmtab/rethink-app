@@ -1,7 +1,15 @@
 # RethinkDNS — Unified UI Architecture
 
 > **Purpose:** Complete map of RethinkDNS UI surface, organized by feature modules and user flows. This is our own architecture — no external references. Use as the single source of truth for Phase 1+ UI work (Plus tab redesign, MITM/adblock integration, auto-restart UX, etc.).
-> **Current state (2026-09-04):** Plus-tab consolidation, auto-restart, filter-source management, and the N4E HTTPS eligibility/runtime policy are device-verified locally. Known and capability-detected browsers are default-ON unless explicitly excluded. Final branch integration remains pending; dedicated final per-app HTTPS management UI must reuse the existing Rethink installed-app inventory.
+> **Current state (2026-09-07):** Plus-tab consolidation, filter-source
+> management, HTTPS master persistence, per-app HTTPS policy management,
+> system-hard-bypass rendering, and repeated-toggle VPN hot apply are canonical.
+> The per-app HTTPS surface reuses Rethink's existing installed-app inventory;
+> no second app database exists. Known and dynamically detected browsers are ON
+> unless explicitly excluded, ordinary applications are OFF unless explicitly
+> included, and system-hard-bypass rows are immutable OFF. Canonical code is
+> `phase1d-advanced-filter` @
+> `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`.
 
 ---
 
@@ -46,7 +54,7 @@
 
 ## ➕ PLUS — "RETHINK PLUS" HUB (KEY REDESIGN TARGET)
 
-### Current state at `ca797a1d179b060b602c26664814111b640ffd8a` (2026-08-27)
+### Current state at `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82` (2026-09-07)
 | Flavor | Fragment | Status |
 |--------|----------|--------|
 | **all (fdroid / full / play / website)** | `RethinkPlusFragment.kt` (full flavor — hoisted from fdroid 1b; R100) | **Filters (MITM/adblock)** — HTTPS Inspection / Advanced Filtering / Exclusions |
@@ -55,12 +63,24 @@ Custom filter-source management supports add, edit, remove, enable, and disable
 through the existing transaction path. The targeted closure passed 102/102 JUnit
 tests, and add/edit/remove/persistence behavior was exercised on the Mi A1.
 
-The N4E HTTPS eligibility/runtime policy is now device-verified locally.
-Controlled tests proved general-app default bypass, compatibility bypass, and
-dynamic-browser MITM, including RethinkDNS CA certificate presentation. Final
-branch integration is still pending. The dedicated final per-app HTTPS
-management UI remains follow-up UI work and must reuse Rethink's existing
-installed-app inventory rather than creating a duplicate app database.
+The HTTPS eligibility/runtime and per-app management stack is canonical.
+Controlled N4E tests proved general-app default bypass, compatibility bypass,
+and dynamic-browser MITM. N9 added the production per-app UI and state
+transactions using the existing installed-app inventory.
+
+The dedicated HTTPS application list reuses `AppListActivity`,
+`AppInfoViewModel`, Room paging, and the existing package inventory. HTTPS
+policy is layered through `HttpsInspectionAppListAdapter` and
+`InspectionAppPolicyController`; it does not create a second application
+database.
+
+Known and dynamic browsers render ON unless explicitly excluded. Ordinary
+applications render OFF unless explicitly included. System-hard-bypass rows
+render immutable OFF.
+
+Repeated OFF→ON device testing proved that policy changes hot-rebuild the VPN
+without killing the process and restore the RethinkDNS MITM certificate when
+browser inspection returns ON.
 
 ```
 Note: `RethinkPlusDashboardFragment.kt` (RPN subscription UI) and `ServerSelectionFragment.kt` (RPN server picker) are deleted from the working tree (executed pivot 2026-08-09; supervisor-audited 2026-08-10). The fdroid `RethinkPlusFragment.kt` was hoisted to `full/` (R100). Play/website `RethinkPlusFragment.kt` (billing UI) is also deleted; the Plus surface is MITM/adblock-only for all flavors.
@@ -139,7 +159,7 @@ Plus (bottom nav tab) → RethinkPlusFragment (full flavor, hoisted fdroid→ful
 | CA status card | `CertificateAuthority.isCaInstalled()` polling | Live badge + actions |
 | CA install flow | `CertificateAuthority` + `KeyChain`/`ACTION_VIEW` | System CA installer |
 | HTTPS toggle | `persistentState.httpsInspectionEnabled` | Master on/off (disabled until CA installed) |
-| Per-app HTTPS policy | **FOLLOW-UP UI — reuse existing Rethink Apps inventory** | Known/dynamic browsers are ON unless excluded; non-browser apps remain default-OFF unless explicitly included |
+| Per-app HTTPS policy | `AppListActivity` mode `https_exclusions` + `HttpsInspectionAppListAdapter` + existing `AppInfoViewModel`/Room inventory | Known/dynamic browsers ON unless excluded; other apps OFF unless explicitly included; system-hard-bypass rows immutable OFF |
 | Exclusions | **NEW** | Domains/apps to skip MITM |
 
 ### CA Install Mechanics (preserve, just relocate)
@@ -160,10 +180,29 @@ installCertLauncher.launch(intent)
 // 4. Poll isCaInstalled() every 1s → update badge ✅ INSTALLED → enable HTTPS toggle
 ```
 
-### Auto-restart UX (new requirement)
-- User flips HTTPS toggle ON → dialog: **"App will restart to apply change"** → OK → process restart
-- User flips HTTPS toggle OFF → same dialog → restart
-- **Any non-hot-pluggable setting follows this pattern**
+### HTTPS policy hot-apply UX
+
+HTTPS policy changes use a VPN configuration rebuild, not an Android process
+restart.
+
+* Master HTTPS state and per-app inclusion/exclusion state are persisted before
+  runtime activation.
+* `BraveVPNService` observes the relevant preference changes and publishes a
+  `vpnRestartTrigger` event.
+* The existing restart flow is debounced by 3000 ms and rebuilds the VPN using
+  the latest persisted configuration.
+* Per-app events use
+  `httpsInspectionAppPolicy[<sequence>]: <key>` so two consecutive changes to
+  the same preference key cannot be lost to equal-value
+  `MutableStateFlow` conflation.
+* The Rethink process PID is expected to remain alive during this hot rebuild.
+* Browser OFF stores the exclusion and results in public TLS.
+* Browser ON clears the exclusion and restores browser-default MITM eligibility.
+* Real-device R4D verification proved OFF→ON restoration to
+  `RethinkDNS Root CA` without a manual Protection restart.
+
+Historical documentation that expected `pid_post != pid_pre` applies to an older
+restart design and is not the N9 hot-apply contract.
 
 ---
 
