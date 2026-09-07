@@ -249,11 +249,6 @@ class ProxySettingsActivity : BaseActivity(R.layout.fragment_proxy_configure) {
                 !b.settingsActivityHttpProxySwitch.isChecked
         }
 
-        b.settingsActivityHttpsInspectionContainer.setOnClickListener {
-            val intent = Intent(this, CertificateSetupActivity::class.java)
-            startActivity(intent)
-        }
-
         b.settingsActivityHttpProxySwitch.setOnCheckedChangeListener {
             _: CompoundButton,
             checked: Boolean ->

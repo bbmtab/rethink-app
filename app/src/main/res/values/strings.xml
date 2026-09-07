@@ -2550,8 +2550,6 @@
     <string name="plus_advanced_html_desc">Remove/collapse page elements via HTML rules (pending backend binding)</string>
     <string name="plus_advanced_filtering_unavailable">Pending FilterEngine toggle-key binding — switches disabled until the backend preference keys exist</string>
 
-    <string name="plus_exclusions_domains">Domain Exclusions</string>
-    <string name="plus_exclusions_domains_desc">Skip MITM for these domains (certificate pinning, banking, etc.)</string>
     <string name="plus_exclusions_manage">Manage</string>
     <string name="plus_exclusions_apps">App Exclusions</string>
     <string name="plus_exclusions_apps_desc">Skip routing these apps through MITM entirely</string>
@@ -2614,7 +2612,7 @@
     <string name="plus_advanced_filtering_desc">Choose filter lists by category to block ads, trackers, annoyances, and threats</string>
     <string name="plus_advanced_filtering_title">Advanced Filtering</string>
     <string name="plus_exclusions_title">Exclusions</string>
-    <string name="plus_exclusions_desc">Configure domains or apps to exclude from HTTPS inspection</string>
+    <string name="plus_exclusions_desc">Configure apps to exclude from HTTPS inspection</string>
 
     <string name="plus_ca_install_success">CA certificate installed successfully</string>
     <string name="plus_ca_install_error">Failed to install CA certificate: %s</string>

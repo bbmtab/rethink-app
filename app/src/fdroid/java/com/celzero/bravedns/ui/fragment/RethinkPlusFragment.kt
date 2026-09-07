@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Sections:
  * 1. HTTPS Inspection — master toggle, CA status badge, CA actions (Install/Re-install/Export)
  * 2. Advanced Filtering — read-only aggregate summary of enabled filter sources + Manage Filters action
- * 3. Exclusions — domain exclusions, app exclusions
+ * 3. Exclusions — app exclusions
  *
  * The DNS Blocklist → MITM Bridge card and the obsolete cosmetic/scriptlet/procedural/CSP/HTML
  * filtering toggles are retired in B5 Slice-1. The bridge is superseded by the FilterSource
@@ -327,21 +327,9 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     // ========== EXCLUSIONS SECTION ==========
 
     private fun initExclusionsSection() {
-        b.btnDomainExclusions.setOnClickListener {
-            openDomainExclusions()
-        }
-
         b.btnAppExclusions.setOnClickListener {
             openAppExclusions()
         }
-    }
-
-    private fun openDomainExclusions() {
-        // Navigate to domain exclusions - reuse existing pattern
-        val intent = Intent(requireContext(), com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity::class.java)
-        intent.putExtra(com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.INTENT, com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.FragmentLoader.LOCAL.ordinal)
-        // Could add a flag to open directly to exclusions
-        startActivity(intent)
     }
 
     private fun openAppExclusions() {
