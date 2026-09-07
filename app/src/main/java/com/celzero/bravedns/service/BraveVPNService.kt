@@ -75,7 +75,9 @@ import com.celzero.bravedns.core.proxy.policy.InspectionBrowserRuntimePackageRes
 import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluator
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetLoader
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicyPresetSource
+import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshot
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshotFactory
+import com.celzero.bravedns.core.proxy.policy.InspectionTransportPolicy
 import com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepository
 import com.celzero.bravedns.data.AppConfig
 import com.celzero.bravedns.data.ConnTrackerMetaData
@@ -207,6 +209,14 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     @Volatile
     private var lastAppliedAdvancedFilterGeneration: Long = -1L
     private val advancedFilterApplyMutex = Mutex()
+
+    // The exact immutable policy snapshot currently installed in LocalHttpsProxy.
+    // Transport enforcement must reuse this snapshot rather than rebuilding policy.
+    @Volatile
+    private var inspectionRuntimePolicySnapshot: InspectionPolicySnapshot? = null
+
+    private val inspectionTransportPolicy =
+        InspectionTransportPolicy()
 
     // used mostly for service to adapter creation and updates
     private val serializer: CoroutineDispatcher = Daemons.make("vpnser")
@@ -1899,6 +1909,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     private val vpnRestartTrigger: MutableStateFlow<String> = MutableStateFlow("startVpn")
+    private val httpsInspectionAppPolicyRestartSequence = AtomicInteger(0)
     @OptIn(FlowPreview::class)
     private fun observeVpnRestartRequests() {
         vpnScope.launch {
@@ -2292,8 +2303,10 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
             PersistentState.HTTPS_INSPECTION_EXCLUDED_PACKAGES,
             PersistentState.HTTPS_INSPECTION_INCLUDED_PACKAGES -> {
                 if (persistentState.httpsInspectionEnabled) {
+                    val sequence = httpsInspectionAppPolicyRestartSequence.incrementAndGet()
+
                     vpnRestartTrigger.value =
-                        "httpsInspectionAppPolicy: $key"
+                        "httpsInspectionAppPolicy[$sequence]: $key"
                 }
             }
 
@@ -3642,6 +3655,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onDestroy() {
+        inspectionRuntimePolicySnapshot = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         if (persistentState.firewallBubbleEnabled) {
@@ -3879,6 +3893,9 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
             s.append("mtu: $mtu\n   has4: $has4\n   has6: $has6\n   noRoutes: $noRoutes\n   dnsMode? $dnsMode\n   firewallMode? $firewallMode")
             builderStats = s.toString()
 
+            // Do not expose a stale transport policy while HTTPS runtime is being rebuilt.
+            inspectionRuntimePolicySnapshot = null
+
             if (persistentState.httpsInspectionEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
                 try {
                     // 1. Load rules into FilterEngine
@@ -4004,7 +4021,10 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                             8443
                         )
                     builder.setHttpProxy(proxyInfo)
-                    
+
+                    // Publish only after the proxy was started and registered successfully.
+                    inspectionRuntimePolicySnapshot = policySnapshot
+
                     Logger.i(LOG_TAG_VPN, "HTTPS Inspection Proxy started and registered with VPN interface")
                 } catch (pe: Exception) {
                     Logger.e(LOG_TAG_VPN, "Failed to start or register LocalHttpsProxy: ${pe.message}", pe)
@@ -6304,7 +6324,19 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         isSplApp: Boolean = false,
         rinr: Boolean
     ) {
-        val rule = firewall(metadata, domains, anyRealIpBlocked, isSplApp, rinr)
+        val baseRule =
+            firewall(
+                metadata,
+                domains,
+                anyRealIpBlocked,
+                isSplApp,
+                rinr
+            )
+        val rule =
+            applyInspectionTransportPolicy(
+                metadata,
+                baseRule
+            )
 
         metadata.blockedByRule = rule.id
         metadata.blocklists = blocklists
@@ -6316,6 +6348,54 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
 
         logd("firewall-rule $rule on conn: ${metadata.connId}; $metadata")
         return
+    }
+
+    private suspend fun applyInspectionTransportPolicy(
+        metadata: ConnTrackerMetaData,
+        baseRule: FirewallRuleset
+    ): FirewallRuleset {
+        // Existing firewall blocks always take precedence.
+        if (FirewallRuleset.ground(baseRule)) {
+            return baseRule
+        }
+
+        // No HTTPS runtime means there is no transport constraint to enforce.
+        val policySnapshot =
+            inspectionRuntimePolicySnapshot
+                ?: return baseRule
+
+        val packageNames =
+            FirewallManager
+                .getPackageNamesByUid(metadata.uid)
+                .toSet()
+
+        val transportResult =
+            inspectionTransportPolicy.evaluate(
+                packageNames = packageNames,
+                uid = metadata.uid,
+                host = metadata.query.orEmpty(),
+                destinationPort = metadata.destPort,
+                isUdp =
+                    metadata.protocol ==
+                        Protocol.UDP.protocolType,
+                policy = policySnapshot
+            )
+
+        if (!transportResult.forceTcp) {
+            return baseRule
+        }
+
+        Logger.i(
+            LOG_TAG_VPN,
+            "HTTPS inspection force-TCP: " +
+                "uid=${metadata.uid}, " +
+                "packages=$packageNames, " +
+                "host=${metadata.query.orEmpty()}, " +
+                "port=${metadata.destPort}, " +
+                "reason=${transportResult.inspectionResult?.reason}"
+        )
+
+        return FirewallRuleset.RULE20
     }
 
     private suspend fun addCidToTrackedCidsToCloseIfNeeded(cid: String, rule: FirewallRuleset) {
@@ -6459,6 +6539,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     override fun onRevoke() {
+        inspectionRuntimePolicySnapshot = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
         // System invokes onRevoke when the user takes an explicit action that
