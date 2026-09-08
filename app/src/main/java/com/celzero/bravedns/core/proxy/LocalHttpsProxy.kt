@@ -36,6 +36,12 @@ object LocalHttpsProxy : KoinComponent {
     private const val TAG = "LocalHttpsProxy"
     private const val DEFAULT_PORT = 8443
 
+    private data class UpstreamConnection(
+        val socket: Socket,
+        val address: InetSocketAddress,
+        val destinationIp: String
+    )
+
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
     private var serverJob: Job? = null
@@ -110,7 +116,8 @@ object LocalHttpsProxy : KoinComponent {
     internal suspend fun evaluateFirewallPolicy(
         clientSocket: Socket,
         host: String,
-        destinationPort: Int
+        destinationPort: Int,
+        destinationIp: String = ""
     ): LocalProxyFirewallResult {
         val evaluator =
             firewallEvaluator
@@ -123,7 +130,8 @@ object LocalHttpsProxy : KoinComponent {
             evaluator.evaluate(
                 clientSocket = clientSocket,
                 host = host,
-                destinationPort = destinationPort
+                destinationPort = destinationPort,
+                destinationIp = destinationIp
             )
         } catch (error: CancellationException) {
             throw error
@@ -245,34 +253,80 @@ object LocalHttpsProxy : KoinComponent {
         return null
     }
 
-    private suspend fun createAndProtectUpstreamSocket(host: String, port: Int): Pair<Socket, InetSocketAddress> {
+    private suspend fun createUpstreamSocket(
+        host: String,
+        port: Int
+    ): UpstreamConnection {
         val proxy = getUpstreamProxy()
         val socket: Socket
         val address: InetSocketAddress
-        
+        val destinationIp: String
+
         if (proxy != null) {
             socket = Socket(proxy)
-            // Use unresolved address to let the proxy resolve DNS and prevent local leaks
+            // Keep the address unresolved: the upstream proxy owns DNS resolution.
             address = InetSocketAddress.createUnresolved(host, port)
+            destinationIp = ""
             logInfo("Upstream connection for $host:$port will route via proxy.")
         } else {
             socket = Socket()
             val resolvedAddress = resolveHostSecurely(host)
-            address = java.net.InetSocketAddress(resolvedAddress, port)
-            logInfo("Upstream connection for $host:$port will route directly via physical interface.")
+            address = InetSocketAddress(resolvedAddress, port)
+            destinationIp = resolvedAddress.hostAddress.orEmpty()
+            logInfo(
+                "Upstream connection for $host:$port will route directly " +
+                    "via physical interface."
+            )
         }
-        
-        val context = appContext
-        if (context != null) {
-            // IMPORTANT: Do NOT call activeNetwork.bindSocket() here.
-            // When VPN is active, activeNetwork may resolve to the VPN virtual interface (tun0).
-            // Binding the upstream socket to tun0 THEN calling protectSocket() creates a routing
-            // contradiction (bind to VPN + bypass VPN simultaneously) → ECONNREFUSED.
-            // The correct sequence is: create plain socket → protectSocket() → connect().
-            // protectSocket() alone is sufficient to route the socket outside the VPN tunnel.
+
+        return UpstreamConnection(
+            socket = socket,
+            address = address,
+            destinationIp = destinationIp
+        )
+    }
+
+    private suspend fun isResolvedDestinationBlocked(
+        clientSocket: Socket,
+        upstreamConnection: UpstreamConnection,
+        host: String,
+        destinationPort: Int
+    ): Boolean {
+        val destinationIp = upstreamConnection.destinationIp
+        if (destinationIp.isEmpty()) {
+            return false
         }
-        com.celzero.bravedns.service.VpnController.protectSocket(socket)
-        return Pair(socket, address)
+
+        val firewallResult =
+            evaluateFirewallPolicy(
+                clientSocket = clientSocket,
+                host = host,
+                destinationPort = destinationPort,
+                destinationIp = destinationIp
+            )
+
+        if (firewallResult.decision == LocalProxyFirewallDecision.ALLOW) {
+            return false
+        }
+
+        try {
+            upstreamConnection.socket.close()
+        } catch (_: Exception) {
+            // Best-effort close of a socket that has not been connected.
+        }
+
+        logInfo(
+            "Local proxy resolved-IP firewall blocked " +
+                "$host:$destinationPort at $destinationIp " +
+                "(reason=${firewallResult.reason})"
+        )
+        sendFirewallBlockResponse(
+            clientSocket = clientSocket,
+            host = host,
+            destinationPort = destinationPort,
+            reason = firewallResult.reason
+        )
+        return true
     }
 
 
@@ -451,7 +505,22 @@ object LocalHttpsProxy : KoinComponent {
             return
         }
 
-        val (upstreamSocket, address) = createAndProtectUpstreamSocket(host, port)
+        val upstreamConnection = createUpstreamSocket(host, port)
+        if (
+            isResolvedDestinationBlocked(
+                clientSocket = clientSocket,
+                upstreamConnection = upstreamConnection,
+                host = host,
+                destinationPort = port
+            )
+        ) {
+            return
+        }
+
+        val upstreamSocket = upstreamConnection.socket
+        val address = upstreamConnection.address
+        com.celzero.bravedns.service.VpnController.protectSocket(upstreamSocket)
+
         try {
             upstreamSocket.soTimeout = 30000
             upstreamSocket.connect(address, 10000)
@@ -1111,7 +1180,21 @@ object LocalHttpsProxy : KoinComponent {
                 return
             }
 
-            val (upstreamSocket, address) = createAndProtectUpstreamSocket(host, port)
+            val upstreamConnection = createUpstreamSocket(host, port)
+            if (
+                isResolvedDestinationBlocked(
+                    clientSocket = clientSocket,
+                    upstreamConnection = upstreamConnection,
+                    host = host,
+                    destinationPort = port
+                )
+            ) {
+                return
+            }
+
+            val upstreamSocket = upstreamConnection.socket
+            val address = upstreamConnection.address
+            com.celzero.bravedns.service.VpnController.protectSocket(upstreamSocket)
             upstreamSocket.connect(address, 10000)
 
             upstreamSocket.use { upstream ->

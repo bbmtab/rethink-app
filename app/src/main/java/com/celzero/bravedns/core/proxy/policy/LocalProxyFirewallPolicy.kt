@@ -16,6 +16,7 @@ fun interface LocalProxyFirewallEvaluator {
     suspend fun evaluate(
         clientSocket: Socket,
         host: String,
-        destinationPort: Int
+        destinationPort: Int,
+        destinationIp: String
     ): LocalProxyFirewallResult
 }

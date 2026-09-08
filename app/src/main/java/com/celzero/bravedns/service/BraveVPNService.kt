@@ -4000,14 +4000,14 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                                 override suspend fun evaluate(
                                     clientSocket: Socket,
                                     host: String,
-                                    destinationPort: Int
+                                    destinationPort: Int,
+                                    destinationIp: String
                                 ): LocalProxyFirewallResult {
                                     val identity =
                                         connectionIdentityResolver.resolve(
                                             clientSocket
                                         )
                                     val uid = identity.uid ?: INVALID_UID
-                                    val destinationIp = ""
                                     val connType =
                                         if (isConnectionMetered(destinationIp)) {
                                             ConnectionTracker.ConnType.METERED

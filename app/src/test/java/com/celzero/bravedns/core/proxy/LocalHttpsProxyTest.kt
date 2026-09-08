@@ -64,7 +64,7 @@ class LocalHttpsProxyTest {
     @Test
     fun testProxyReturnsBadGatewayOnInvalidUpstream() {
         LocalHttpsProxy.setFirewallEvaluator(
-            LocalProxyFirewallEvaluator { _, _, _ ->
+            LocalProxyFirewallEvaluator { _, _, _, _ ->
                 LocalProxyFirewallResult(
                     decision = LocalProxyFirewallDecision.ALLOW,
                     reason = "TEST_ALLOW"
@@ -237,7 +237,7 @@ class LocalHttpsProxyTest {
     fun firewallEvaluatorFailureBlocksByDefault() = runBlocking {
         LocalHttpsProxy.stop()
         LocalHttpsProxy.setFirewallEvaluator(
-            LocalProxyFirewallEvaluator { _, _, _ ->
+            LocalProxyFirewallEvaluator { _, _, _, _ ->
                 throw IllegalStateException("test failure")
             }
         )
@@ -264,7 +264,7 @@ class LocalHttpsProxyTest {
         LocalHttpsProxy.stop()
         val cancellation = CancellationException("cancelled")
         LocalHttpsProxy.setFirewallEvaluator(
-            LocalProxyFirewallEvaluator { _, _, _ ->
+            LocalProxyFirewallEvaluator { _, _, _, _ ->
                 throw cancellation
             }
         )
@@ -290,10 +290,17 @@ class LocalHttpsProxyTest {
     fun blockedConnectReturnsForbiddenBeforeUpstreamCreation() {
         var evaluatedHost: String? = null
         var evaluatedPort: Int? = null
+        var evaluatedDestinationIp: String? = null
+
         LocalHttpsProxy.setFirewallEvaluator(
-            LocalProxyFirewallEvaluator { _, host, port ->
+            LocalProxyFirewallEvaluator {
+                _,
+                host,
+                port,
+                destinationIp ->
                 evaluatedHost = host
                 evaluatedPort = port
+                evaluatedDestinationIp = destinationIp
                 LocalProxyFirewallResult(
                     decision = LocalProxyFirewallDecision.BLOCK,
                     reason = "RULE2E"
@@ -328,6 +335,82 @@ class LocalHttpsProxyTest {
 
         assertEquals("blocked.example", evaluatedHost)
         assertEquals(443, evaluatedPort)
+        assertEquals("", evaluatedDestinationIp)
+    }
+
+    @Test
+    fun resolvedIpBlockReturnsForbiddenBeforeSocketProtection() {
+        val evaluatedDestinationIps = mutableListOf<String>()
+
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator {
+                _,
+                _,
+                _,
+                destinationIp ->
+                evaluatedDestinationIps.add(destinationIp)
+                if (destinationIp == "127.0.0.1") {
+                    LocalProxyFirewallResult(
+                        decision = LocalProxyFirewallDecision.BLOCK,
+                        reason = "Rule #2"
+                    )
+                } else {
+                    LocalProxyFirewallResult(
+                        decision = LocalProxyFirewallDecision.ALLOW,
+                        reason = "Rule #0"
+                    )
+                }
+            }
+        )
+
+        io.mockk.mockkObject(
+            com.celzero.bravedns.service.VpnController
+        )
+        io.mockk.every {
+            com.celzero.bravedns.service.VpnController
+                .protectSocket(any())
+        } returns Unit
+
+        try {
+            LocalHttpsProxy.start(TEST_PORT)
+            Thread.sleep(150)
+
+            Socket("localhost", TEST_PORT).use { socket ->
+                socket.getOutputStream().apply {
+                    write(
+                        (
+                            "CONNECT 127.0.0.1:59998 HTTP/1.1\r\n" +
+                                "Host: 127.0.0.1:59998\r\n\r\n"
+                        ).toByteArray()
+                    )
+                    flush()
+                }
+
+                val responseLine =
+                    BufferedReader(
+                        InputStreamReader(socket.getInputStream())
+                    ).readLine()
+
+                assertEquals(
+                    "HTTP/1.1 403 Forbidden",
+                    responseLine
+                )
+            }
+
+            assertEquals(
+                listOf("", "127.0.0.1"),
+                evaluatedDestinationIps
+            )
+            io.mockk.verify(exactly = 0) {
+                com.celzero.bravedns.service.VpnController
+                    .protectSocket(any())
+            }
+        } finally {
+            LocalHttpsProxy.stop()
+            io.mockk.unmockkObject(
+                com.celzero.bravedns.service.VpnController
+            )
+        }
     }
 
     @Test
@@ -355,7 +438,7 @@ class LocalHttpsProxyTest {
             }
 
         LocalHttpsProxy.setFirewallEvaluator(
-            LocalProxyFirewallEvaluator { _, _, _ ->
+            LocalProxyFirewallEvaluator { _, _, _, _ ->
                 LocalProxyFirewallResult(
                     decision = LocalProxyFirewallDecision.BLOCK,
                     reason = "RULE2H"
