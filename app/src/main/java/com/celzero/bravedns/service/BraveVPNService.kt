@@ -4045,11 +4045,26 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                                                 persistentState
                                                     .routeRethinkInRethink
                                         )
+                                    val isBlocked = FirewallRuleset.ground(rule)
+                                    metadata.isBlocked = isBlocked
+                                    metadata.blockedByRule = rule.id
+
+                                    if (isBlocked) {
+                                        metadata.proxyDetails = Backend.Block
+                                        if (uid == rethinkUid) {
+                                            netLogTracker.writeRethinkLog(metadata)
+                                        } else {
+                                            netLogTracker.writeIpLog(metadata)
+                                        }
+                                        logd(
+                                            "local proxy firewall: persisted blocked connection " +
+                                                "${metadata.connId}, uid=$uid, host=$host, " +
+                                                "destinationIp=$destinationIp, rule=${rule.id}"
+                                        )
+                                    }
                                     return LocalProxyFirewallResult(
                                         decision =
-                                            if (
-                                                FirewallRuleset.ground(rule)
-                                            ) {
+                                            if (isBlocked) {
                                                 LocalProxyFirewallDecision.BLOCK
                                             } else {
                                                 LocalProxyFirewallDecision.ALLOW
