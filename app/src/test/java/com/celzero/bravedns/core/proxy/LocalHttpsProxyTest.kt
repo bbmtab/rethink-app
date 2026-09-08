@@ -5,6 +5,9 @@ import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluato
 import com.celzero.bravedns.core.proxy.policy.InspectionConnectionIdentity
 import com.celzero.bravedns.core.proxy.policy.InspectionDecision
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshot
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallDecision
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallEvaluator
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallResult
 import kotlinx.coroutines.*
 import org.junit.After
 import org.junit.Assert.*
@@ -36,6 +39,7 @@ class LocalHttpsProxyTest {
 
     @After
     fun tearDown() {
+        LocalHttpsProxy.proxyListener = null
         LocalHttpsProxy.stop()
     }
 
@@ -59,6 +63,14 @@ class LocalHttpsProxyTest {
 
     @Test
     fun testProxyReturnsBadGatewayOnInvalidUpstream() {
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator { _, _, _ ->
+                LocalProxyFirewallResult(
+                    decision = LocalProxyFirewallDecision.ALLOW,
+                    reason = "TEST_ALLOW"
+                )
+            }
+        )
         io.mockk.mockkObject(com.celzero.bravedns.service.VpnController)
         io.mockk.every {
             com.celzero.bravedns.service.VpnController.protectSocket(any())
@@ -198,5 +210,184 @@ class LocalHttpsProxyTest {
         }
 
         assertEquals(InspectionDecision.MITM, result.decision)
+    }
+
+    @Test
+    fun missingFirewallEvaluatorBlocksByDefault() = runBlocking {
+        LocalHttpsProxy.stop()
+
+        val result =
+            LocalHttpsProxy.evaluateFirewallPolicy(
+                clientSocket = Socket(),
+                host = "example.com",
+                destinationPort = 443
+            )
+
+        assertEquals(
+            LocalProxyFirewallDecision.BLOCK,
+            result.decision
+        )
+        assertEquals(
+            "FIREWALL_EVALUATOR_MISSING",
+            result.reason
+        )
+    }
+
+    @Test
+    fun firewallEvaluatorFailureBlocksByDefault() = runBlocking {
+        LocalHttpsProxy.stop()
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator { _, _, _ ->
+                throw IllegalStateException("test failure")
+            }
+        )
+
+        val result =
+            LocalHttpsProxy.evaluateFirewallPolicy(
+                clientSocket = Socket(),
+                host = "example.com",
+                destinationPort = 443
+            )
+
+        assertEquals(
+            LocalProxyFirewallDecision.BLOCK,
+            result.decision
+        )
+        assertEquals(
+            "FIREWALL_EVALUATION_FAILED",
+            result.reason
+        )
+    }
+
+    @Test
+    fun firewallEvaluatorCancellationIsRethrown() {
+        LocalHttpsProxy.stop()
+        val cancellation = CancellationException("cancelled")
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator { _, _, _ ->
+                throw cancellation
+            }
+        )
+
+        val thrown =
+            try {
+                runBlocking {
+                    LocalHttpsProxy.evaluateFirewallPolicy(
+                        clientSocket = Socket(),
+                        host = "example.com",
+                        destinationPort = 443
+                    )
+                }
+                null
+            } catch (error: CancellationException) {
+                error
+            }
+
+        assertSame(cancellation, thrown)
+    }
+
+    @Test
+    fun blockedConnectReturnsForbiddenBeforeUpstreamCreation() {
+        var evaluatedHost: String? = null
+        var evaluatedPort: Int? = null
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator { _, host, port ->
+                evaluatedHost = host
+                evaluatedPort = port
+                LocalProxyFirewallResult(
+                    decision = LocalProxyFirewallDecision.BLOCK,
+                    reason = "RULE2E"
+                )
+            }
+        )
+
+        LocalHttpsProxy.start(TEST_PORT)
+        Thread.sleep(150)
+
+        Socket("localhost", TEST_PORT).use { socket ->
+            socket.getOutputStream().apply {
+                write(
+                    (
+                        "CONNECT blocked.example:443 HTTP/1.1\r\n" +
+                            "Host: blocked.example:443\r\n\r\n"
+                    ).toByteArray()
+                )
+                flush()
+            }
+
+            val responseLine =
+                BufferedReader(
+                    InputStreamReader(socket.getInputStream())
+                ).readLine()
+
+            assertEquals(
+                "HTTP/1.1 403 Forbidden",
+                responseLine
+            )
+        }
+
+        assertEquals("blocked.example", evaluatedHost)
+        assertEquals(443, evaluatedPort)
+    }
+
+    @Test
+    fun blockedPlainHttpSkipsFilterListenerAndUpstream() {
+        var listenerInvocations = 0
+        LocalHttpsProxy.proxyListener =
+            object : LocalHttpsProxy.ProxyListener {
+                override fun onRequestInspection(
+                    url: String,
+                    host: String,
+                    method: String,
+                    headers: List<String>,
+                    resourceType: Int
+                ): Boolean {
+                    listenerInvocations++
+                    return true
+                }
+
+                override fun onResponseInspection(
+                    url: String,
+                    statusCode: Int,
+                    headers: List<String>,
+                    decompressedBody: String?
+                ) = Unit
+            }
+
+        LocalHttpsProxy.setFirewallEvaluator(
+            LocalProxyFirewallEvaluator { _, _, _ ->
+                LocalProxyFirewallResult(
+                    decision = LocalProxyFirewallDecision.BLOCK,
+                    reason = "RULE2H"
+                )
+            }
+        )
+
+        LocalHttpsProxy.start(TEST_PORT)
+        Thread.sleep(150)
+
+        Socket("localhost", TEST_PORT).use { socket ->
+            socket.getOutputStream().apply {
+                write(
+                    (
+                        "GET http://blocked.example/path HTTP/1.1\r\n" +
+                            "Host: blocked.example\r\n\r\n"
+                    ).toByteArray()
+                )
+                flush()
+            }
+
+            val responseLine =
+                BufferedReader(
+                    InputStreamReader(socket.getInputStream())
+                ).readLine()
+
+            assertEquals(
+                "HTTP/1.1 403 Forbidden",
+                responseLine
+            )
+        }
+
+        assertEquals(0, listenerInvocations)
     }
 }

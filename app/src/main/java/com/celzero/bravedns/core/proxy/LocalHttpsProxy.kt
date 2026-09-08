@@ -10,6 +10,9 @@ import com.celzero.bravedns.core.proxy.policy.InspectionConnectionPolicyEvaluato
 import com.celzero.bravedns.core.proxy.policy.InspectionDecision
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicyResult
 import com.celzero.bravedns.core.proxy.policy.InspectionReason
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallDecision
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallEvaluator
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallResult
 import kotlinx.coroutines.*
 import java.io.*
 import java.net.InetSocketAddress
@@ -47,6 +50,10 @@ object LocalHttpsProxy : KoinComponent {
     @Volatile
     private var inspectionPolicyEvaluator:
         InspectionConnectionPolicyEvaluator? = null
+
+    @Volatile
+    private var firewallEvaluator:
+        LocalProxyFirewallEvaluator? = null
 
     /**
      * Initializes the proxy with persistent state to load and persist bypassed hosts.
@@ -91,6 +98,46 @@ object LocalHttpsProxy : KoinComponent {
     ) {
         inspectionPolicyEvaluator = evaluator
         logInfo("HTTPS inspection policy evaluator configured")
+    }
+
+    fun setFirewallEvaluator(
+        evaluator: LocalProxyFirewallEvaluator
+    ) {
+        firewallEvaluator = evaluator
+        logInfo("Local proxy firewall evaluator configured")
+    }
+
+    internal suspend fun evaluateFirewallPolicy(
+        clientSocket: Socket,
+        host: String,
+        destinationPort: Int
+    ): LocalProxyFirewallResult {
+        val evaluator =
+            firewallEvaluator
+                ?: return LocalProxyFirewallResult(
+                    decision = LocalProxyFirewallDecision.BLOCK,
+                    reason = "FIREWALL_EVALUATOR_MISSING"
+                )
+
+        return try {
+            evaluator.evaluate(
+                clientSocket = clientSocket,
+                host = host,
+                destinationPort = destinationPort
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            logError(
+                "Local proxy firewall evaluation failed for " +
+                    "$host:$destinationPort: ${error.message}",
+                error
+            )
+            LocalProxyFirewallResult(
+                decision = LocalProxyFirewallDecision.BLOCK,
+                reason = "FIREWALL_EVALUATION_FAILED"
+            )
+        }
     }
 
     internal suspend fun evaluateInspectionPolicy(
@@ -298,6 +345,7 @@ object LocalHttpsProxy : KoinComponent {
     @Synchronized
     fun stop() {
         inspectionPolicyEvaluator = null
+        firewallEvaluator = null
         if (!isRunning) return
         isRunning = false
         logInfo("Stopping local HTTPS proxy server...")
@@ -355,10 +403,54 @@ object LocalHttpsProxy : KoinComponent {
         }
     }
 
+    private fun sendFirewallBlockResponse(
+        clientSocket: Socket,
+        host: String,
+        destinationPort: Int,
+        reason: String
+    ) {
+        logInfo(
+            "Local proxy firewall blocked $host:$destinationPort " +
+                "(reason=$reason)"
+        )
+        try {
+            val output = clientSocket.getOutputStream()
+            output.write(
+                (
+                    "HTTP/1.1 403 Forbidden\r\n" +
+                        "Connection: close\r\n" +
+                        "Content-Length: 0\r\n\r\n"
+                ).toByteArray(Charsets.UTF_8)
+            )
+            output.flush()
+        } catch (error: Exception) {
+            logError(
+                "Failed to send firewall block response for " +
+                    "$host:$destinationPort: ${error.message}"
+            )
+        }
+    }
+
     /**
      * Manages HTTP CONNECT tunneling.
      */
     private suspend fun handleConnectTunnel(clientSocket: Socket, host: String, port: Int) {
+        val firewallResult =
+            evaluateFirewallPolicy(
+                clientSocket = clientSocket,
+                host = host,
+                destinationPort = port
+            )
+        if (firewallResult.decision == LocalProxyFirewallDecision.BLOCK) {
+            sendFirewallBlockResponse(
+                clientSocket = clientSocket,
+                host = host,
+                destinationPort = port,
+                reason = firewallResult.reason
+            )
+            return
+        }
+
         val (upstreamSocket, address) = createAndProtectUpstreamSocket(host, port)
         try {
             upstreamSocket.soTimeout = 30000
@@ -987,6 +1079,22 @@ object LocalHttpsProxy : KoinComponent {
             val uri = java.net.URI(urlStr)
             val host = uri.host ?: return
             val port = if (uri.port != -1) uri.port else 80
+
+            val firewallResult =
+                evaluateFirewallPolicy(
+                    clientSocket = clientSocket,
+                    host = host,
+                    destinationPort = port
+                )
+            if (firewallResult.decision == LocalProxyFirewallDecision.BLOCK) {
+                sendFirewallBlockResponse(
+                    clientSocket = clientSocket,
+                    host = host,
+                    destinationPort = port,
+                    reason = firewallResult.reason
+                )
+                return
+            }
 
             val isAllowed = proxyListener?.onRequestInspection(
                 url = urlStr,

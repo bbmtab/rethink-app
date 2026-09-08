@@ -79,6 +79,9 @@ import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshot
 import com.celzero.bravedns.core.proxy.policy.InspectionPolicySnapshotFactory
 import com.celzero.bravedns.core.proxy.policy.InspectionTransportPolicy
 import com.celzero.bravedns.core.proxy.policy.InspectionUserAppPolicyRepository
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallDecision
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallEvaluator
+import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallResult
 import com.celzero.bravedns.data.AppConfig
 import com.celzero.bravedns.data.ConnTrackerMetaData
 import com.celzero.bravedns.data.ConnectionSummary
@@ -3990,6 +3993,73 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                     // 5. Connect socket identity resolution to the policy engine.
                     val connectionIdentityResolver =
                         InspectionConnectionIdentityResolver(this)
+
+                    com.celzero.bravedns.core.proxy.LocalHttpsProxy
+                        .setFirewallEvaluator(
+                            object : LocalProxyFirewallEvaluator {
+                                override suspend fun evaluate(
+                                    clientSocket: Socket,
+                                    host: String,
+                                    destinationPort: Int
+                                ): LocalProxyFirewallResult {
+                                    val identity =
+                                        connectionIdentityResolver.resolve(
+                                            clientSocket
+                                        )
+                                    val uid = identity.uid ?: INVALID_UID
+                                    val destinationIp = ""
+                                    val connType =
+                                        if (isConnectionMetered(destinationIp)) {
+                                            ConnectionTracker.ConnType.METERED
+                                        } else {
+                                            ConnectionTracker.ConnType.UNMETERED
+                                        }
+                                    val metadata =
+                                        createConnTrackerMetaData(
+                                            uid = uid,
+                                            usrId =
+                                                FirewallManager.userId(uid),
+                                            srcIp =
+                                                clientSocket.inetAddress
+                                                    ?.hostAddress
+                                                    .orEmpty(),
+                                            srcPort = clientSocket.port,
+                                            dstIp = destinationIp,
+                                            dstPort = destinationPort,
+                                            protocol =
+                                                Protocol.TCP.protocolType,
+                                            query = host,
+                                            connId =
+                                                "local-https-proxy-" +
+                                                    "${clientSocket.localPort}-" +
+                                                    "${clientSocket.port}",
+                                            connType = connType
+                                        )
+                                    val rule =
+                                        firewall(
+                                            connInfo = metadata,
+                                            domains = host,
+                                            anyRealIpBlocked = false,
+                                            isSplApp = isSpecialApp(uid),
+                                            rinr =
+                                                persistentState
+                                                    .routeRethinkInRethink
+                                        )
+                                    return LocalProxyFirewallResult(
+                                        decision =
+                                            if (
+                                                FirewallRuleset.ground(rule)
+                                            ) {
+                                                LocalProxyFirewallDecision.BLOCK
+                                            } else {
+                                                LocalProxyFirewallDecision.ALLOW
+                                            },
+                                        reason = rule.id
+                                    )
+                                }
+                            }
+                        )
+
                     val policyEvaluator =
                         InspectionConnectionPolicyEvaluator(
                             policySnapshot = policySnapshot,
