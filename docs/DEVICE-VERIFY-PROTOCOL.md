@@ -1,14 +1,25 @@
 # Device-Verify Protocol — DV1–DV5 (Phase B)
 
 > **Historical status (2026-07-29):** Canonical, repo-resolvable. **Issued 2026-07-28; NOT YET EXECUTED** by the executor at that time (supervisor-issued, awaiting a fresh executor session to run Phase B).
-> **Current status (2026-08-27):** Later Mi A1 device gates and filter-source-management checks have executed. The latest evidence is appended in §7; controlled website filtering and RC readiness remain blocked.
+> **Current status (2026-09-09):** Later Mi A1 gates are appended in §§7–10.
+> Controlled filter-runtime, N4E policy/inventory, N9 repeated per-app hot
+> apply, and N10 local-proxy domain/IP firewall plus Network Logs persistence
+> are sealed. Direct RULE20 execution remains deferred for lack of a qualifying
+> natural UDP/443 control stimulus; release-level DoD and DECISION-011 preset
+> provenance remain separate blockers that device evidence cannot waive.
 > **Owner:** Supervisor. This doc is the single source of truth for the device-verify gate labels `DV1`–`DV5`. Executor relays MUST resolve `DV1`–`DV5` here, not from memory.
 
 ---
 
 ## 0. Why this doc exists (relabel rationale)
 
-The device-verify gates were originally numbered **G1–G5** in an in-session relay. That collided with **G1–G5** in [docs/PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md](PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md) (an unrelated proposal whose G3 = "QUIC measurement", G4 = "UX validation"). Same numbers, incompatible meanings → a reader could install the wrong gate. Relabelled to **DV1–DV5** (Device-Verify) and persisted here so the labels are **repo-resolvable**, not memory-only.
+The device-verify gates were originally numbered **G1–G5** in an in-session
+relay. That collided with G1–G5 in the historical
+`PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md` (not retained in this checkout),
+an unrelated proposal whose G3 meant "QUIC measurement" and G4 meant "UX
+validation". Same numbers, incompatible meanings → a reader could install the
+wrong gate. They were relabelled to **DV1–DV5** (Device-Verify) and persisted
+here so the labels are **repo-resolvable**, not memory-only.
 
 | Old (retired) | New | Meaning |
 |---|---|---|
@@ -87,7 +98,7 @@ adb -s 3595381c0804 logcat -d -b crash
 | **DV5** | E2E MITM cert-swap | From an allowlisted browser hit a test site (e.g. `example.com`). `logcat -d` MUST show a cert-swap / MITM-established log line for the tunneled host | no |
 
 ### DV3 — automation forbidden (human-only)
-Even with root, a user-CA install requires a human tap through at least one system confirmation. Forbidden for the executor: `pm grant`, mount-remount, `su`, Magisk cert-injection. Await an explicit user ping "DONE" before reading `dumpsys trusted_credentials`. Do NOT poll dumpsys as a stand-in for "user installed yet". See [feedback_ca_install_is_human_only](memory) + DECISION-005 context.
+Even with root, a user-CA install requires a human tap through at least one system confirmation. Forbidden for the executor: `pm grant`, mount-remount, `su`, Magisk cert-injection. Await an explicit user ping "DONE" before reading `dumpsys trusted_credentials`. Do NOT poll dumpsys as a stand-in for "user installed yet". See the historical `feedback_ca_install_is_human_only` session note and DECISION-005 context.
 
 ---
 
@@ -505,3 +516,104 @@ One R4E3-R1 fixture run used `force-stop` despite the relay prohibition. That
 procedural violation did not create a positive RULE20 result and does not change
 the zero-UDP/443 blocker classification. Future fixture verification must obey
 the explicit no-force-stop constraint unless separately authorized.
+
+---
+
+## 10. N10 Local-Proxy Firewall + Network Logs Closure (2026-09-08/09)
+
+This addendum records the device protocol and final evidence for N10A, N10B,
+and N10C. It does not replace the historical DV1–DV5 labels.
+
+### Device and tooling constraints
+
+```text
+device  = Xiaomi Mi A1 / tissot
+Android = 16 / SDK 36
+serial  = 3595381c0804
+app     = com.celzero.bravedns.plus / UID 10442
+browser = com.android.chrome / UID 10335
+VPN     = tun1
+proxy   = localhost:8443
+```
+
+This device does not provide `run-as` or `su`. Do not make either command a
+precondition. Verify deployment with `pm path`, `adb pull`, byte count,
+SHA-256, version metadata, and `apksigner --print-certs`.
+
+### Required N10 execution sequence
+
+1. Prove the exact locally re-signed APK, installed package, signer, version,
+   app/browser UID, `tun1`, and HTTP proxy state.
+2. Capture an allowed browser baseline before creating a rule.
+3. Create exactly one temporary Chrome-specific domain or IP/port BLOCK rule
+   through the normal UI.
+4. Trigger the matching browser request and capture the LocalHttpsProxy block
+   line plus absence of prohibited downstream work.
+5. For N10C, open Network Logs and capture the blocked connection detail:
+   application, destination, protocol/port, block status, and firewall reason.
+6. Delete the temporary rule and prove the rule list is empty/unchanged from
+   baseline.
+7. Prove browser connectivity is restored.
+8. Re-open Network Logs and prove the historical blocked row remains after rule
+   deletion.
+9. Re-check VPN/proxy health, first-install preservation, crash buffer, repo
+   branch/HEAD, tracked tree, and staged state.
+
+If a UI XML dump is captured, verify its foreground package/activity before
+claiming it is a Network Logs capture. The N10C R3 rerun exists because an
+earlier file named as a Network Logs dump actually contained Chrome UI.
+
+### N10A — pre-DNS hostname/port gate
+
+```text
+temporary rule = Chrome-specific domain BLOCK for example.com
+runtime result = Local proxy firewall blocked example.com:443
+downstream DNS/upstream/inspection/MITM lines for target = 0
+rule deleted = YES
+connectivity restored = YES
+```
+
+### N10B — post-resolution destination-IP gate
+
+```text
+temporary rule = Chrome-specific IP BLOCK for 1.1.1.1:0
+resolution = 1.1.1.1
+runtime result = Local proxy resolved-IP firewall blocked 1.1.1.1:443
+socket protect/connect/MITM after block = 0
+rule deleted = YES
+firewall state after deletion = NONE
+connectivity restored = YES
+```
+
+### N10C — blocked connection-log persistence
+
+Final clean proof used a new Chrome-specific IP BLOCK for `1.0.0.1:0`.
+
+```text
+Local proxy block lines = 20 for 1.0.0.1:443
+Network Logs app        = Chrome
+destination             = 1.0.0.1
+protocol / port         = TCP / 443
+status                  = blocked
+firewall reason         = IP / Port (App)
+rule deleted            = YES
+rule list after cleanup = No IP or Port rules.
+blocked row retained    = YES
+browser restored        = YES
+```
+
+The expected certificate-name error when browsing a raw Cloudflare IP after
+cleanup is not a firewall failure. `ERR_TUNNEL_CONNECTION_FAILED` is the block
+signal; `NET::ERR_CERT_COMMON_NAME_INVALID` proves the tunnel was no longer
+being rejected by the temporary IP rule.
+
+### N10 closure
+
+```text
+N10A_DOMAIN_GATE_DEVICE_PROVEN=YES
+N10B_RESOLVED_IP_GATE_DEVICE_PROVEN=YES
+N10C_NETWORK_LOG_PERSISTENCE_DEVICE_PROVEN=YES
+N10_TEMP_RULE_DELETED=YES
+N10_CONNECTIVITY_RESTORED=YES
+N10_REPO_MUTATIONS_FROM_DEVICE_RUN=0
+```

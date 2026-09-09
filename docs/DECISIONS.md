@@ -456,7 +456,11 @@ Revisit when:
 
 ## DV-B nav-gap residual (A14+) — DOCUMENTED LIMITATION, not a fixable gap
 
-**Status:** recorded 2026-08-04. The B-path fix [d28f807bb](retarget PendingIntent → CertificateSetupActivity) is **technically INEFFECTIVE on A14+**: `BACKGROUND_ACTIVITY_LAUNCH_BLOCKED` is target-agnostic post-death — even a correctly-targeted pending-intent relaunch is BAL_BLOCKed. So the B-path could not close the nav-gap on A16 (Mi A1, see `logcat_Dnav.txt`).
+**Status:** recorded 2026-08-04. The B-path fix `d28f807bb` (retarget
+PendingIntent → CertificateSetupActivity) is **technically INEFFECTIVE on
+A14+**: `BACKGROUND_ACTIVITY_LAUNCH_BLOCKED` is target-agnostic post-death —
+even a correctly-targeted pending-intent relaunch is BAL_BLOCKed. So the B-path
+could not close the nav-gap on A16 (Mi A1, see `logcat_Dnav.txt`).
 
 **Resolved in practice by DECISION-006/D (`1c62bfd91`):** the D-fix retired the entire `killProcess` → process-death → PendingIntent → BAL chain. With no kill, the process never dies (PID constant), no post-death relaunch/PI fires, so there is no BAL and **no navigation to restore** — the user stays on CertificateSetupActivity throughout (DV-D.a/c/d SEALED). The nav-gap is therefore OPERATIVELY RESOLVED by construction: the mechanism that created it no longer runs.
 
@@ -577,7 +581,11 @@ The `RethinkPlusFragment.kt` in `full/` is the hoisted fdroid MITM-only fragment
 - Plus hero label: `app/src/main/res/layout/fragment_rethink_plus.xml:55` — `android:text="@string/plus_title"` (reads "Plus")
 - Plus bottom-nav label: `app/src/main/res/menu/bottom_nav_menu.xml:17` — `android:title="@string/plus_title"`
 - Filters sections layout: `app/src/main/res/layout/fragment_rethink_plus.xml` (line 68+: HTTPS Inspection card; blocklist bridge section; exclusions section; hero banner L36-56 with `plus_title`)
-- SwitchMaterial crash fix (Track-D): [styles.xml:737-745](docs/unified_ui_architecture.md) (`PlusMaterialSwitchFix` / `PlusSwitchOverlayFix` overlay with literal `@color` values, zero `?attr` refs); 5 `MaterialSwitch` elements at [fragment_rethink_plus.xml:131/290/459/495/530](app/src/main/res/layout/fragment_rethink_plus.xml#L131)
+- SwitchMaterial crash fix (Track-D):
+  [UNIFIED_UI_ARCHITECTURE.md](UNIFIED_UI_ARCHITECTURE.md)
+  (`PlusMaterialSwitchFix` / `PlusSwitchOverlayFix` overlay with literal
+  `@color` values, zero `?attr` refs); 5 `MaterialSwitch` elements in
+  `app/src/main/res/layout/fragment_rethink_plus.xml`.
 - Filters backend machinery (unchanged): `PersistentState.httpsInspectionEnabled` (L15 in arch doc), `CertificateAuthority`, `RethinkBlocklistManager`, `FilterEngine`, `LocalHttpsProxy` — observed, toggled, NOT edited by this UX phase (DECISION-006/D hot-plug verified 2026-08-04/2026-08-03).
 - Auto-restart / always-on: DECISION-006/D (`killProcess`/`PendingIntent` retired; `vpnRestartTrigger` hot-plug; no BAL, no crash) — sealed 2026-08-04; O7 `WgHop` 84/0/0; `FirewallManagerTest` 45/0/0.
 
@@ -1527,7 +1535,7 @@ Re-open or append to this decision if:
 
 ---
 
-**End of Decisions — Append Only**
+**Earlier decision log continues below — append only**
 
 ---
 
@@ -1882,3 +1890,209 @@ N9_TRANSPORT_POLICY_SOURCE_GHA_SEALED=YES
 N9_RULE20_DEVICE_EXECUTION=DEFERRED_NO_NATURAL_UDP443_FIXTURE
 N9_RULE20_DEVICE_FAILURE_PROVEN=NO
 ```
+
+---
+
+## DECISION-010 — N10 LOCAL PROXY FIREWALL AUTHORITY ADDENDUM (2026-09-09)
+
+**Status:** GOVERNING IMPLEMENTATION ADDENDUM — N10A/N10B/N10C canonical and device-sealed
+**Canonical implementation:** `phase1d-advanced-filter` @ `63bc8593df3efa83b51f68146b1216f4320f8e44`
+**Scope:** ordinary firewall authority for HTTPS CONNECT and absolute-URI plain HTTP traffic handled by `LocalHttpsProxy`, including blocked connection-log persistence
+
+### Context
+
+`LocalHttpsProxy` creates its upstream socket on the physical network so that
+the VPN application does not loop its own traffic back through firestack. That
+socket therefore cannot rely on the Go packet path to apply the original
+client application's domain/IP/port firewall rules.
+
+This is a policy-authority gap, not a reason to create a second firewall.
+
+### Decision
+
+`BraveVPNService.firewall()` remains the sole ordinary firewall decision
+authority. `LocalHttpsProxy` receives a narrow suspend evaluator and invokes it
+using the original client socket identity.
+
+The proxy must evaluate twice for a direct upstream connection:
+
+```text
+Gate 1: client UID + hostname + destination port + destinationIp=""
+        before proxy DNS, protectSocket, upstream connect, CONNECT 200,
+        request inspection, or MITM
+
+Gate 2: same client identity + hostname + destination port + resolved IP
+        after direct DNS resolution but before protectSocket/upstream connect
+```
+
+The second gate is not fabricated for a configured upstream HTTP proxy. That
+proxy receives an unresolved destination because it owns DNS resolution.
+
+### Failure and response contract
+
+* Missing evaluator → BLOCK with `FIREWALL_EVALUATOR_MISSING`.
+* Ordinary evaluator exception → BLOCK with `FIREWALL_EVALUATION_FAILED`.
+* `CancellationException` → rethrow; cancellation is not converted into a
+  firewall decision.
+* Firewall BLOCK → send `HTTP/1.1 403 Forbidden`, close the connection, and do
+  not continue to DNS/upstream/CONNECT-200/MITM work applicable after that
+  gate.
+
+### Existing-rule and logging ownership
+
+The evaluator constructs `ConnTrackerMetaData` with the resolved original UID,
+TCP protocol, hostname, port, and destination IP when available. It calls the
+existing `firewall()` function and maps grounded rules to BLOCK.
+
+For blocked results it sets:
+
+```text
+metadata.isBlocked = true
+metadata.blockedByRule = rule.id
+metadata.proxyDetails = Backend.Block
+```
+
+It then writes through the existing `NetLogTracker` path:
+
+* `writeRethinkLog(metadata)` for `rethinkUid`;
+* `writeIpLog(metadata)` for every other UID.
+
+N10 must not call `processFirewallRequest()` or
+`persistAndConstructFlowResponse()` from the evaluator and must not introduce
+direct proxy ownership of `DomainRulesManager` or `IpRulesManager`.
+
+### Canonical slices
+
+| Slice | Commit | Closure |
+|---|---|---|
+| N10A | `d6d3602880193e4f6250ce01c7b0eac46380faac` | hostname/port firewall gate before upstream work; fail-closed contract; CONNECT and plain HTTP coverage |
+| N10B | `24b7a292a96ff230345992fce942af5d12c36d79` | resolved destination-IP gate before socket protection/connect |
+| N10C | `63bc8593df3efa83b51f68146b1216f4320f8e44` | blocked decisions persisted in the existing connection log |
+
+### Verification closure
+
+```text
+N10A LocalHttpsProxyTest = 10/10 PASS
+N10B/N10C LocalHttpsProxyTest = 11/11 PASS
+
+GHA 34174825194 = success on d6d360288
+GHA 34198839548 = success on 24b7a292a
+GHA 34225352812 = success on 63bc8593d
+```
+
+Physical Mi A1 / Android 16 evidence proved:
+
+* Chrome-specific `example.com` domain BLOCK stops before DNS/upstream and
+  restores after deletion;
+* Chrome-specific `1.1.1.1` IP BLOCK stops after resolution but before
+  protection/connect/MITM and restores after deletion;
+* Chrome-specific `1.0.0.1:0` IP BLOCK appears in Network Logs as Chrome,
+  destination `1.0.0.1`, TCP/443, blocked, reason `IP / Port (App)`;
+* the persisted row remains visible after the temporary rule is deleted;
+* no temporary N10 firewall rule remains and connectivity is restored.
+
+### Closure
+
+```text
+N10A_PRE_UPSTREAM_FIREWALL_AUTHORITY=SEALED
+N10B_RESOLVED_IP_FIREWALL_AUTHORITY=SEALED
+N10C_BLOCKED_CONNECTION_LOG_PERSISTENCE=SEALED
+N10_CANONICAL_HEAD=63bc8593df3efa83b51f68146b1216f4320f8e44
+N10_TEMPORARY_DEVICE_RULES_REMAINING=0
+```
+
+This addendum closes local-proxy firewall parity. It does not close the separate
+RULE20 natural-UDP/443 device stimulus, external compatibility matrix,
+first-party preset-registry, or post-MITM resource-threshold follow-ups.
+
+---
+
+## DECISION-011 — CANONICAL PRESET-ASSET DIVERGENCE ADDENDUM (2026-09-09)
+
+**Status:** OPEN RELEASE BLOCKER — records implementation divergence; grants no redistribution authorization
+**Observed canonical head:** `63bc8593df3efa83b51f68146b1216f4320f8e44`
+**Introducing commit:** `82004b55eb195ae8b4aa0a65cb685a1f4a250423`
+
+DECISION-011 authorized only the pinned `ssl_allow_list.txt` intake. Canonical
+runtime nevertheless contains four additional assets that are byte-identical
+to the supplied attachments:
+
+```text
+pkg_exclusions.txt
+69230a7b5dc586c6dd9bd3da4e65ae749b3c05a099b30eb324c41c9c38ea5d47
+
+filter_https_traffic_inclusions.txt
+2da0920ee235c3c34584be859443a27f8fd7d40ba8f55c69b050b716770f7299
+
+filter_https_traffic_exclusions.json
+4ae3b2fd7a0a9898378334150433886683671abed390adb6529ec7b4878723a4
+
+ssl_block_list.txt
+ae59d79d6534a797a9e7ca9fa62c6131c600c2f2ea83c2022b1e1e8156359a7b
+```
+
+The bundled `NOTICE.txt` documents only `ssl_allow_list.txt` and says
+CompatibilityIssues-derived files were not bundled by that slice. It is not an
+accurate provenance/redistribution notice for the four files above.
+
+This finding does not invalidate the functional N4E/N9/N10 test evidence. It
+does block a stable release claim until one of these paths is completed and
+separately authorized:
+
+1. remove/replace the four files with Rethink-owned registries whose entries,
+   semantics, and package identities are independently verified; or
+2. obtain explicit redistribution authorization, verify the intended Rethink
+   semantics, and update the shipped notice accurately.
+
+Documentation edits alone must not be treated as authorization. The original
+DECISION-011 source, license, semantic, parser, and update gates remain binding.
+
+---
+
+## DECISION-012: POST-RELEASE UPSTREAM MAINTENANCE BRIDGE (2026-09-09)
+
+**Status:** PLANNED — sequencing locked; implementation branch/name and merge method not yet selected
+
+### Purpose
+
+The fork depends heavily on Rethink's original core networking, DNS, firewall,
+WireGuard, VPN, and platform-maintenance work. A permanent freeze would make the
+MITM/adblock fork increasingly expensive and unsafe to maintain.
+
+The final project phase will therefore create an upstream-maintenance bridge on
+a separate branch. Its purpose is Git/source integration with the original
+Rethink project, not a runtime DNS-to-FilterEngine bridge.
+
+### Locked sequence
+
+```text
+1. Finish every authorized MITM/adblock task on phase1d-advanced-filter
+2. Close documentation, source, tests, GHA, device, and release blockers
+3. Integrate and push the completed shipping state to main
+4. Complete the intended release gate/tag/public artifact
+5. Create the upstream-maintenance bridge on a separate branch
+6. Use that branch to evaluate and import future original-Rethink core updates
+```
+
+The bridge must not be started early by mixing upstream reconciliation into the
+current MITM/adblock release closure.
+
+### Ownership boundary
+
+DECISION-001 remains the starting conflict map:
+
+* upstream/core-friendly territory: DNS, firewall, WireGuard, RPN, VPN tunnel,
+  platform compatibility, and unrelated application maintenance;
+* fork-owned territory: CA, LocalHttpsProxy, HTTPS inspection policy,
+  FilterEngine, advanced filter sources, and their Plus UI;
+* shared conflict territory, especially `BraveVPNService.kt` and
+  `PersistentState.kt`, requires explicit manual review.
+
+The bridge may use merge, rebase, or selected cherry-picks only after a fresh
+upstream-delta audit. This decision does not choose that mechanism in advance
+and does not authorize any source mutation, branch creation, merge, push, tag,
+or release during the current documentation sync.
+
+---
+
+**End of Decisions — Append Only**

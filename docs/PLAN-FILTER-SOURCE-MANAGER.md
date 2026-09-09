@@ -1,6 +1,14 @@
 # Filter Source Manager â€” Implementation & Architecture Plan
 
 > **STATUS: CURRENT â€” PHASE-1D-B IMPLEMENTATION PLAN**
+> **Canonical sync (2026-09-09):** Filter runtime E2E, N4E HTTPS policy,
+> N9 per-app/transport integration, and N10 local-proxy firewall/logging closure
+> are integrated through `phase1d-advanced-filter` @
+> `63bc8593df3efa83b51f68146b1216f4320f8e44`. The release-level DoD in §9
+> remains a separate checklist and is not retroactively inferred from those
+> feature seals. DECISION-011 preset provenance is also an explicit release
+> blocker and is owned by `PLAN-HTTPS-INSPECTION-POLICY.md`, not this source
+> manager plan.
 >
 > Authority:
 > - [[docs/DECISIONS.md#DECISION-008]] â€” Original Rethink DNS and Advanced Filter Sources are independent subsystems
@@ -747,8 +755,9 @@ no preset-seeding path from worker context.
 ### B4.5 HTTPS Inspection Policy — Architecture Layer (documented in DECISION-010)
 
 HTTPS-policy detail remains owned by `PLAN-HTTPS-INSPECTION-POLICY.md` and
-DECISION-010. N4E policy/runtime/device verification is sealed locally as of
-2026-09-04; final branch integration is pending.
+DECISION-010. N4E policy/runtime, N9 per-app/transport, and N10 local-proxy
+firewall/log persistence are canonical and device-sealed through
+`63bc8593df3efa83b51f68146b1216f4320f8e44`.
 
 | Sub-feature | Scope | Status |
 |-------------|-------|--------|
@@ -782,16 +791,22 @@ B1    Data / storage foundation              SEALED
 B2    Downloader + validation                SEALED
 B3    Parser / compiler + diagnostics        SEALED
 B4    Atomic activation + rollback           SEALED
-B4.5  HTTPS Inspection Policy                SEALED LOCALLY — N4E policy/runtime/device gates complete; final branch commit pending
+B4.5  HTTPS Inspection Policy                SEALED CANONICALLY — N4E/N9/N10 gates complete at 63bc8593d
 B5    Manage Filters + custom source UI       IMPLEMENTED — add, edit, remove, enable and disable flows exist
 B6    End-to-end verification                 SEALED FOR CURRENT PHASE-1D ACCEPTANCE — filter runtime E2E closed 2026-08-30; HTTPS-policy/device N4E closed 2026-09-04
 ```
 
 DECISION-010 remains the governing HTTPS-policy authority. The N4E
-preset-driven eligibility/runtime implementation is device-verified locally.
+preset-driven eligibility/runtime implementation, N9 per-app/transport layer,
+and N10 proxy-firewall parity are canonical and device-verified.
 This Filter Source Manager document records only roadmap status and does not own
-the HTTPS-policy semantics. Final repository integration/commit remains
-separate.
+the HTTPS-policy semantics.
+
+After the remaining release-level Filter Source/MITM gates are closed, the
+shipping state is integrated and pushed to `main`, and the intended release is
+completed, DECISION-012 schedules a separate upstream-maintenance bridge as the
+final project phase. Upstream reconciliation must not be mixed into the current
+Filter Source release closure.
 
 ---
 
@@ -829,8 +844,9 @@ Current follow-up findings:
 * HTTPS policy semantics remain owned by DECISION-010 and
   `PLAN-HTTPS-INSPECTION-POLICY.md`; this Filter Source Manager plan records
   roadmap status only.
-* Final repository integration of the verified N4E working-tree changes remains
-  pending.
+* N4E, N9, and N10 repository integration is complete at `63bc8593d`.
+* N10 proves that direct LocalHttpsProxy upstream traffic respects existing
+  domain/IP/port firewall rules and persists blocked rows in Network Logs.
 
 Release implication:
 
@@ -839,7 +855,7 @@ Release implication:
 * N4E HTTPS policy/runtime/device acceptance is closed as of 2026-09-04.
 * The former HTTPS/browser regression and missing controlled-filtering proof are
   no longer active blockers.
-* Final N4E branch integration/documentation commit remains pending.
+* Final N4E/N9/N10 branch integration is complete through `63bc8593d`.
 * Any remaining release-candidate blockers must come from the current
   release-level Definition of Done, not from the superseded browser-regression
   finding above.

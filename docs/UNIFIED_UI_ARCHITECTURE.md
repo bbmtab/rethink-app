@@ -1,15 +1,17 @@
 # RethinkDNS — Unified UI Architecture
 
 > **Purpose:** Complete map of RethinkDNS UI surface, organized by feature modules and user flows. This is our own architecture — no external references. Use as the single source of truth for Phase 1+ UI work (Plus tab redesign, MITM/adblock integration, auto-restart UX, etc.).
-> **Current state (2026-09-07):** Plus-tab consolidation, filter-source
+> **Current state (2026-09-09):** Plus-tab consolidation, filter-source
 > management, HTTPS master persistence, per-app HTTPS policy management,
 > system-hard-bypass rendering, and repeated-toggle VPN hot apply are canonical.
 > The per-app HTTPS surface reuses Rethink's existing installed-app inventory;
 > no second app database exists. Known and dynamically detected browsers are ON
 > unless explicitly excluded, ordinary applications are OFF unless explicitly
 > included, and system-hard-bypass rows are immutable OFF. Canonical code is
-> `phase1d-advanced-filter` @
-> `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`.
+> N10 also routes LocalHttpsProxy blocks through the existing firewall authority
+> and connection-log UI; blocked rows remain historical records after a
+> temporary rule is deleted. Canonical code is `phase1d-advanced-filter` @
+> `63bc8593df3efa83b51f68146b1216f4320f8e44`.
 
 ---
 
@@ -47,14 +49,14 @@
 |--------|---------|
 | Summary tab | Per-app data, total TX/RX, time-series charts |
 | Events tab | `EventLogger` records — DNS blocks, firewall hits, connection open/close |
-| Network logs | Raw packet-level captures (PCAP export) |
+| Network logs | Connection history, including LocalHttpsProxy firewall blocks; N10C proved app/destination/TCP-port/status/reason detail persists after rule deletion |
 | App-wise logs | `AppWiseDomainLogsActivity`, `AppWiseIpLogsActivity` |
 
 ---
 
 ## ➕ PLUS — "RETHINK PLUS" HUB (KEY REDESIGN TARGET)
 
-### Current state at `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82` (2026-09-07)
+### Current state at `63bc8593df3efa83b51f68146b1216f4320f8e44` (2026-09-09)
 | Flavor | Fragment | Status |
 |--------|----------|--------|
 | **all (fdroid / full / play / website)** | `RethinkPlusFragment.kt` (full flavor — hoisted from fdroid 1b; R100) | **Filters (MITM/adblock)** — HTTPS Inspection / Advanced Filtering / Exclusions |
@@ -81,6 +83,12 @@ render immutable OFF.
 Repeated OFF→ON device testing proved that policy changes hot-rebuild the VPN
 without killing the process and restore the RethinkDNS MITM certificate when
 browser inspection returns ON.
+
+N10 device testing also proved that Chrome-specific domain and IP/port firewall
+rules apply to traffic handled by `LocalHttpsProxy`. A blocked connection is
+shown in the existing Network Logs detail surface with application,
+destination, protocol/port, block status, and firewall reason; deleting the
+rule does not erase the historical row.
 
 ```
 Note: `RethinkPlusDashboardFragment.kt` (RPN subscription UI) and `ServerSelectionFragment.kt` (RPN server picker) are deleted from the working tree (executed pivot 2026-08-09; supervisor-audited 2026-08-10). The fdroid `RethinkPlusFragment.kt` was hoisted to `full/` (R100). Play/website `RethinkPlusFragment.kt` (billing UI) is also deleted; the Plus surface is MITM/adblock-only for all flavors.
@@ -476,12 +484,15 @@ app/src/full/java/com/celzero/bravedns/ui/dialog/
 | **1b** | Plus-tab MITM UI                         | **COMPLETED.** HTTPS Inspection, Advanced Filtering, and Exclusions are exposed through the unified Plus surface.                                                                                                        |
 | **1c** | Plus-tab canonicalization across flavors | **SEALED.** The shared full-flavor `RethinkPlusFragment` is the canonical Filters surface.                                                                                                                               |
 | **1d** | Auto-restart framework                   | **IMPLEMENTED AND DEVICE-VERIFIED** for settings that require restart. Filter-source changes use their separate compile/generation transaction path.                                                                     |
-| **1e** | Advanced Filter Source Foundation        | **IMPLEMENTED / PARTIAL CLOSURE.** Storage, downloader, compiler diagnostics, atomic activation, rollback, and custom-source management exist. Full DECISION-010 policy and controlled website verification remain open. |
+| **1e** | Advanced Filter Source Foundation        | **SEALED FOR CURRENT PHASE-1D ACCEPTANCE.** Storage, downloader, compiler diagnostics, atomic activation/rollback, custom-source management, controlled filter-runtime E2E, N4E policy, N9 per-app/transport, and N10 proxy-firewall/logging gates are complete. Release-level DoD remains separate. |
 
-Custom-source management is implemented at
-`ca797a1d179b060b602c26664814111b640ffd8a`, with 102/102 targeted JUnit tests
-passing. B4.5 and B6 remain open because the complete preset-driven HTTPS policy
-is absent and controlled real-website OFF → ON → OFF filtering has not passed.
+Custom-source management was implemented at
+`ca797a1d179b060b602c26664814111b640ffd8a`, with 102/102 targeted JUnit tests.
+The later controlled filter-runtime cycle closed OFF→ON→OFF behavior; N4E and
+N9 closed HTTPS eligibility/per-app transport behavior; N10 closed
+LocalHttpsProxy firewall parity and blocked-row persistence. Remaining work is
+the explicit release-level DoD and deferred compatibility/hardening list, not
+the superseded B4.5/B6 browser-regression claim.
 
 ---
 
@@ -498,4 +509,4 @@ is absent and controlled real-website OFF → ON → OFF filtering has not passe
 
 ---
 
-**End of Architecture — current through custom-source management at `ca797a1d179b060b602c26664814111b640ffd8a`; HTTPS-policy and controlled website verification remain open.**
+**End of Architecture — current through N10C at `63bc8593df3efa83b51f68146b1216f4320f8e44`; current Phase-1D feature acceptance is sealed, with release-level and deferred compatibility gates tracked separately.**

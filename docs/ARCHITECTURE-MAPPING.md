@@ -2,16 +2,20 @@
 
 This artifact defines the architectural blueprint and packet flow tracing for integrating local **HTTPS MITM Inspection** into RethinkDNS. It incorporates critical feedback regarding `setHttpProxy` limitations, HTTP/2 ALPN, and response compression.
 
-> **Implementation status (2026-09-07):** CA, LocalHttpsProxy, FilterEngine,
-> routing integration, unified Plus UI, per-app HTTPS policy management, N4E
-> eligibility/runtime policy, repeated-toggle hot apply, and policy-driven
-> UDP/443 force-TCP enforcement are canonical on `phase1d-advanced-filter` at
-> `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`. Dynamic-browser policy,
-> browser/general-app MITM and bypass branches, per-app OFF→ON hot rebuild, and
-> package-lifecycle inventory are real-device verified on Mi A1 / Android 16.
-> `InspectionTransportPolicy` / RULE20 passed source, targeted tests, compile,
-> and assemble gates; direct RULE20 device execution remains deferred because no
-> available natural control fixture emitted qualifying UDP/443.
+> **Implementation status (2026-09-09):** CA, LocalHttpsProxy, FilterEngine,
+> routing integration, unified Plus UI, N4E eligibility/runtime policy, N9
+> per-app hot apply and UDP/443 transport enforcement, plus N10 local-proxy
+> firewall parity are canonical on `phase1d-advanced-filter` at
+> `63bc8593df3efa83b51f68146b1216f4320f8e44`. Local HTTPS CONNECT and plain
+> HTTP requests now consult the existing `BraveVPNService.firewall()` authority
+> before DNS/upstream work; direct upstream connections are checked again with
+> the resolved destination IP before socket protection/connect. Blocked proxy
+> decisions are persisted through the existing Network Logs pipeline. N10A,
+> N10B, and N10C passed focused JVM, GHA, and physical-device gates. Direct
+> RULE20 device execution remains deferred because no available natural control
+> fixture emitted qualifying UDP/443. Functional closure does not waive the
+> separate DECISION-011 release blocker for four bundled preset assets whose
+> provenance/redistribution gate is unresolved.
 
 ---
 
@@ -66,8 +70,14 @@ graph TD
 > [!NOTE]
 > **\*Routing Path Clarification**:
 > In Android, the VPN app itself is excluded from its own VPN interface (using `addDisallowedApplication(packageName)`) to prevent infinite routing loops.
-> Therefore, the connection from `LocalHttpsProxy` to the real world is established directly via the underlying active network interface (WiFi/Cellular) and runs under the VPN app's UID, meaning it bypasses the Go `firestack` upstream firewall logic.
-> However, incoming client connections to `LocalHttpsProxy` can be verified on the local device, and we can query `/proc/net/` to map local port connections back to the original calling app's UID if per-app filtering is required.
+> Therefore, the socket from `LocalHttpsProxy` to the real world is established
+> directly via the underlying active network interface (WiFi/Cellular) and does
+> not re-enter the Go `firestack` packet path. N10 closes the former policy gap:
+> the proxy resolves the original client UID and explicitly calls the existing
+> `BraveVPNService.firewall()` authority before DNS/upstream work, then repeats
+> evaluation with the resolved destination IP before protecting or connecting a
+> direct upstream socket. This preserves per-app domain/IP/port firewall policy
+> without routing the proxy's own socket back through the VPN.
 
 ---
 
@@ -88,7 +98,8 @@ graph TD
     RethinkDNS["Rethink DNS Resolver<br/>(VPN DNS Engine)"]:::dns
     Sinkhole["Blocked Domain?<br/>â†’ 0.0.0.0 SINKHOLE"]:::result
     RealIP["Allowed Domain?<br/>â†’ Real Public IPs"]:::result
-    Connect["createAndProtectUpstreamSocket()<br/>VpnController.protectSocket()"]:::proxy
+    IpGate["firewall(host, port, resolved IP)<br/>N10 resolved-IP gate"]:::proxy
+    Connect["VpnController.protectSocket()<br/>upstream connect"]:::proxy
     Blocked["0.0.0.0:443 â†’ ECONNREFUSED<br/>â†’ 502 Bad Gateway"]:::result
     Allowed["Real IP:443 â†’ TLS MITM<br/>(whitelisted pkg) / Raw TCP"]:::result
 
@@ -98,13 +109,15 @@ graph TD
     ActiveNet -->|4. Routed to Rethink DNS| RethinkDNS
     RethinkDNS -->|5a. Blocked| Sinkhole
     RethinkDNS -->|5b. Allowed| RealIP
-    Sinkhole -->|6a. Connect to sinkhole| Connect
-    RealIP -->|6b. Protected socket| Connect
-    Connect -->|7a. Connection refused| Blocked
-    Connect -->|7b. TLS handshake| Allowed
+    Sinkhole -->|6a. Resolved destination| IpGate
+    RealIP -->|6b. Resolved destination| IpGate
+    IpGate -->|7a. Firewall BLOCK| FirewallBlocked["HTTP 403 Forbidden<br/>no protect/connect/MITM"]:::result
+    IpGate -->|7b. Firewall ALLOW| Connect
+    Connect -->|8a. Sinkhole connection refused| Blocked
+    Connect -->|8b. TLS handshake| Allowed
 ```
 
-**Live Device Evidence (Mi A1 A16, PID 3661)**:
+**Historical pre-N10 live device evidence (Mi A1 A16, PID 3661):**
 
 | Test | Domain | `resolveHostSecurely()` Result | Outcome | Logcat Trace |
 |------|--------|------------------------------|---------|--------------|
@@ -114,7 +127,7 @@ graph TD
 | E | `example.com` (Chrome) | `104.20.23.154, 172.66.147.243` (L58) | TLS MITM tunnel established 200 OK | `Established TLS MITM tunnel for example.com` |
 | F | `doubleclick.net` (Chrome) | `0.0.0.0` (L69) | ERR_TUNNEL_CONNECTION_FAILED | `Resolved host 'doubleclick.net' securely on active network: 0.0.0.0` â†’ `ECONNREFUSED` |
 
-**Key Architectural Implication**: Domain-level DNS blocking does **NOT** require a manual text-bridge (`syncBlocklistToAdblockRules` â†’ `adblock_rules.txt` â†’ `FilterEngine`) because the underlying OS resolver integration already enforces DNS sinkholing **before** socket creation. Cosmetic/scriptlet/element-hiding rules remain the sole domain of `FilterEngine` / `adblock_rules.txt`.
+**Key Architectural Implication**: Domain-level DNS blocking does **NOT** require a manual text-bridge (`syncBlocklistToAdblockRules` â†’ `adblock_rules.txt` â†’ `FilterEngine`) because the underlying OS resolver integration already enforces DNS sinkholing before upstream connect. N10 additionally evaluates ordinary domain policy before DNS and resolved-IP policy after DNS. Cosmetic/scriptlet/element-hiding rules remain the sole domain of `FilterEngine` / `adblock_rules.txt`.
 
 **DECISION-008 (Locked, 2026-08-15)**: Original Rethink DNS policy and Advanced Filter Sources are **independent subsystems**. There is **NO documented source-flow**: `Rethink DNS blocklists â†’ FilterEngine`. The legacy `syncBlocklistToAdblockRules()` is **obsolete pending source cleanup** (A2 STOP-P2). FilterEngine receives rules only from dedicated Advanced Filter Sources (EasyList, AdGuard Base, AdGuard Annoyances, Custom URL).
 
@@ -273,6 +286,65 @@ Direct RULE20 device execution is currently verification-deferred because no
 available natural fixture emitted a qualifying control UDP/443 flow. This does
 not alter the architecture above.
 
+### A+2. Local Proxy Firewall Authority Boundary (N10)
+
+`LocalHttpsProxy` owns socket mechanics, but it does not own a separate
+firewall ruleset. N10 routes proxy traffic through the existing
+`BraveVPNService.firewall()` decision authority using the original client
+socket identity.
+
+```text
+HTTPS CONNECT or absolute-URI HTTP request
+        ↓
+resolve original client UID
+        ↓
+firewall(host, port, destinationIp="")
+        ├── BLOCK → persist blocked connection → HTTP 403 → close
+        └── ALLOW
+             ↓
+       direct upstream selected?
+        ├── NO, configured proxy → upstream proxy owns DNS
+        └── YES
+             ↓
+       resolveHostSecurely(host)
+             ↓
+       firewall(host, port, resolved destinationIp)
+        ├── BLOCK → close unconnected socket → persist → HTTP 403
+        └── ALLOW
+             ↓
+       VpnController.protectSocket()
+             ↓
+       upstream connect
+             ↓
+       CONNECT 200 / inspection policy / MITM or raw tunnel
+```
+
+The first gate is before proxy-side DNS resolution, socket protection,
+upstream connect, `HTTP/1.1 200 Connection Established`, request inspection,
+or MITM. The second gate applies only when `LocalHttpsProxy` resolves a direct
+destination IP; a configured upstream HTTP proxy receives an unresolved
+address and remains responsible for DNS.
+
+The evaluator contract is fail-closed: a missing evaluator or ordinary
+evaluation exception returns BLOCK, while coroutine cancellation is rethrown.
+Both CONNECT and plain HTTP blocks return `HTTP/1.1 403 Forbidden` with a closed
+connection.
+
+Blocked metadata is written through the pre-existing `NetLogTracker` path:
+`writeRethinkLog()` for the Rethink UID and `writeIpLog()` for other UIDs. N10
+does not call `processFirewallRequest()` and does not create a second domain/IP
+policy authority.
+
+Physical-device closure proved all three layers:
+
+* N10A: a Chrome-specific `example.com` domain rule blocked before DNS/upstream
+  and restored after rule deletion;
+* N10B: a Chrome-specific `1.1.1.1` IP rule blocked after resolution but before
+  socket protection/connect/MITM and restored after deletion;
+* N10C: a Chrome-specific `1.0.0.1:0` IP rule produced a persisted blocked
+  Network Logs row (`TCP/443`, reason `IP / Port (App)`) that remained visible
+  after the temporary rule was deleted.
+
 ### A++. Installed-App Inventory Lifecycle Boundary (N4E)
 
 HTTPS Inspection does not own a second installed-app database.
@@ -313,15 +385,17 @@ To avoid interfering with the heavy Cgo-compiled packet capture, we inject a sys
   ```
   This is added dynamically in `establishVpn()` inside `BraveVPNService.kt` when `HTTPS_INSPECTION_ENABLED` is `true`.
 - **Local Https Proxy Server**:
-  We will start a non-blocking `ServerSocket` on port `8443` in `LocalHttpsProxy.kt` using Coroutines (`Dispatchers.IO`).
+  A non-blocking `ServerSocket` runs on port `8443` in
+  `LocalHttpsProxy.kt` using Coroutines (`Dispatchers.IO`).
 - **Connection Pipeline**:
   1. **HTTP CONNECT request** (e.g. `CONNECT google.com:443 HTTP/1.1`) is received on the proxy.
-  2. The proxy generates a dynamic, self-signed leaf certificate for `google.com` using `CertificateAuthority.generateLeafCert("google.com")`.
-  3. The proxy responds with `HTTP/1.1 200 Connection Established`.
-  4. The client initiates a TLS handshake with the proxy, which uses the generated leaf certificate.
-  5. Concurrently, the proxy establishes a secure TLS upstream connection to the real `google.com:443`.
-  6. The proxy decrypts and parses the client's HTTP request, applying **FilterEngine** and **CosmeticFilter**.
-  7. The proxy forwards the request, intercepts the response, performs cosmetic body injection (if the content type is `text/html`), and forwards the response back to the client.
+  2. N10 evaluates the original client UID, hostname, and port through the existing firewall authority.
+  3. For a direct route, the proxy resolves the host and evaluates the resolved destination IP through the same authority.
+  4. Only an allowed flow is protected and connected to the upstream server.
+  5. The proxy responds with `HTTP/1.1 200 Connection Established` and evaluates the N4E/N9 HTTPS inspection policy.
+  6. For MITM, it generates a leaf certificate for `google.com`, completes downstream and upstream TLS, and parses the decrypted HTTP request.
+  7. **FilterEngine** evaluates the request and the response pipeline applies applicable cosmetic/scriptlet/procedural/CSP/HTML processing before returning the response.
+  8. For policy BYPASS, the already-authorized connection is piped as raw TCP without FilterEngine execution.
 
 ---
 
@@ -332,7 +406,10 @@ To ensure that the existing DNS Filtering and Firewall capabilities remain entir
 > [!IMPORTANT]
 > **Safety Guardrails**
 > - **Opt-In Toggle**: `HTTPS_INSPECTION_ENABLED` must be checked before registering the proxy on `VpnService.Builder`. If disabled (default), the proxy is not registered, and zero proxy overhead is introduced.
-> - **Bypass pinned / failed connections**: If upstream TLS handshake or verification fails (e.g., certificate pinning, custom CA trust failure), the proxy must **fallback gracefully to a raw TCP pass-through tunnel** without trying to decrypt the TLS stream.
+> - **No learned handshake bypass**: A TLS failure does not mutate or persist
+>   policy and does not switch an already-started connection from MITM to raw TCP
+>   mid-flow. Compatibility bypass must be decided before MITM by the policy
+>   engine or an explicit exclusion.
 > - **DNS Sinkhole Inheritance (PROVEN â€” Phase-1D-A3)**: The DNS resolution of domains requested in `CONNECT` is performed via `ConnectivityManager.activeNetwork.getAllByName(host)` which routes through the **active VPN network context** â€” i.e., Rethink's own DNS resolver. Blocked domains automatically receive `0.0.0.0` sinkhole addresses, causing upstream connection failure (`ECONNREFUSED` â†’ `502 Bad Gateway`). **No manual bridge or duplicate blocklist evaluation is required** for domain-level blocking. This mechanism is empirically verified on Mi A1 A16 (2026-08-15).
 > - **No blocking operations**: All network operations must run asynchronously using Kotlin Coroutines on `Dispatchers.IO`.
 
@@ -340,24 +417,30 @@ To ensure that the existing DNS Filtering and Firewall capabilities remain entir
 
 ## 4. Implementation Status
 
-| Area                                     | Components                                                             | Status at `ca797a1d179b060b602c26664814111b640ffd8a`          |
+| Area                                     | Components                                                             | Status at `63bc8593df3efa83b51f68146b1216f4320f8e44`         |
 | :--------------------------------------- | :--------------------------------------------------------------------- | :------------------------------------------------------------ |
 | Architecture and packet-flow mapping     | This document; DECISION-008; DECISION-010                              | **GOVERNING / CURRENT**                                       |
 | Certificate authority                    | `core/ca/CertificateAuthority.kt`                                      | **IMPLEMENTED AND DEVICE-VERIFIED**                           |
-| Local MITM proxy                         | `core/proxy/LocalHttpsProxy.kt`                                        | **IMPLEMENTED AND N4E DEVICE-VERIFIED**                       |
+| Local MITM proxy                         | `core/proxy/LocalHttpsProxy.kt`                                        | **IMPLEMENTED; N4E + N10 DEVICE-VERIFIED**                    |
 | Filter engine and advanced rule handling | `core/filter/FilterEngine.kt` and subtype handlers                     | **IMPLEMENTED**                                               |
 | Filter-source pipeline                   | Storage, downloader, compiler diagnostics, atomic activation, rollback | **SEALED THROUGH B4**                                         |
 | Filter-source management UI              | Shared Plus UI and Manage Filters surfaces                             | **IMPLEMENTED** for add/edit/remove/enable/disable            |
-| HTTPS eligibility and bypass policy      | `InspectionPolicyEngine`, preset snapshot inputs, browser capability discovery | **SEALED LOCALLY / N4E DEVICE-VERIFIED; final branch commit pending** |
-| End-to-end closure                       | Filter runtime E2E + HTTPS policy controlled-device matrix              | **CURRENT PHASE-1D ACCEPTANCE SEALED**                        |
+| HTTPS eligibility and bypass policy      | `InspectionPolicyEngine`, preset snapshot inputs, browser capability discovery | **CANONICAL; N4E/N9 DEVICE-VERIFIED**                         |
+| HTTPS transport enforcement              | `InspectionTransportPolicy`, `FirewallRuleset.RULE20`                   | **SOURCE/GHA SEALED; DIRECT DEVICE STIMULUS DEFERRED**         |
+| Local-proxy firewall parity               | `LocalProxyFirewallEvaluator`, `BraveVPNService.firewall()`, Network Logs | **CANONICAL; N10A/N10B/N10C DEVICE-VERIFIED**                 |
+| End-to-end closure                       | Filter runtime E2E + HTTPS policy + local-proxy firewall matrix         | **CURRENT PHASE-1D ACCEPTANCE SEALED**                        |
 
 The custom-source implementation passed 102/102 targeted JUnit tests and its
-add/edit/remove/persistence flows were exercised on the Mi A1. Those results do
-not establish controlled rule blocking on a real website.
+add/edit/remove/persistence flows were exercised on the Mi A1. Those UI results
+alone did not establish controlled rule blocking; the later D11C2
+OFF→ON→OFF runtime-filter gate supplied that separate proof.
 
-The remaining runtime investigation must distinguish CA trust, application and
-domain eligibility, upstream TLS handshake, proxy routing or bypass,
-filter compilation/activation, and intended rule blocking.
+Future regressions must still distinguish CA trust, application/domain
+eligibility, ordinary firewall policy, resolved-IP policy, upstream TLS,
+proxy routing/bypass, filter compilation/activation, and intended rule
+blocking. N10 closes the known local-proxy firewall-authority and blocked-log
+persistence gaps; it does not close the separate release-level compatibility,
+resource-threshold, or RULE20 stimulus work.
 
 ---
 
@@ -380,3 +463,21 @@ During Phase 1, the following critical operational limits and design trade-offs 
 - **Response Modification**: Modern web pages are compressed.
 - **Strategy in Phase 3 & 7**: The streaming pipeline in `LocalHttpsProxy.kt` must detect `Content-Encoding: gzip` or `Content-Encoding: br` (Brotli).
   - When modifying `text/html` bodies, the proxy will transparently wrap the stream with a decompression wrapper (e.g., `GZIPInputStream`), inject the CSS snippet before `</head>`, and re-compress (e.g., `GZIPOutputStream`) before forwarding to the client, adjusting the `Content-Length` header accordingly.
+
+### 4. Post-release upstream-maintenance bridge
+
+The fork depends on continuing updates from the original Rethink core. That
+maintenance path is the **last project phase**, not part of the current MITM
+runtime:
+
+1. finish all authorized MITM/adblock work on `phase1d-advanced-filter`;
+2. close source, test, GHA, device, documentation, and release blockers;
+3. integrate and push the shipping state to `main`, then complete the intended
+   release gate;
+4. only then create a separate upstream-maintenance branch and audit/import
+   future original-Rethink changes.
+
+The bridge is a Git/source-integration boundary, not a runtime DNS or proxy
+bridge. Fork-owned MITM files remain protected, upstream/core-friendly areas
+may track original Rethink, and shared files require manual conflict review.
+See DECISION-012.

@@ -20,15 +20,19 @@ different claims. This doc exists so that implicit habit is an explicit rule.
 
 ## What actually reaches a user
 
-Verified from `/.github/workflows/` on 2026-07-17; re-check the workflows before
+Verified from `/.github/workflows/` on 2026-09-09; re-check the workflows before
 relying on this section, since triggers change.
 
-- **Push to `main`** (no tag):
+- **Push to `main` or `dev`**, or a manual `workflow_dispatch` (no tag):
   - `android.yml` runs `lint` + `assembleWebsiteFullDebug` — CI verification only,
-    no published artifact.
+    no published artifact; this workflow is triggered only for `main`, not `dev`
+    or arbitrary manually dispatched feature refs.
   - `build-apk.yml` builds a signed release and uploads it as a CI artifact
-    named `release-plus-<sha>` with **30-day retention**. This is a **CI artifact,
+    when repository signing secrets are available. If they are absent, it builds
+    `assembleFdroidFullDebug` as a debug-signed fallback. Both paths upload a CI
+    artifact named `release-plus-<sha>` with **30-day retention**. This is a **CI artifact,
     not a GitHub Release** — downloadable by maintainers, never served to users.
+    The workflow is build-only and does not run the unit-test suite.
 - **Push a `v*.*.*` tag** (`build-apk.yml` additionally runs `Create GitHub Release`
   via `softprops/action-gh-release@v2`, gated on `startsWith(ref, 'refs/tags/v')`):
   publishes a **public GitHub Release** with the signed `-plus` APKs. This is the
@@ -120,6 +124,60 @@ this doc is meant to prevent.
   place — (a) push of `main` to `origin/main` (outward-facing; held for explicit
   go), and (b) the eventual pre-push device check of the onCreate ordering. Neither
   blocks writing this policy; both block a tag.
+
+## Phase-1D candidate snapshot (2026-09-09)
+
+This newer snapshot supersedes only the dated Phase-1D/HTTPS readiness facts;
+it does not claim that `main` is synchronized or authorize a release tag.
+
+```text
+development branch = phase1d-advanced-filter
+development head   = 63bc8593df3efa83b51f68146b1216f4320f8e44
+latest slice       = N10C local-proxy blocked-log persistence
+```
+
+Feature-level gates now closed on that branch:
+
+* controlled Advanced Filter runtime OFF→ON→OFF behavior;
+* N4E HTTPS eligibility, dynamic-browser discovery, and package-inventory
+  lifecycle;
+* N9 per-app hot apply and policy-driven UDP/443 transport source/GHA gates;
+* N10A hostname/port firewall authority before proxy DNS/upstream work;
+* N10B resolved destination-IP firewall authority before direct socket
+  protection/connect;
+* N10C blocked connection persistence in Network Logs after rule deletion.
+
+N10 canonical head passed `LocalHttpsProxyTest` 11/11, GHA build run
+`34225352812`, and the physical-device block/delete/restore/log-retention gate.
+No temporary N10 rule remains.
+
+Still unresolved before a stable release claim:
+
+* the release-level Filter Source Manager DoD in
+  `PLAN-FILTER-SOURCE-MANAGER.md` has not been re-adjudicated item by item;
+* DECISION-011 preset intake is not release-clean: four canonical runtime assets
+  were bundled without the accepted provenance/redistribution gate, and the
+  shipped notice documents only `ssl_allow_list.txt`;
+* direct RULE20 execution still lacks a natural qualifying UDP/443 control
+  stimulus;
+* the deferred external compatibility matrix, first-party registry audit, and
+  post-MITM resource-threshold evidence remain open;
+* Windscribe must remain disabled unless its own deferred DoD is separately
+  closed;
+* integration into the actual release-feeding branch, final pre-tag verification,
+  annotated tag authorization, and proof of a public GitHub Release are not part
+  of the N10 closure.
+
+A green temporary-branch `build-apk.yml` run and its retained artifact are build
+evidence only. They do not satisfy checklist item 4 and do not mean a release
+reached users. N10 verification runs exercised the debug-signed fallback path,
+so their `release-plus-*` artifact names must not be interpreted as proof of a
+production release signature.
+
+DECISION-012 places the upstream-maintenance bridge **after** the completed
+`main` integration and intended release. It is a separate-branch maintenance
+phase for importing future original-Rethink core changes; it is not a pre-tag
+gate and must not be used to bypass any unresolved item above.
 
 ## Out of scope
 

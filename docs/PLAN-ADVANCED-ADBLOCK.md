@@ -2,6 +2,12 @@
 
 > **Tujuan:** Membawa kemampuan adblock RethinkDNS setara dengan AdGuard/uBlock Origin
 > dengan mengimplementasikan 4 fitur lanjutan di atas infrastruktur MITM proxy yang sudah ada.
+>
+> **Status sinkronisasi (2026-09-09):** Empat fitur di dokumen ini tetap
+> selesai. Pipeline pendukung canonical sekarang juga mencakup N4E policy, N9
+> transport/hot apply, dan N10 firewall authority/log persistence pada
+> `phase1d-advanced-filter` @
+> `63bc8593df3efa83b51f68146b1216f4320f8e44`.
 
 ---
 
@@ -10,7 +16,15 @@
 Semua fitur ini berjalan di atas pipeline yang sudah ada:
 
 ```
-Traffic â†’ VPN Tunnel â†’ LocalHttpsProxy (port 8443) â†’ MITM Inspection
+Traffic â†’ VPN Tunnel â†’ LocalHttpsProxy (port 8443)
+                              â†“
+                    firewall(host/app/port)     â† N10 pre-DNS gate
+                              â†“
+                    DNS + firewall(resolved IP) â† N10 direct-upstream gate
+                              â†“
+                    MITM eligibility policy    â† N4E/N9
+                              â†“
+                    MITM Inspection
                               â†“
                     pipeResponseBody()          â† titik injeksi utama
                               â†“
@@ -30,7 +44,8 @@ Traffic â†’ VPN Tunnel â†’ LocalHttpsProxy (port 8443) â†’ MITM I
 **Prasyarat wajib:**
 - User harus install CA certificate RethinkDNS
 - HTTPS inspection harus aktif (opt-in)
-- App dengan certificate pinning akan otomatis bypass via `dynamicBypassSet`
+- App/domain yang tidak kompatibel harus dibypass oleh policy/exclusion yang
+  eksplisit. Kegagalan TLS tidak membuat atau menyimpan dynamic bypass baru.
 
 ---
 

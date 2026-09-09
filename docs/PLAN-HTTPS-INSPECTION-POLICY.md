@@ -1,9 +1,9 @@
 # HTTPS Inspection Policy — Authority Document
 
-**Status:** Governing architecture + N9 canonical HTTPS policy/transport integration sealed (2026-09-07); direct RULE20 device execution is deferred because no natural UDP/443 control fixture was available
-**Authority:** `docs/DECISIONS.md` § DECISION-010 plus the 2026-09-04 N4E superseding addendum and the 2026-09-07 N9 transport/hot-apply addendum
-**Canonical branch baseline:** `phase1d-advanced-filter` @ `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`
-**Canonical sealed implementation:** N4E policy/runtime, N9 per-app policy state/UI, repeated-toggle hot apply, runtime policy-snapshot publication, and policy-driven UDP/443 force-TCP enforcement are committed. Source/GHA gates are closed; R4D hot apply is real-device proven. RULE20 direct device execution remains a deferred evidence item, not a source/GHA failure.
+**Status:** Governing architecture + N4E/N9/N10 canonical runtime closure sealed (2026-09-09); preset provenance/redistribution divergence is a release blocker; direct RULE20 device execution is deferred because no natural UDP/443 control fixture was available
+**Authority:** `docs/DECISIONS.md` § DECISION-010 plus the 2026-09-04 N4E, 2026-09-07 N9, and 2026-09-09 N10 addenda
+**Canonical branch baseline:** `phase1d-advanced-filter` @ `63bc8593df3efa83b51f68146b1216f4320f8e44`
+**Canonical sealed implementation:** N4E policy/runtime, N9 per-app policy state/UI and transport enforcement, and N10 local-proxy domain/resolved-IP firewall authority with blocked Network Logs persistence are committed. Focused tests, GHA, and physical-device gates are closed. RULE20 direct device execution remains a deferred evidence item, not a source/GHA failure.
 **Scope:** This document owns the HTTPS Inspection eligibility, bypass, and
 resource-protection policy layer. No other planning document should contain
 HTTPS policy details; they live here.
@@ -451,18 +451,20 @@ B1    Data / storage foundation              SEALED
 B2    Downloader + validation                SEALED
 B3    Parser / compiler + diagnostics        SEALED
 B4    Atomic activation + rollback           SEALED
-B4.5  HTTPS Inspection Policy                SEALED — canonical policy/per-app/transport integration at a3c6a00b
+B4.5  HTTPS Inspection Policy                SEALED — canonical policy/per-app/transport/firewall integration at 63bc8593d
 B5    Manage Filters + custom source UI      IMPLEMENTED
 B6    End-to-end verification                SEALED FOR CURRENT PHASE-1D ACCEPTANCE
                                               — N4E policy/device closed
                                               — N9 repeated-toggle hot apply device-closed
+                                              — N10 proxy firewall + blocked-log persistence device-closed
                                               — RULE20 direct execution deferred for lack of natural UDP/443 stimulus
 ```
 
 Canonical repository integration is complete. The N4E policy/runtime stack,
-N9 per-app management stack, repeated-toggle hot-apply repair, and
-policy-driven inspection transport enforcement are now committed on
-`phase1d-advanced-filter`.
+N9 per-app management and transport stack, repeated-toggle hot-apply repair,
+and N10 local-proxy firewall authority/log persistence are committed on
+`phase1d-advanced-filter` at
+`63bc8593df3efa83b51f68146b1216f4320f8e44`.
 
 The remaining device item is narrower: direct execution evidence for RULE20
 requires a real application flow that naturally reaches Rethink as UDP/443
@@ -533,8 +535,8 @@ N4E repository integration is complete. Remaining work is limited to separately
 scoped compatibility/resource follow-up and the deferred direct-device RULE20
 execution evidence described below.
 
-The verified implementation is now canonical at
-`a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`.
+The N4E/N9 implementation is canonical in the history leading to the current
+N10 head, `63bc8593df3efa83b51f68146b1216f4320f8e44`.
 The temporary GHA workflow used to verify the transport implementation remains
 temp-branch-only and is intentionally absent from the canonical tree.
 
@@ -676,6 +678,65 @@ Additional donor-preset QUIC fixtures were not installed on the device. No
 RULE20 failure was observed because no real UDP/443 control stimulus reached
 the rule gate.
 
+#### N10 local-proxy firewall authority closure — 2026-09-08/09
+
+Canonical commits:
+
+```text
+N10A  d6d3602880193e4f6250ce01c7b0eac46380faac
+      fix(firewall): gate local proxy before upstream
+
+N10B  24b7a292a96ff230345992fce942af5d12c36d79
+      fix(firewall): enforce resolved ip rules before upstream
+
+N10C  63bc8593df3efa83b51f68146b1216f4320f8e44
+      fix(firewall): persist local proxy block logs
+```
+
+N10 does not change `InspectionPolicyEngine` precedence. It closes the
+firewall-authority gap created by the direct physical-network socket used by
+`LocalHttpsProxy`:
+
+1. CONNECT and plain HTTP requests call the existing
+   `BraveVPNService.firewall()` authority with original client identity,
+   hostname and port before proxy-side DNS, socket protection, upstream
+   connect, CONNECT 200, request inspection, or MITM.
+2. A direct upstream destination is resolved without protecting or connecting
+   the socket. The same authority is called again with `destinationIp` before
+   `VpnController.protectSocket()` and `Socket.connect()`.
+3. A configured upstream HTTP proxy keeps the target unresolved because that
+   proxy owns DNS; no fabricated destination IP is supplied.
+4. A block returns `HTTP/1.1 403 Forbidden`, closes the flow, and records the
+   decision through the existing connection-log pipeline.
+5. A missing evaluator or ordinary evaluation exception fails closed;
+   `CancellationException` is rethrown.
+
+The implementation deliberately reuses `firewall()` and does not invoke
+`processFirewallRequest()` or directly consult `DomainRulesManager` /
+`IpRulesManager` from the proxy layer.
+
+Verification closure:
+
+```text
+LocalHttpsProxyTest at N10A = 10/10 PASS
+LocalHttpsProxyTest at N10B/N10C = 11/11 PASS
+
+N10A GHA run = 34174825194, success
+N10B GHA run = 34198839548, success
+N10C GHA run = 34225352812, success
+
+N10A device = Chrome-specific example.com domain block before DNS/upstream;
+                rule deleted; connectivity restored
+N10B device = Chrome-specific 1.1.1.1 IP block after resolution and before
+                protect/connect/MITM; rule deleted; connectivity restored
+N10C device = Chrome-specific 1.0.0.1:0 IP block persisted as a Network Logs
+                TCP/443 row with reason "IP / Port (App)"; rule deleted;
+                blocked row retained; connectivity restored
+```
+
+No temporary firewall rule remains on the device. No merge commit or force push
+was used during the three canonical fast-forward gates.
+
 Remaining work is intentionally narrower:
 
 * [x] Implement policy-driven HTTPS transport enforcement for MITM-eligible
@@ -687,12 +748,18 @@ Remaining work is intentionally narrower:
 * [ ] Complete the remaining external compatibility scenarios in §12.3.
 * [ ] Verify package-scoped domain/app edge cases not exercised by the controlled
   N4E three-fixture matrix.
-* [ ] Complete the dedicated per-app HTTPS management UI by reusing Rethink's
-  existing installed-app inventory.
+* [x] Complete the dedicated per-app HTTPS management UI by reusing Rethink's
+  existing installed-app inventory (N9).
 * [ ] Continue first-party browser-registry maintenance and production package
   identity verification.
 * [ ] Tune post-MITM resource thresholds from device/performance evidence while
   preserving `MITM_STREAM_ONLY` semantics.
+
+Project sequencing after these items is locked by DECISION-012: finish all
+MITM/adblock work and release verification first, integrate and push the
+shipping state to `main`, complete the intended release gate, and only then
+create the upstream-maintenance bridge on a separate branch. The bridge is not
+part of B4.5 and must not be mixed into this policy closure.
 
 ### 12.3 Deferred compatibility tests
 
@@ -721,15 +788,45 @@ N3D bundles only `app/src/main/assets/https_inspection/ssl_allow_list.txt`. It i
 
 The bundled asset is limited to protected-domain policy input. N3D did not add Android loading, dependency injection, runtime policy publication, UI integration, QUIC handling, or changes to the default treatment of applications. The consolidated policy suite passed 32 tests with zero failures and zero errors.
 
-#### Remaining inputs are not authorized for bundling
+#### Canonical governance divergence: unauthorized inputs are currently bundled
 
-The following external or attached inputs remain research material and must not be copied into application assets by a later implementation slice without satisfying the corresponding gate:
+DECISION-011 authorized only the hash-pinned `ssl_allow_list.txt`. Nevertheless,
+commit `82004b55eb195ae8b4aa0a65cb685a1f4a250423` added four other assets that are
+byte-identical to the supplied attachments:
+
+```text
+pkg_exclusions.txt
+sha256 69230a7b5dc586c6dd9bd3da4e65ae749b3c05a099b30eb324c41c9c38ea5d47
+
+filter_https_traffic_inclusions.txt
+sha256 2da0920ee235c3c34584be859443a27f8fd7d40ba8f55c69b050b716770f7299
+
+filter_https_traffic_exclusions.json
+sha256 4ae3b2fd7a0a9898378334150433886683671abed390adb6529ec7b4878723a4
+
+ssl_block_list.txt
+sha256 ae59d79d6534a797a9e7ca9fa62c6131c600c2f2ea83c2022b1e1e8156359a7b
+```
+
+The current `NOTICE.txt` covers only `ssl_allow_list.txt` and explicitly says
+CompatibilityIssues-derived files were not bundled by that slice. It therefore
+does not resolve the provenance/redistribution status of the four files above.
+
+Functional N4E runtime/device closure remains valid, but a stable release must
+either remove/replace those four inputs with Rethink-owned, independently
+verified registries or add explicit redistribution authorization and accurate
+notices. Documentation sync does not grant that authorization.
+
+The policy constraints for these inputs remain:
 
 - `pkg_exclusions.txt`: the AdGuard meaning is exclusion from VPN routing and filtering, while the current Rethink policy model describes HTTPS-inspection bypass. These are not equivalent scopes.
 - `filter_https_traffic_inclusions.txt`: its AdGuard meaning enables HTTPS filtering by default for listed browsers. Rethink requires every known-browser entry to be independently verified before it can become a default-ON policy entry.
-- `filter_https_traffic_inclusions_problematic_devices.txt`: device-specific selection criteria and fallback behavior have not been modeled.
+- `filter_https_traffic_inclusions_problematic_devices.txt`: not currently
+  bundled; device-specific selection criteria and fallback behavior have not
+  been modeled.
 - `filter_https_traffic_exclusions.json`: its schema, selection precedence, and Android integration contract have not been accepted.
-- `quic_pkg_exclusions.txt`: remains donor research/compatibility data and is
+- `quic_pkg_exclusions.txt`: not currently bundled; remains donor
+  research/compatibility data and is
   not the runtime authority for inspection force-TCP. Canonical N9 transport
   enforcement is package-agnostic and derives its result from
   `InspectionPolicyEngine`. Any future package-specific QUIC exception registry
@@ -751,7 +848,9 @@ The following external or attached inputs remain research material and must not 
   one, with its own provenance and policy decision.
 - [ ] Define the schema and precedence for `filter_https_traffic_exclusions.json` before parsing or bundling it.
 - [ ] Create each remaining asset only after its provenance, redistribution authorization, semantics, parser contract, and focused tests are accepted.
-- [ ] Connect the preset loader to Android assets and runtime policy publication only after all mandatory registries required by the selected policy mode exist.
+- [x] Connect the preset loader to Android assets and runtime policy publication
+  (implemented by N4E). The four unapproved bundled inputs above remain a
+  release-governance defect until removed/replaced or explicitly authorized.
 
 #### Locked defaults for remaining follow-up work
 

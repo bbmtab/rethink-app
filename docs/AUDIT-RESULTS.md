@@ -754,3 +754,107 @@ Repository integration remains pending: this evidence was produced from the
 verified local working tree. Do not reinterpret committed HEAD
 `43e02cd0956d6aefc487eac0d534eaefa99c769d` as already containing every N4E
 working-tree file.
+
+---
+
+## Phase-1D Canonical Closure Correction — N4E through N10C (2026-09-09)
+
+This later audit entry supersedes only the repository-status and open-blocker
+statements in the dated 2026-08-27 and N4E entries above. Their original
+evidence remains historical.
+
+### Canonical repository state
+
+```text
+branch = phase1d-advanced-filter
+head   = 63bc8593df3efa83b51f68146b1216f4320f8e44
+tracked tree at canonical fast-forward = clean
+staged files = 0
+```
+
+The N4E implementation was integrated by the commits leading through
+`82004b5` and `de40464`; N9 transport/hot-apply integration is canonical at
+`a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`. The old statements that N4E final
+branch integration was pending are no longer current.
+
+### N9 closure
+
+* `InspectionTransportPolicyTest`: 11/11 passed.
+* GHA run `34046896707`: compile/assemble success.
+* Repeated Brave per-app OFF→ON hot apply was device-proven without process
+  death or manual Protection restart.
+* Direct RULE20 device execution remains deferred because Chrome, YouTube,
+  YouTube Music, and Play Store emitted no qualifying UDP/443 control flow.
+  This is not a proven implementation failure.
+
+### N10 source and GHA closure
+
+| Slice | Canonical commit | Focused tests | GHA |
+|---|---|---|---|
+| N10A | `d6d3602880193e4f6250ce01c7b0eac46380faac` | `LocalHttpsProxyTest` 10/10 | run `34174825194` success |
+| N10B | `24b7a292a96ff230345992fce942af5d12c36d79` | `LocalHttpsProxyTest` 11/11 | run `34198839548` success |
+| N10C | `63bc8593df3efa83b51f68146b1216f4320f8e44` | same 11/11 regression gate | run `34225352812` success |
+
+N10A routes CONNECT and plain HTTP proxy requests through the existing
+`BraveVPNService.firewall()` authority before proxy DNS/upstream/CONNECT-200 or
+MITM work. N10B repeats the decision with a directly resolved destination IP
+before socket protection/connect. N10C persists blocked results using the
+existing `NetLogTracker` connection-log path.
+
+### N10 physical-device closure
+
+Mi A1 / `tissot` / Android 16, Chrome UID 10335:
+
+```text
+N10A domain rule:
+  example.com → blocked before DNS/upstream/inspection/MITM
+  temporary rule deleted → connectivity restored
+
+N10B resolved-IP rule:
+  1.1.1.1 → resolved → firewall BLOCK → no protect/connect/MITM
+  temporary rule deleted → firewall NONE → connectivity restored
+
+N10C persistence rule:
+  1.0.0.1:0, Chrome-specific BLOCK
+  Network Logs detail = Chrome / 1.0.0.1 / TCP / 443 /
+                        blocked / IP / Port (App)
+  temporary rule deleted → no IP/port rules
+  blocked log row retained → connectivity restored
+```
+
+The final N10C deployment APK was byte-identical after installation, the local
+and installed signer matched, VPN `tun1` and HTTP proxy `localhost:8443` were
+confirmed, and no crash/FATAL/Koin-startup failure was recorded. `run-as` and
+`su` are unavailable on this device; APK provenance was verified with
+`pm path`, `adb pull`, SHA-256, and `apksigner` instead.
+
+### Current audit verdict
+
+```text
+N4E_POLICY_RUNTIME_AND_INVENTORY=SEALED
+N9_PER_APP_HOT_APPLY_AND_TRANSPORT_SOURCE=SEALED
+N9_RULE20_DIRECT_DEVICE_EXECUTION=DEFERRED_NO_CONTROL_STIMULUS
+N10_LOCAL_PROXY_FIREWALL_AUTHORITY=SEALED
+N10_BLOCKED_LOG_PERSISTENCE=SEALED
+TEMPORARY_N10_FIREWALL_RULES_REMAINING=0
+```
+
+The former HTTPS/browser regression and controlled website filter blocker are
+closed by the later controlled N4E and filter-runtime evidence. Remaining work
+belongs to release-level Filter Source DoD, deferred compatibility/registry
+coverage, resource-threshold evidence, and the RULE20 natural-stimulus gate.
+
+Repository inspection during this documentation sync also found a release-level
+DECISION-011 divergence: commit `82004b55` bundled
+`pkg_exclusions.txt`, `filter_https_traffic_inclusions.txt`,
+`filter_https_traffic_exclusions.json`, and `ssl_block_list.txt`, although only
+the pinned `ssl_allow_list.txt` had been authorized for intake. The four files
+are byte-identical to the supplied attachments, and the bundled notice covers
+only `ssl_allow_list.txt`. Functional N4E evidence remains valid, but preset
+provenance/redistribution must be remediated before a stable release claim.
+
+The upstream-maintenance bridge in DECISION-012 is deliberately later than
+these remaining gates. The locked order is: finish the MITM/adblock branch,
+close release blockers, integrate and push `main`, complete the release gate,
+then create the bridge on a separate branch for future original-Rethink core
+updates. It is not a substitute for any open release item above.
