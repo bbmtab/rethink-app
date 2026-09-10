@@ -1,4 +1,4 @@
-HTTPS Inspection third-party data notice
+HTTPS Inspection data notice
 
 Bundled file: ssl_allow_list.txt
 Purpose: protected-domain bypass preset for HTTPS Inspection
@@ -22,6 +22,69 @@ Pinned package.json Git blob: 7795ae94de557b592abcc53d3e1c7e9c2b279afe
 Standalone upstream LICENSE/COPYING/NOTICE file at pinned commit: none
 MIT license reference: https://spdx.org/licenses/MIT.html
 
-This notice records the upstream package metadata and the exact generated artifact
-used by this repository. CompatibilityIssues-derived files and locally transformed
-attachments are not bundled by this slice.
+This notice records the upstream package metadata and exact generated artifact
+used for ssl_allow_list.txt.
+
+Additional bundled HTTPS Inspection policy assets
+
+Bundled file: pkg_exclusions.txt
+Purpose: package-level routing exclusions for VPN, system-critical, OEM update,
+and other applications that must not be forced through HTTPS inspection.
+Source history: the current content was supplied from an
+AdguardTeam/CompatibilityIssues-derived input.
+Local policy: package identifiers are factual Android identifiers. Their presence
+does not require permission from each application publisher. Inclusion in this
+preset is a Rethink compatibility decision and may evolve through device testing.
+Current redistribution status: unresolved under DECISION-011 because no explicit
+license or redistribution grant was verified for the source dataset.
+
+Bundled file: filter_https_traffic_inclusions.txt
+Purpose: eligibility candidates for browser and embedded-browser applications
+whose HTTPS traffic may be inspected.
+Source history: the current content was supplied from an
+AdguardTeam/CompatibilityIssues-derived input.
+Local policy: Google Search Lite, Bing News, Yandex Search, and similar hybrid
+applications remain candidates because they expose browser functionality.
+Their native/API paths still require device testing for certificate pinning and
+other compatibility failures.
+Current redistribution status: unresolved under DECISION-011 because no explicit
+license or redistribution grant was verified for the source dataset.
+
+Bundled file: filter_https_traffic_exclusions.json
+Purpose: package-level HTTPS inspection compatibility bypass registry.
+Source history: derived from a supplied AdguardTeam/CompatibilityIssues dataset
+and locally maintained for Rethink compatibility.
+Local modifications: ten obsolete package identities were removed in N12B,
+reducing the registry from 201 to 191 unique package entries.
+SHA-256: a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05
+Evidence fields: retained public_issue_url values are compatibility references;
+they are not license declarations or redistribution grants.
+Current redistribution status: unresolved under DECISION-011. The remaining
+registry requires first-party maintenance ownership and device verification.
+
+Bundled file: https_inspection_inclusions.txt
+Previous local name: ssl_block_list.txt
+Purpose: domain eligibility list for HTTPS inspection; this is not a direct
+network or DNS blocklist.
+Effective domains: googleapis.com, graph.facebook.com, doubleclick.net,
+googleadservices.com
+Local policy: all four broad domains are intentionally retained because
+advertising or tracking content can use these shared HTTPS paths. Narrowing is
+deferred unless device evidence demonstrates breakage.
+Local modifications: renamed to express inspection semantics and annotated with
+parser-compatible comments.
+SHA-256: 182d55f35f3fff793b3008d73276f14fc6474cd8044a8aac1b7d7ec624141d5b
+Source status: supplied project input; no upstream license or redistribution
+authorization is asserted by this notice.
+
+Not bundled:
+- quic_pkg_exclusions.txt
+- filter_https_traffic_inclusions_problematic_devices.txt
+
+AdguardTeam/CompatibilityIssues did not provide a standalone license declaration
+at the audited source snapshot. Recording source history, issue references, and
+local transformations does not grant or imply redistribution permission.
+
+DECISION-011 therefore remains only partially remediated. Stable release remains
+blocked until provenance, redistribution, and first-party maintenance requirements
+are resolved.

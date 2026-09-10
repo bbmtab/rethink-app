@@ -858,3 +858,38 @@ these remaining gates. The locked order is: finish the MITM/adblock branch,
 close release blockers, integrate and push `main`, complete the release gate,
 then create the bridge on a separate branch for future original-Rethink core
 updates. It is not a substitute for any open release item above.
+
+## N12 HTTPS Preset Partial Remediation — 2026-09-09
+
+N12A corrected the semantics of the four-domain HTTPS inclusion asset:
+
+```text
+old name = ssl_block_list.txt
+new name = https_inspection_inclusions.txt
+effective domains = 4
+asset sha256 = 182d55f35f3fff793b3008d73276f14fc6474cd8044a8aac1b7d7ec624141d5b
+```
+
+The asset is an HTTPS-inspection eligibility input, not a DNS or firewall
+blocklist. `googleapis.com`, `graph.facebook.com`, `doubleclick.net`, and
+`googleadservices.com` remain broad intentionally.
+
+N12B removed ten obsolete package identities from the HTTPS compatibility
+registry. Entry count changed from 201 to 191; all surviving objects remained
+unchanged and ordered.
+
+```text
+compatibility asset sha256 =
+a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05
+
+focused tests = 15
+failures = 0
+```
+
+Package names are factual identifiers. The remaining release concern is
+first-party ownership and evidence for the curated default-policy decisions,
+not permission from each application publisher.
+
+N12 does not close the compatibility device queue, current Cryptomator testing,
+`ONLY_INCLUDED` runtime-selector confirmation, NOTICE/provenance correction,
+temporary-branch GHA, or stable-release readiness.

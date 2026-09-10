@@ -21,13 +21,6 @@
     "public": true
   },
   {
-    "package_name": "com.microsoft.cortana",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1135",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
     "package_name": "ru.yandex.taxi",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/320",
     "private_issue_url": null,
@@ -140,13 +133,6 @@
     "public": true
   },
   {
-    "package_name": "com.jet.jet.app",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/612",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
     "package_name": "com.amazon.kindle",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/676",
     "private_issue_url": null,
@@ -176,13 +162,6 @@
   },
   {
     "package_name": "com.amazon.windowshop",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/676",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
-    "package_name": "com.amazon.drive",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/676",
     "private_issue_url": null,
     "comment": null,
@@ -357,13 +336,6 @@
     "public": true
   },
   {
-    "package_name": "com.google.android.apps.fireball",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/804",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
     "package_name": "com.skype.raider",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/826",
     "private_issue_url": null,
@@ -462,20 +434,6 @@
     "public": true
   },
   {
-    "package_name": "org.cryptomator.beta",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/991",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
-    "package_name": "com.poloniumarts.svyaznoy",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/987",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
     "package_name": "air.nn.mobile.app.main",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1034",
     "private_issue_url": null,
@@ -499,20 +457,6 @@
   {
     "package_name": "com.ecobee.athenamobile",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1041",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
-    "package_name": "com.nuance.swype.dtc",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1040",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
-    "package_name": "com.nuance.swype.trial",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1040",
     "private_issue_url": null,
     "comment": null,
     "public": true
@@ -763,13 +707,6 @@
     "public": true
   },
   {
-    "package_name": "com.sonymobile.androidapp.audiorecorder",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1817",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
     "package_name": "com.google.android.apps.maps",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1825",
     "private_issue_url": null,
@@ -800,13 +737,6 @@
   {
     "package_name": "org.lumicall.android",
     "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1899",
-    "private_issue_url": null,
-    "comment": null,
-    "public": true
-  },
-  {
-    "package_name": "com.bbm",
-    "public_issue_url": "https://github.com/AdguardTeam/AdguardForAndroid/issues/1940",
     "private_issue_url": null,
     "comment": null,
     "public": true

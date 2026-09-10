@@ -2095,4 +2095,105 @@ or release during the current documentation sync.
 
 ---
 
+## DECISION-011 — N12 PARTIAL PRESET REMEDIATION ADDENDUM (2026-09-09)
+
+**Status:** PARTIALLY REMEDIATED — RELEASE BLOCKER REMAINS
+**Working-tree baseline:** `bb36fda1f799a375772721aa914bd352ac42cfb`
+**Scope:** N12A HTTPS inclusion semantics and N12B obsolete compatibility-package pruning
+
+### Completed remediation
+
+N12A renamed `ssl_block_list.txt` to
+`https_inspection_inclusions.txt`. The new name records the actual policy
+semantics: this is an HTTPS-inspection inclusion preset, not a DNS or
+firewall blocklist.
+
+The asset retains the following four broad parent domains:
+
+```text
+googleapis.com
+graph.facebook.com
+doubleclick.net
+googleadservices.com
+```
+
+A matching domain only makes a connection eligible for HTTPS inspection when
+the active domain mode and application eligibility permit it. Actual blocking
+still requires a matching filtering or firewall rule. Higher-priority system,
+user, compatibility, and package-scoped bypass policy remains authoritative.
+
+N12B removed exactly ten obsolete package identities from
+`filter_https_traffic_exclusions.json`:
+
+```text
+com.microsoft.cortana
+com.google.android.apps.fireball
+com.amazon.drive
+com.bbm
+com.jet.jet.app
+com.nuance.swype.dtc
+com.nuance.swype.trial
+com.sonymobile.androidapp.audiorecorder
+com.poloniumarts.svyaznoy
+org.cryptomator.beta
+```
+
+The registry changed from 201 to 191 unique entries. All 191 surviving objects
+were preserved unchanged and in their original order. The resulting asset has
+SHA-256 `a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05`.
+
+The focused package-preset, preset-loader, and bundled-asset test selection
+passed 15 tests with zero failures.
+
+### Registry ownership clarification
+
+Android package identifiers are factual identifiers. Recording such an
+identifier in a Rethink-owned compatibility registry does not inherently
+require permission from the application publisher or from another filtering
+product.
+
+The remaining governance concern is not ownership of individual package names.
+It is whether Rethink can explain, maintain, and verify its complete curated
+default-policy dataset instead of indefinitely redistributing or trusting an
+external vendor snapshot without independent adjudication.
+
+Future entries may be added through Rethink testing and field evidence. Each
+entry must record a current package identity and a reproducible compatibility
+reason. It does not require permission from the affected app vendor.
+
+### Preserved policy decisions
+
+ColorOS update and download components remain intentionally protected in the
+package-routing exclusion policy because intercepting or rerouting those
+system-critical paths may break Oppo-group firmware and component updates.
+
+Google Search Lite, Bing News, and Yandex Search remain browser-capable
+inclusion candidates because they provide embedded browsing functionality.
+Their native API paths may use certificate pinning, so login, content, account,
+media, native API, and embedded-browser paths require device testing before any
+final compatibility classification.
+
+`quic_pkg_exclusions.txt` and
+`filter_https_traffic_inclusions_problematic_devices.txt` remain unbundled.
+QUIC policy and device-specific browser policy are separate concerns.
+
+### Remaining release blockers
+
+This addendum does not declare preset intake release-clean. The following remain
+open:
+
+* first-party rationale and maintenance metadata for the retained compatibility
+  registry;
+* device verification of weak, contradictory, or old compatibility entries;
+* independent testing of the current `org.cryptomator` package;
+* confirmation or implementation of the production/UI selector for
+  `ONLY_INCLUDED`;
+* accurate bundled NOTICE/provenance text;
+* compatibility testing for hybrid browser/native applications;
+* final temporary-branch GHA and release-level review.
+
+Documentation alone does not close these gates.
+
+---
+
 **End of Decisions — Append Only**

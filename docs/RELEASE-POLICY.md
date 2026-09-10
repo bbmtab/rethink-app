@@ -155,9 +155,11 @@ Still unresolved before a stable release claim:
 
 * the release-level Filter Source Manager DoD in
   `PLAN-FILTER-SOURCE-MANAGER.md` has not been re-adjudicated item by item;
-* DECISION-011 preset intake is not release-clean: four canonical runtime assets
-  were bundled without the accepted provenance/redistribution gate, and the
-  shipped notice documents only `ssl_allow_list.txt`;
+* DECISION-011 preset intake is partially remediated by N12: the misleading
+  `ssl_block_list.txt` name and semantics were corrected, and ten obsolete HTTPS
+  compatibility package identities were removed. Stable release remains blocked
+  until the retained first-party registry decisions, device-verification queue,
+  `ONLY_INCLUDED` runtime selection, and bundled NOTICE/provenance are resolved;
 * direct RULE20 execution still lacks a natural qualifying UDP/443 control
   stimulus;
 * the deferred external compatibility matrix, first-party registry audit, and
