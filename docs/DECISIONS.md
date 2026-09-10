@@ -2196,4 +2196,50 @@ Documentation alone does not close these gates.
 
 ---
 
+## DECISION-011 — N12D/N12E EVIDENCE ADDENDUM (2026-09-10)
+
+**Status:** PARTIALLY REMEDIATED — RELEASE BLOCKER REMAINS
+**Candidate branch:** `tmp/n12e-preset-gha-20260910`
+**Candidate commit:** `776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`
+**Candidate parent:** `bb36fda1f799a375772721aa914bd352ac42bcfb`
+
+### Completed evidence
+
+N12D corrected the bundled HTTPS Inspection NOTICE. It now records all five
+bundled policy files, distinguishes the two unbundled inputs, preserves the
+pinned `ssl_allow_list.txt` provenance, and explicitly states that documenting
+source history does not grant redistribution permission.
+
+N12E verified the corrected combined candidate using the existing
+`.github/workflows/build-apk.yml` workflow. GitHub Actions run
+`34461990520` was dispatched with `workflow_dispatch` for
+`tmp/n12e-preset-gha-20260910` at
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`.
+
+The `Build & Sign APK` job completed successfully. It uploaded artifact
+`release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`, size
+173746306 bytes, with artifact digest
+`sha256:4db466557bf929dc197a97645e78561f55c7dfd5272ec800e81b495e32e5de14`.
+The artifact was not expired when audited. The `Create GitHub Release` step was
+skipped, as required for a branch dispatch.
+
+The candidate is one non-merge commit above
+`bb36fda1f799a375772721aa914bd352ac42bcfb` and changes exactly the ten
+reviewed N12 paths. The earlier focused test selection passed 15 tests with zero
+failures.
+
+### Release boundary
+
+This successful temporary-branch build is verification evidence only. It did
+not create a GitHub Release, tag, pull request, or merge, and it did not advance
+`phase1d-advanced-filter`.
+
+Stable release remains blocked by the unresolved first-party registry
+rationale and maintenance metadata, redistribution authorization or independent
+replacement of donor-derived curated datasets, compatibility device testing,
+current Cryptomator testing, `ONLY_INCLUDED` production/UI selection, and the
+remaining release gates outside N12.
+
+---
+
 **End of Decisions — Append Only**

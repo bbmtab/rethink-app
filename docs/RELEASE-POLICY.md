@@ -151,15 +151,37 @@ N10 canonical head passed `LocalHttpsProxyTest` 11/11, GHA build run
 `34225352812`, and the physical-device block/delete/restore/log-retention gate.
 No temporary N10 rule remains.
 
+### N12 corrected temporary-candidate evidence — 2026-09-10
+
+The corrected N12 candidate is commit
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85` on
+`tmp/n12e-preset-gha-20260910`. Its only parent is canonical baseline
+`bb36fda1f799a375772721aa914bd352ac42bcfb`, and it contains exactly the
+ten reviewed N12 paths.
+
+GitHub Actions run `34461990520` used `workflow_dispatch` with
+`.github/workflows/build-apk.yml`. The `Build & Sign APK` job completed
+successfully and uploaded
+`release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`. The
+`Create GitHub Release` step was skipped. No release, tag, pull request, merge,
+or canonical-branch push was created.
+
+N12D corrected the bundled NOTICE, but accurate provenance documentation does
+not itself grant redistribution authorization. The successful N12E build proves
+that the corrected candidate builds in GHA; it does not make the candidate a
+stable release.
+
 Still unresolved before a stable release claim:
 
 * the release-level Filter Source Manager DoD in
   `PLAN-FILTER-SOURCE-MANAGER.md` has not been re-adjudicated item by item;
 * DECISION-011 preset intake is partially remediated by N12: the misleading
-  `ssl_block_list.txt` name and semantics were corrected, and ten obsolete HTTPS
-  compatibility package identities were removed. Stable release remains blocked
-  until the retained first-party registry decisions, device-verification queue,
-  `ONLY_INCLUDED` runtime selection, and bundled NOTICE/provenance are resolved;
+  `ssl_block_list.txt` name and semantics were corrected, ten obsolete HTTPS
+  compatibility package identities were removed, the bundled NOTICE was
+  corrected, and the combined candidate passed temporary-branch GHA. Stable
+  release remains blocked until the retained first-party registry decisions,
+  device-verification queue, `ONLY_INCLUDED` runtime selection, and
+  redistribution authorization or independent dataset replacement are resolved;
 * direct RULE20 execution still lacks a natural qualifying UDP/443 control
   stimulus;
 * the deferred external compatibility matrix, first-party registry audit, and

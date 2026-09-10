@@ -865,8 +865,17 @@ The policy constraints for these inputs remain:
   `org.cryptomator.beta` decision.
 - [ ] Add first-party reason, verification date/version, and maintenance status
   for retained compatibility entries.
-- [ ] Correct NOTICE/provenance without claiming that documentation itself grants
-  redistribution rights.
+- [x] Correct the bundled NOTICE so it records all five bundled policy files,
+  distinguishes the two unbundled inputs, and does not claim that documentation
+  grants redistribution rights. Completed by N12D.
+- [ ] Resolve redistribution authorization or independently replace the
+  donor-derived curated datasets. Accurate NOTICE text does not grant
+  redistribution permission.
+- [x] Verify the corrected combined N12 candidate on a temporary branch using
+  `.github/workflows/build-apk.yml`. N12E run `34461990520` completed
+  successfully for commit
+  `776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`; its release-creation step
+  was skipped.
 - [ ] Test Google Search Lite, Bing News, and Yandex Search across both embedded
   browser and native API flows.
 - [ ] Preserve ColorOS update/download routing exclusions unless device evidence

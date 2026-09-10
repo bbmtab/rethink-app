@@ -837,6 +837,9 @@ N9_RULE20_DIRECT_DEVICE_EXECUTION=DEFERRED_NO_CONTROL_STIMULUS
 N10_LOCAL_PROXY_FIREWALL_AUTHORITY=SEALED
 N10_BLOCKED_LOG_PERSISTENCE=SEALED
 TEMPORARY_N10_FIREWALL_RULES_REMAINING=0
+N12_PRESET_PARTIAL_REMEDIATION=SEALED
+N12_CORRECTED_TEMP_BRANCH_GHA=SEALED
+STABLE_RELEASE_STATUS=BLOCKED
 ```
 
 The former HTTPS/browser regression and controlled website filter blocker are
@@ -890,6 +893,20 @@ Package names are factual identifiers. The remaining release concern is
 first-party ownership and evidence for the curated default-policy decisions,
 not permission from each application publisher.
 
-N12 does not close the compatibility device queue, current Cryptomator testing,
-`ONLY_INCLUDED` runtime-selector confirmation, NOTICE/provenance correction,
-temporary-branch GHA, or stable-release readiness.
+N12D corrected the bundled NOTICE so it accurately records all five bundled
+policy files. That correction records source history and the unresolved
+redistribution status; it does not create or imply a redistribution grant.
+
+N12E verified corrected temporary candidate
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`, whose only parent is
+`bb36fda1f799a375772721aa914bd352ac42bcfb`. GitHub Actions run
+`34461990520` completed successfully on
+`tmp/n12e-preset-gha-20260910`. The `Build & Sign APK` job succeeded and
+uploaded `release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`;
+the `Create GitHub Release` step was skipped.
+
+N12D and N12E close the NOTICE-accuracy and temporary-branch build-verification
+items for this slice. They do not close DECISION-011, the compatibility device
+queue, current Cryptomator testing, `ONLY_INCLUDED` runtime-selector
+confirmation, first-party registry ownership, redistribution authorization, or
+stable-release readiness.
