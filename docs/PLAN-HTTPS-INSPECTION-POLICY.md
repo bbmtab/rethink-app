@@ -788,34 +788,32 @@ N3D bundles only `app/src/main/assets/https_inspection/ssl_allow_list.txt`. It i
 
 The bundled asset is limited to protected-domain policy input. N3D did not add Android loading, dependency injection, runtime policy publication, UI integration, QUIC handling, or changes to the default treatment of applications. The consolidated policy suite passed 32 tests with zero failures and zero errors.
 
-#### Canonical governance divergence: unauthorized inputs are currently bundled
+#### Canonical governance divergence: N12 partial remediation completed
 
-DECISION-011 authorized only the hash-pinned `ssl_allow_list.txt`. Nevertheless,
-commit `82004b55eb195ae8b4aa0a65cb685a1f4a250423` added four other assets that are
-byte-identical to the supplied attachments:
+Commit `82004b55eb195ae8b4aa0a65cb685a1f4a250423` originally
+bundled four inputs beyond the `ssl_allow_list.txt` intake authorized by
+DECISION-011.
 
-```text
-pkg_exclusions.txt
-sha256 69230a7b5dc586c6dd9bd3da4e65ae749b3c05a099b30eb324c41c9c38ea5d47
+N12 partially remediates that divergence:
 
-filter_https_traffic_inclusions.txt
-sha256 2da0920ee235c3c34584be859443a27f8fd7d40ba8f55c69b050b716770f7299
+* `ssl_block_list.txt` was renamed to
+  `https_inspection_inclusions.txt`, given explicit inspection—not
+  blocking—semantics, and retained with four documented parent domains;
+* `filter_https_traffic_exclusions.json` was independently reviewed for obsolete
+  package identities, pruned from 201 to 191 entries, and re-pinned at SHA-256
+  `a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05`;
+* `pkg_exclusions.txt` and `filter_https_traffic_inclusions.txt` remain unchanged;
+* `quic_pkg_exclusions.txt` and
+  `filter_https_traffic_inclusions_problematic_devices.txt` remain unbundled.
 
-filter_https_traffic_exclusions.json
-sha256 4ae3b2fd7a0a9898378334150433886683671abed390adb6529ec7b4878723a4
+Package identifiers are factual identifiers and may be maintained by Rethink
+without permission from the affected application publisher. The remaining gate
+is ownership and maintainability of the curated policy decisions: current
+package identity, reproducible rationale, precedence, device evidence where
+needed, and accurate NOTICE/provenance documentation.
 
-ssl_block_list.txt
-sha256 ae59d79d6534a797a9e7ca9fa62c6131c600c2f2ea83c2022b1e1e8156359a7b
-```
-
-The current `NOTICE.txt` covers only `ssl_allow_list.txt` and explicitly says
-CompatibilityIssues-derived files were not bundled by that slice. It therefore
-does not resolve the provenance/redistribution status of the four files above.
-
-Functional N4E runtime/device closure remains valid, but a stable release must
-either remove/replace those four inputs with Rethink-owned, independently
-verified registries or add explicit redistribution authorization and accurate
-notices. Documentation sync does not grant that authorization.
+The functional N4E runtime/device closure remains valid. N12 does not yet make
+the complete preset set release-clean.
 
 The policy constraints for these inputs remain:
 
@@ -824,19 +822,31 @@ The policy constraints for these inputs remain:
 - `filter_https_traffic_inclusions_problematic_devices.txt`: not currently
   bundled; device-specific selection criteria and fallback behavior have not
   been modeled.
-- `filter_https_traffic_exclusions.json`: its schema, selection precedence, and Android integration contract have not been accepted.
+- `filter_https_traffic_exclusions.json`: runtime loading and precedence already
+  exist. N12B removed ten obsolete identities and retained 191 unchanged
+  survivors. First-party rationale, maintenance metadata, weak-entry device
+  verification, and current-package review remain open.
 - `quic_pkg_exclusions.txt`: not currently bundled; remains donor
   research/compatibility data and is
   not the runtime authority for inspection force-TCP. Canonical N9 transport
   enforcement is package-agnostic and derives its result from
   `InspectionPolicyEngine`. Any future package-specific QUIC exception registry
   requires separate provenance, compatibility, and policy approval.
-- `ssl_block_list.txt`: its authoritative source, redistribution terms, and whitelist-mode semantics have not been accepted.
+- `https_inspection_inclusions.txt`: contains four broad parent domains that are
+  candidates for HTTPS inspection in include-only domain mode. It is not a DNS
+  or firewall blocklist. Compatibility fallout must be handled through package
+  exclusions or package-scoped domain bypass, not by silently narrowing the
+  global advertising/analytics inspection candidates.
 
 `AdguardTeam/CompatibilityIssues` may be used as a research reference, but its repository did not expose a `LICENSE`, `COPYING`, `NOTICE`, or package-level license declaration during the 2026-08-31 audit. Project governance therefore does not authorize redistributing those raw lists. A transformed attachment is not an acceptable substitute for an authorized raw upstream artifact.
 
 #### First-party registry TODO
 
+- [x] Rename `ssl_block_list.txt` to
+  `https_inspection_inclusions.txt`, document its inspection semantics, retain
+  all four broad domains, and pin focused asset tests.
+- [x] Remove the ten independently identified obsolete package identities from
+  `filter_https_traffic_exclusions.json`.
 - [ ] Audit every proposed system hard-bypass UID and package against an authoritative platform source and record a concrete operational rationale. Do not copy third-party VPN or OEM package exclusions merely because they appear in another product.
 - [ ] Build the known-browser registry as first-party maintained data. Verify the production package identifier, browser identity, and essential HTTPS-inspection functionality for each entry.
 - [ ] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
@@ -848,9 +858,19 @@ The policy constraints for these inputs remain:
   one, with its own provenance and policy decision.
 - [ ] Define the schema and precedence for `filter_https_traffic_exclusions.json` before parsing or bundling it.
 - [ ] Create each remaining asset only after its provenance, redistribution authorization, semantics, parser contract, and focused tests are accepted.
-- [x] Connect the preset loader to Android assets and runtime policy publication
-  (implemented by N4E). The four unapproved bundled inputs above remain a
-  release-governance defect until removed/replaced or explicitly authorized.
+- [ ] Confirm or implement the production/UI selector for `ONLY_INCLUDED`.
+- [ ] Device-test the weak or contradictory compatibility queue before removing
+  additional entries.
+- [ ] Test current `org.cryptomator`; do not inherit the obsolete
+  `org.cryptomator.beta` decision.
+- [ ] Add first-party reason, verification date/version, and maintenance status
+  for retained compatibility entries.
+- [ ] Correct NOTICE/provenance without claiming that documentation itself grants
+  redistribution rights.
+- [ ] Test Google Search Lite, Bing News, and Yandex Search across both embedded
+  browser and native API flows.
+- [ ] Preserve ColorOS update/download routing exclusions unless device evidence
+  proves that removal is safe.
 
 #### Locked defaults for remaining follow-up work
 

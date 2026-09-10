@@ -58,6 +58,6 @@ class InspectionPolicyPresetLoader(
             "https_inspection/filter_https_traffic_exclusions.json"
 
         const val INCLUDED_DOMAIN_MITM_ASSET_PATH =
-            "https_inspection/ssl_block_list.txt"
+            "https_inspection/https_inspection_inclusions.txt"
     }
 }

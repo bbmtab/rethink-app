@@ -157,9 +157,9 @@ class InspectionPolicyBundledAssetTest {
                 "https_inspection/filter_https_traffic_exclusions.json"
             )
 
-        assertEquals(44745L, asset.length())
+        assertEquals(42614L, asset.length())
         assertEquals(
-            "4ae3b2fd7a0a9898378334150433886683671abed390adb6529ec7b4878723a4",
+            "a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05",
             sha256(asset)
         )
 
@@ -168,12 +168,12 @@ class InspectionPolicyBundledAssetTest {
                 InspectionAppExclusionPresetParser().parse(input)
             }
 
-        assertEquals(201, preset.rules.size)
-        assertEquals(201, preset.excludedPackages.size)
+        assertEquals(191, preset.rules.size)
+        assertEquals(191, preset.excludedPackages.size)
         assertTrue(preset.diagnostics.isEmpty())
         assertTrue(preset.rules.all { it.isPublic })
         assertEquals(
-            198,
+            188,
             preset.rules.count { it.publicIssueUrl != null }
         )
     }
@@ -182,12 +182,12 @@ class InspectionPolicyBundledAssetTest {
     fun bundledIncludedDomainPresetMatchesPinnedArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/ssl_block_list.txt"
+                "https_inspection/https_inspection_inclusions.txt"
             )
 
-        assertEquals(182L, asset.length())
+        assertEquals(811L, asset.length())
         assertEquals(
-            "ae59d79d6534a797a9e7ca9fa62c6131c600c2f2ea83c2022b1e1e8156359a7b",
+            "182d55f35f3fff793b3008d73276f14fc6474cd8044a8aac1b7d7ec624141d5b",
             sha256(asset)
         )
 
