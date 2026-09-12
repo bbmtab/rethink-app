@@ -83,6 +83,7 @@ class RethinkDnsApplicationPlay : Application() {
     private suspend fun scheduleJobs() {
         get<WorkScheduler>().scheduleAppExitInfoCollectionJob()
         get<ScheduleManager>().scheduleDatabaseRefreshJob()
+        get<ScheduleManager>().scheduleFilterUpdateJob()
         get<WorkScheduler>().scheduleDataUsageJob()
         get<WorkScheduler>().schedulePurgeConnectionsLog()
         get<WorkScheduler>().schedulePurgeConsoleLogs()

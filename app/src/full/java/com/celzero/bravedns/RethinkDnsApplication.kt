@@ -99,6 +99,7 @@ class RethinkDnsApplication : Application() {
         get<WorkScheduler>().scheduleAppExitInfoCollectionJob()
         // database refresh to keep app data up to date
         get<ScheduleManager>().scheduleDatabaseRefreshJob()
+        get<ScheduleManager>().scheduleFilterUpdateJob()
         get<WorkScheduler>().scheduleDataUsageJob()
         get<WorkScheduler>().schedulePurgeConnectionsLog()
         get<WorkScheduler>().schedulePurgeConsoleLogs()
