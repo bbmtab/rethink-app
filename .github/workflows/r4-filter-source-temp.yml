@@ -1,0 +1,20 @@
+name: r4-filter-source-compile-probe
+on:
+  push:
+    branches: [ "temp/r4-filter-source-compile-20260914" ]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-java@v5
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    - name: Neutralize local Windows Gradle Java home
+      run: sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+    - name: chmod gradlew
+      run: chmod +x gradlew
+    - name: Kotlin compile (fdroid full debug)
+      run: ./gradlew :app:compileFdroidFullDebugKotlin --no-daemon --stacktrace

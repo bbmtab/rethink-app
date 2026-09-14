@@ -138,10 +138,24 @@ sealed interface RemoveCustomSourceResult {
     ) : RemoveCustomSourceResult
 }
 
+interface FilterSourceCompilerRepository {
+    suspend fun getEnabledSources(): List<FilterSource>
+
+    suspend fun updateCompilationDiagnostics(
+        id: Int,
+        totalLineCount: Int, parsedRuleCount: Int,
+        unsupportedRuleCount: Int, invalidRuleCount: Int,
+        networkRuleCount: Int, cosmeticRuleCount: Int,
+        proceduralRuleCount: Int, scriptletRuleCount: Int,
+        cspRuleCount: Int, htmlFilterRuleCount: Int,
+        lastUpdated: Long = System.currentTimeMillis()
+    )
+}
+
 class FilterSourceRepository(
     private val filterSourceDao: FilterSourceDao,
     private val fileStore: FilterSourceFileStore
-) {
+) : FilterSourceCompilerRepository {
 
     companion object {
         private const val TAG = "FilterSourceRepo"
@@ -152,7 +166,7 @@ class FilterSourceRepository(
 
     suspend fun getAllSources(): List<FilterSource> = filterSourceDao.getAllSources()
 
-    suspend fun getEnabledSources(): List<FilterSource> = filterSourceDao.getEnabledSources()
+    override suspend fun getEnabledSources(): List<FilterSource> = filterSourceDao.getEnabledSources()
 
     suspend fun getSourceById(id: Int): FilterSource? = filterSourceDao.getSourceById(id)
 
@@ -270,7 +284,7 @@ class FilterSourceRepository(
     }
 
     // ---- B3 Filter Source Compiler diagnostics ------------------------------------
-    suspend fun updateCompilationDiagnostics(
+    override suspend fun updateCompilationDiagnostics(
         id: Int,
         totalLineCount: Int,
         parsedRuleCount: Int,
@@ -282,7 +296,7 @@ class FilterSourceRepository(
         scriptletRuleCount: Int,
         cspRuleCount: Int,
         htmlFilterRuleCount: Int,
-        lastUpdated: Long = System.currentTimeMillis()
+        lastUpdated: Long
     ) {
         filterSourceDao.updateCompilationDiagnostics(
             id = id,
