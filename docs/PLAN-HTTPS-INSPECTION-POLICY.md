@@ -772,7 +772,12 @@ part of B4.5 and must not be mixed into this policy closure.
 
 ### 12.3 Deferred compatibility tests
 
-- [ ] General applications such as WeChat receive default BYPASS.
+- [x] General applications such as WeChat receive default BYPASS.
+  - 2026-09-16 (Mi A1 A16, sideloaded WeChat 8.0.76 uid=10465, defaults
+    untouched): pre-login long-conn flows (hklong/dns/hkextshort.weixin.qq.com
+    :443/:80/:8080) all forwarded, zero MITM/RULE20. Scope: pre-login only;
+    post-login/Mini Program is #8 (still open). Memory:
+    project_wechat_bypass_20260916.
 - [ ] Package exclusion beats browser or user inclusion.
 - [ ] Package-scoped domain bypass does not affect another app.
 - [ ] QUIC allowance does not automatically create HTTPS bypass.
@@ -875,8 +880,15 @@ The policy constraints for these inputs remain:
 - [ ] Confirm or implement the production/UI selector for `ONLY_INCLUDED`.
 - [ ] Device-test the weak or contradictory compatibility queue before removing
   additional entries.
-- [ ] Test current `org.cryptomator`; do not inherit the obsolete
+- [x] Test current `org.cryptomator`; do not inherit the obsolete
   `org.cryptomator.beta` decision.
+  - 2026-09-16 (Mi A1 A16, sideloaded 2.0.0 uid=10464, registry has NO
+    cryptomator entry): default-BYPASS arm clean (launch/wizard/trial, no
+    crash); explicit-MITM arm clean (cold start, zero TLS/handshake/pinning
+    errors, zero deaths). No exclusion rationale found; `.beta` NOT
+    inherited. Depth limit: vault-sync-over-MITM needs a cloud account
+    (open, recorded — not passed). Switch restored OFF. Memory:
+    project_cryptomator_compat_20260916.
 - [ ] Add first-party reason, verification date/version, and maintenance status
   for retained compatibility entries.
 - [x] Correct the bundled NOTICE so it records all five bundled policy files,
