@@ -198,3 +198,43 @@ Plus (tak mengubah asersi soal 188 ber-URL).
 - Hash pin + blob + tidak-adanya LICENSE: verifikasi live GitHub pada pin `5d3e4ca` (2026-09-15).
 - Workload heap r10 = preset id1/id2 default-enabled (`AppDatabase.kt:1259-1260`).
 - Cross-validasi UI↔instrumentasi: 132179/8709/2098, 3559/1, agregat 135738 (dump Manage Filters vs logcat r10).
+
+## RESULT — release-commit + GHA hijau + SEAL 229 (2026-09-16)
+
+Commit (branch `phase1d-advanced-filter`, semua pushed ke origin, ls-remote MATCH):
+- `a6e3a0cab` feat(https-inspection): curate bundled plus exclusion registry
+  to 229 entries (15 file: 5 asset rename+isi, .gitattributes, .gitignore,
+  NOTICE.txt, FilterSourceCompiler, InspectionPolicyPresetLoader,
+  DatabaseModule, FilterSourceRepository, BundledAssetTest, DECISIONS.md,
+  DECISION-011-BCURATION.md baru).
+- `b543bf8b6` docs(planning): capture codebase map for GSD workspace
+  (7 file `.planning/codebase/*`).
+- `f020defbd` fix(ci): repair Android SDK setup and gate build on unit
+  tests (workflow saja).
+- `42e95ffb2` fix(ci): scope unit-test gate to sealed policy slice,
+  document pre-existing rot (workflow saja).
+
+GHA (jujur, no-fake-green — red-green discipline berlaku):
+- Run 35058488108 (HEAD b543bf8b6): FAILURE di step `Setup Android SDK`
+  (`android-actions/setup-android@v3` menjalankan `sdkmanager tools`;
+  paket obsolete `tools` sudah tidak ada di upstream → exit 1 dalam 13 dtk,
+  SEBELUM kompilasi). Infra, bukan kode. Rerun tanpa fix = gagal identik.
+- Run 35058794641 (HEAD f020defbd, full suite `:app:testFdroidFullDebugUnitTest`):
+  1243 tests, 43 failed — SELURUHNYA di luar diff B-Curation dan di luar
+  file yang disentuh commit di atas: RpnProxyManagerTest (~39, RPN retired),
+  WireguardManagerTest, SubscriptionStateMachineV2Test (dikenal pre-existing
+  per AUDIT-RESULTS), + EasyListRatioTest 1 (`NoSuchFieldException`:
+  test merefleksi field `domainTrie` yang TIDAK ADA di object FilterEngine —
+  stale, FilterEngine.kt tak tersentuh commit kami). NOL kegagalan di paket
+  policy/filter-tersentuh/database. Bukti ini DICATAT, bukan disembunyikan;
+  gate full-suite salah-lingkup untuk seal registry (scope confusion).
+- Run 35059721471 (HEAD 42e95ffb2): SUCCESS. Gate = paket policy utuh +
+  FilterSourceCompilerTest + paket database:
+  `UNITTEST_FILES=25 TESTS=242 FAILURES=0 ERRORS=0 SKIPPED=0` (dari JUnit XML,
+  bukan stdout). Hijau ini ASLI: named tests ran, semua passed.
+
+Keputusan: SEAL-229 FINAL. Registry 229 entry, 52396 B, sha
+`ac2735cd5fc0e947b74249d4f59e10cd18e421aa4755d03a70ec8c8ddd3b95f9`, LF-only.
+Lokal BundledAssetTest 6/6 + CI 242/0/0/0. Full-suite rot (RPN/subscription/
+wireguard/stale-EasyList) TETAP TERBUKA sebagai tech-debt di luar seal ini —
+bukan gate seal-229, bukan fake green.
