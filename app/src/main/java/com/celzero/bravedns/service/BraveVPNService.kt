@@ -1948,6 +1948,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     // Idempotent start (cancel-first): mirrors observeVpnRestartRequests().
     private fun observeVpnWatchdog() {
         watchdogJob?.cancel()
+        Logger.i(LOG_TAG_VPN, "watchdog: ticker started")
         watchdogJob = io("watchdog") {
             val cfg = VpnWatchdog.Config()
             // First check after one interval: lets a fresh establish settle.
