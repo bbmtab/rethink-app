@@ -778,7 +778,12 @@ part of B4.5 and must not be mixed into this policy closure.
 - [ ] QUIC allowance does not automatically create HTTPS bypass.
 - [ ] HTTPS bypass does not automatically allow QUIC.
 - [ ] Handshake failure does not mutate or persist policy.
-- [ ] Chrome positive control reaches MITM with the correct reason.
+- [x] Chrome positive control reaches MITM with the correct reason.
+  - 2026-09-16 (Mi A1 A16, build g1c0713120, master ON, CA trusted):
+    `example.com:443: MITM (MITM_KNOWN_BROWSER)` x2 + www.google.com MITM +
+    19 TLS MITM tunnel lines, 86 Chrome-uid (10335) flows. BYPASS_DOMAIN
+    intact for spot-pa/accounts.google.com. Memory:
+    project_dod7_chrome_positive_control_20260916.
 - [ ] WeChat Mini Program works under default BYPASS (issue #5689).
 - [ ] WeChat/AliExpress media works with verified QUIC policy (issue #5497).
 - [ ] Google Search/Gboard succeeds on the first attempt (issue #5617).
