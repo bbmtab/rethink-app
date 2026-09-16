@@ -1963,6 +1963,19 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
     }
 
     private suspend fun runVpnWatchdogCheck(cfg: VpnWatchdog.Config) {
+        // A dying watchdog must never be silent (that IS the bug class):
+        // any observation failure is logged and the ticker lives on.
+        // CancellationException rethrows: cancel must still end the loop.
+        try {
+            runVpnWatchdogCheckInner(cfg)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.e(LOG_TAG_VPN, "watchdog: check failed (ticker survives): ${e.message}", e)
+        }
+    }
+
+    private suspend fun runVpnWatchdogCheckInner(cfg: VpnWatchdog.Config) {
         val shouldRun = persistentState.vpnEnabledLiveData.value == true
         // Mirror the Home fragment's own guard: paused topology differs.
         val paused = VpnController.isAppPaused()
