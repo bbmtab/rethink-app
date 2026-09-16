@@ -790,7 +790,11 @@ part of B4.5 and must not be mixed into this policy closure.
     242-run. Device part open, recorded — not passed.
 - [ ] QUIC allowance does not automatically create HTTPS bypass.
 - [ ] HTTPS bypass does not automatically allow QUIC.
-- [ ] Handshake failure does not mutate or persist policy.
+- [x] Handshake failure does not mutate or persist policy.
+  - 2026-09-16 (Mi A1 A16, Chrome MITM): `expired`/`wrong.host.badssl.com`
+    → upstream cert rejected + explicit `not adding to bypass cache`; zero
+    policy-mutation lines; Chrome switch still ON after; no crash. Memory:
+    project_m6_handshake_nomutate_20260916.
 - [x] Chrome positive control reaches MITM with the correct reason.
   - 2026-09-16 (Mi A1 A16, build g1c0713120, master ON, CA trusted):
     `example.com:443: MITM (MITM_KNOWN_BROWSER)` x2 + www.google.com MITM +
