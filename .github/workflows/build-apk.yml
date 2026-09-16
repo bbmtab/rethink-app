@@ -28,8 +28,23 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # Runner ubuntu-latest already ships an Android SDK. The third-party
+      # setup-android action is pinned OFF because v3 hard-codes
+      # `sdkmanager tools` and the obsolete `tools` package no longer exists
+      # upstream (exit 1 before any compile). Install only real packages.
+      - name: Setup Android SDK (preinstalled runner SDK)
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
+            SDKMGR="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -n 1)"
+          fi
+          echo "Using sdkmanager: $SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null
+          "$SDKMGR" "platform-tools" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -45,6 +60,27 @@ jobs:
 
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
+
+      # No-fake-green gate (red-green discipline): compile-only success is NOT
+      # green. The unit-test task MUST run and pass; counts are re-reported
+      # from JUnit XML, not trusted from gradle stdout alone.
+      - name: Run unit tests (focused + consolidated gates)
+        run: ./gradlew :app:testFdroidFullDebugUnitTest --console=plain --stacktrace
+
+      - name: Report unit-test counts from JUnit XML
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          files = glob.glob('app/build/test-results/testFdroidFullDebugUnitTest/*.xml')
+          for p in files:
+              r = ET.parse(p).getroot()
+              t += int(r.get('tests', 0)); f += int(r.get('failures', 0))
+              e += int(r.get('errors', 0)); s += int(r.get('skipped', 0))
+          print(f'UNITTEST_FILES={len(files)} TESTS={t} FAILURES={f} ERRORS={e} SKIPPED={s}')
+          raise SystemExit(1 if (f or e) else 0)
+          EOF
 
       - name: Decode Keystore
         if: github.event_name != 'pull_request'
