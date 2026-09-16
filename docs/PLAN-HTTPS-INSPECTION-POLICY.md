@@ -802,7 +802,16 @@ part of B4.5 and must not be mixed into this policy closure.
     intact for spot-pa/accounts.google.com. Memory:
     project_dod7_chrome_positive_control_20260916.
 - [ ] WeChat Mini Program works under default BYPASS (issue #5689).
+  - 2026-09-16 NOTE: BLOCKED — no WeChat account available on the test
+    device; Mini Programs require a logged-in (human, personal-account)
+    session. Pre-login default-BYPASS evidence recorded separately (#1).
+    DEFERRED, will retest when an account exists — NOT dropped. Unblocks
+    only when the owner logs in personally.
 - [ ] WeChat/AliExpress media works with verified QUIC policy (issue #5497).
+  - 2026-09-16 NOTE: BLOCKED — same missing WeChat account for the WeChat
+    half; AliExpress app itself is not installed. No account credentials
+    may ever be handled by agents. DEFERRED, will retest when account/app
+    exist — NOT dropped; unblocks on owner-provided login/app.
 - [ ] Google Search/Gboard succeeds on the first attempt (issue #5617).
 - [ ] Chrome MoQT/WebTransport is not broken by QUIC policy (issue #6076).
 - [x] Restart preserves package, domain, QUIC, decision, and reason state.
@@ -905,7 +914,9 @@ The policy constraints for these inputs remain:
     crash); explicit-MITM arm clean (cold start, zero TLS/handshake/pinning
     errors, zero deaths). No exclusion rationale found; `.beta` NOT
     inherited. Depth limit: vault-sync-over-MITM needs a cloud account
-    (open, recorded — not passed). Switch restored OFF. Memory:
+    (open, recorded — not passed; 2026-09-16 NOTE: no cloud account on the
+    test device, credentials human-only — DEFERRED, will retest when an
+    account exists, NOT dropped). Switch restored OFF. Memory:
     project_cryptomator_compat_20260916.
 - [ ] Add first-party reason, verification date/version, and maintenance status
   for retained compatibility entries.
