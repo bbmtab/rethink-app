@@ -895,13 +895,21 @@ The policy constraints for these inputs remain:
   `filter_https_traffic_exclusions.json`.
 - [ ] Audit every proposed system hard-bypass UID and package against an authoritative platform source and record a concrete operational rationale. Do not copy third-party VPN or OEM package exclusions merely because they appear in another product.
 - [ ] Build the known-browser registry as first-party maintained data. Verify the production package identifier, browser identity, and essential HTTPS-inspection functionality for each entry.
-- [ ] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
+- [x] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
   - 2026-09-16 device evidence (Mi A1 A16, master ON, CA trusted): Chrome
     `example.com` MITM_KNOWN_BROWSER (DoD #7); Brave `example.com` +
     `www.example.org` MITM_KNOWN_BROWSER x4 (129 uid flows); Firefox
-    telemetry/ads/youtube/instagram MITM_KNOWN_BROWSER (RULE20-R2). Edge
-    NOT installed — still open. Memory: project_browser_audit_chrome_brave_firefox_20260916.
-- [ ] Resolve the existing Edge package candidate discrepancy during an authorized runtime-integration slice: `com.microsoft.empath` is not the verified Microsoft Edge package identifier; the verified Google Play identifier is `com.microsoft.emmx`.
+    telemetry/ads/youtube/instagram MITM_KNOWN_BROWSER (RULE20-R2); Edge
+    (Play-installed `com.microsoft.emmx` 153.0.4234.32 uid=10466)
+    `example.com` + `www.example.org` MITM_KNOWN_BROWSER, 114 uid flows.
+    4/4 DONE. (First Edge run void: VPN dead 3rd time + LMK storm killing
+    Edge renderers 13x/min — recorded, rerun clean.) Memory:
+    project_browser_audit_chrome_brave_firefox_20260916.
+- [x] Resolve the existing Edge package candidate discrepancy during an authorized runtime-integration slice: `com.microsoft.empath` is not the verified Microsoft Edge package identifier; the verified Google Play identifier is `com.microsoft.emmx`.
+  - 2026-09-16 RESOLVED by evidence: `com.microsoft.emmx` installed from
+    Play (installerPackageName=com.android.vending, v153.0.4234.32),
+    present in `https_inspection_known_browsers_plus:9`, MITM live on
+    device. No `empath` anywhere in tree (grep-clean).
 - [ ] Define how problematic-device browser entries are selected before creating any corresponding asset.
 - [ ] Do not add a package-specific QUIC registry merely to implement HTTPS
   inspection force-TCP; that enforcement is already policy-driven. Add a
