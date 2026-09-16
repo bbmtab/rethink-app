@@ -105,6 +105,14 @@ object TunFlowManager : KoinComponent {
         val isIfaceMetered: (String) -> Boolean,
         val isActiveIfaceCellular: () -> Boolean,
         val isActiveIfaceMetered: () -> Boolean,
+        // Bridge (Plus): post-firewall transport-policy hook. Runs after
+        // evaluateFirewall with the base rule; returns the effective rule
+        // (e.g. RULE20 force-TCP for MITM-inspected flows). Null = no
+        // adjustment. Carried here (not hard-wired) so TunFlowManager stays
+        // core-clean; BraveVPNService supplies the Plus implementation.
+        val applyInspectionTransportPolicy:
+            (suspend (ConnTrackerMetaData, FirewallRuleset) -> FirewallRuleset)? =
+            null,
     )
 
     // IPv4 VPN constants
@@ -959,7 +967,13 @@ object TunFlowManager : KoinComponent {
         rinr: Boolean,
         isAlg: Boolean
     ) {
-        val rule = evaluateFirewall(ctx, metadata, domains, anyRealIpBlocked, isSplApp, rinr, isAlg)
+        val baseRule = evaluateFirewall(ctx, metadata, domains, anyRealIpBlocked, isSplApp, rinr, isAlg)
+
+        // Bridge (Plus): transport-policy adjustment AFTER base firewall
+        // evaluation, BEFORE grounding. Ordering matches the pre-split
+        // pipeline (firewall first, blocks take precedence inside the hook).
+        val rule = ctx.applyInspectionTransportPolicy?.invoke(metadata, baseRule)
+            ?: baseRule
 
         metadata.blockedByRule = rule.id
         metadata.blocklists = blocklists

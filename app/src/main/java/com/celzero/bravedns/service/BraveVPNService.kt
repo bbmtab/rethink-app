@@ -321,6 +321,9 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
     private lateinit var connTracer: ConnectionTracer
 
     private val rand: Random = Random
+    // Bridge: uid eget Rethink (swallowed by the flow-managers split;
+    // TunFlowManager keeps its own copy). Used by the MITM proxy path.
+    private val rethinkUid: Int = Process.myUid()
 
     private val appConfig by inject<AppConfig>()
     private val orbotHelper by inject<OrbotHelper>()
@@ -3633,7 +3636,12 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
                                         )
                                     val uid = identity.uid ?: INVALID_UID
                                     val connType =
-                                        if (isConnectionMetered(destinationIp)) {
+                                        if (
+                                            TunFlowManager.isConnectionMetered(
+                                                buildFlowContext(),
+                                                destinationIp
+                                            )
+                                        ) {
                                             ConnectionTracker.ConnType.METERED
                                         } else {
                                             ConnectionTracker.ConnType.UNMETERED
@@ -3660,14 +3668,33 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
                                             connType = connType
                                         )
                                     val rule =
-                                        firewall(
-                                            connInfo = metadata,
-                                            domains = host,
-                                            anyRealIpBlocked = false,
-                                            isSplApp = isSpecialApp(uid),
-                                            rinr =
-                                                persistentState
-                                                    .routeRethinkInRethink
+                                        // Bridge: old monolith firewall() moved to
+                                        // TunFirewallManager in the split; same verdict,
+                                        // new entry point. No transport-policy step here:
+                                        // proxied flows are inspection-eligible by
+                                        // construction (proxy runs only with a live
+                                        // policy snapshot).
+                                        TunFirewallManager.firewall(
+                                            TunFirewallManager.FirewallParameters(
+                                                scope = vpnScope,
+                                                connInfo = metadata,
+                                                domains = host,
+                                                anyRealIpBlocked = false,
+                                                isSplApp =
+                                                    TunFlowManager.isSpecialApp(
+                                                        uid
+                                                    ),
+                                                rinr =
+                                                    persistentState
+                                                        .routeRethinkInRethink,
+                                                underlyingNetworks =
+                                                    underlyingNetworks,
+                                                isLockdown = isLockdown(),
+                                                isAppPaused = isAppPaused(),
+                                                keyguardManager =
+                                                    keyguardManager,
+                                                connectivityManager = cm
+                                            )
                                         )
                                     val isBlocked = FirewallRuleset.ground(rule)
                                     metadata.isBlocked = isBlocked
@@ -4489,6 +4516,14 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
             isIfaceMetered = { dst -> isIfaceMetered(dst) },
             isActiveIfaceCellular = { isActiveIfaceCellular() },
             isActiveIfaceMetered = { isActiveIfaceMetered() },
+            // Bridge (Plus): MITM transport-policy hook for the new pipeline.
+            // Enforcement point = TunFlowManager.processFirewallRequest,
+            // post-evaluateFirewall, pre-ground — same ordering as the
+            // pre-split pipeline. Snapshot lifecycle unchanged (set at
+            // establishVpn proxy-bind, cleared at onDestroy).
+            applyInspectionTransportPolicy = { meta, base ->
+                applyInspectionTransportPolicy(meta, base)
+            },
         )
     }
 
@@ -4671,44 +4706,11 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
         return vpnAdapter?.getRDNS(type)
     }
 
-    // Bridge TODO: old-pipeline entry point. Upstream moved firewall to
-    // TunFlowManager.processFirewallRequest; re-wire applyInspectionTransportPolicy
-    // into TunFlowManager.handleFlow before device validation, else Plus
-    // MITM transport policy silently drops. Kept intentionally (not deleted).
-    private suspend fun processFirewallRequest(
-        metadata: ConnTrackerMetaData,
-        domains: String?,
-        anyRealIpBlocked: Boolean = false,
-        blocklists: String = "",
-        isSplApp: Boolean = false,
-        rinr: Boolean
-    ) {
-        val baseRule =
-            firewall(
-                metadata,
-                domains,
-                anyRealIpBlocked,
-                isSplApp,
-                rinr
-            )
-        val rule =
-            applyInspectionTransportPolicy(
-                metadata,
-                baseRule
-            )
-
-        metadata.blockedByRule = rule.id
-        metadata.blocklists = blocklists
-
-        val blocked = FirewallRuleset.ground(rule)
-        metadata.isBlocked = blocked
-
-        addCidToTrackedCidsToCloseIfNeeded(metadata.connId, rule)
-
-        logd("firewall-rule $rule on conn: ${metadata.connId}; $metadata")
-        return
-    }
-
+    // Bridge: old-pipeline processFirewallRequest retired — its role
+    // (evaluate + transport-policy + ground + track) now lives in
+    // TunFlowManager.processFirewallRequest with the Plus hook supplied
+    // via buildFlowContext(). applyInspectionTransportPolicy below is the
+    // live Plus implementation, called through that hook.
     private suspend fun applyInspectionTransportPolicy(
         metadata: ConnTrackerMetaData,
         baseRule: FirewallRuleset
@@ -4755,23 +4757,6 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
         )
 
         return FirewallRuleset.RULE20
-    }
-
-    private suspend fun addCidToTrackedCidsToCloseIfNeeded(cid: String, rule: FirewallRuleset) {
-        // no need to track the blocked connections, as they will be closed
-        if (FirewallRuleset.ground(rule)) {
-            return
-        }
-        // skip the connections if the rules is part of any bypass rules
-        // like, app bypass, dns bypass, domain trust, ip trust
-        if (FirewallRuleset.isBypassRule(rule)) {
-            return
-        }
-
-        Logger.v(LOG_TAG_VPN, "firewall-rule $rule, adding to trackedCids to close, $cid")
-        activeClosableCidsMutex.withLock {
-            activeClosableCids.add(cid)
-        }
     }
 
     // this method is called when the device is locked, so no need to check for device lock here
