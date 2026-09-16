@@ -745,6 +745,15 @@ Remaining work is intentionally narrower:
 * [ ] Capture direct real-device RULE20 execution when a natural fixture emits
   qualifying UDP/443 traffic. Current status: deferred because all available
   installed control fixtures produced zero UDP/443.
+  - 2026-09-16 (RULE20-R2, Mi A1 A16, build g1c0713120): first natural UDP/443
+    captured (Firefox 22 conns to Meta edge, control BYPASS, 0 stall/MITM);
+    MITM live for Firefox TCP (MITM_KNOWN_BROWSER). Direct stall still
+    unobserved: proxy enforces HTTP/1.1 ALPN (LocalHttpsProxy.kt:602,626) so
+    MITM'd browsers never discover QUIC; app-side QUIC backoff confirmed
+    (VPN-off /proc/net/udp run also 0); fixture matrix exhausted (Chrome/YT/
+    YTM/Play 0; Opera/Brave skipped by construction as known-browsers;
+    ReVanced playback void). Verdict BLOCKED with mechanism — no code defect,
+    gate stays open. Memory: project_rule20_firefox_quic_r2_verdict_20260916.
 * [ ] Complete the remaining external compatibility scenarios in §12.3.
 * [ ] Verify package-scoped domain/app edge cases not exercised by the controlled
   N4E three-fixture matrix.
