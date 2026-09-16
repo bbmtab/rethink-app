@@ -778,8 +778,16 @@ part of B4.5 and must not be mixed into this policy closure.
     :443/:80/:8080) all forwarded, zero MITM/RULE20. Scope: pre-login only;
     post-login/Mini Program is #8 (still open). Memory:
     project_wechat_bypass_20260916.
-- [ ] Package exclusion beats browser or user inclusion.
+- [x] Package exclusion beats browser or user inclusion.
+  - 2026-09-16 (Mi A1 A16): Chrome (known default ON) flipped OFF →
+    `example.com` `BYPASS (BYPASS_USER)` x6, 0 MITM. 2 leading
+    `BYPASS_DEFAULT` lines = hot-apply propagation transient. Memory:
+    project_matrix_m2_m12_m3_vpn_desync_20260916.
 - [ ] Package-scoped domain bypass does not affect another app.
+  - 2026-09-16: NO user-facing harness (Per-App Firewall = BLOCK/ALLOW
+    layer; Plus exclusions = ON/OFF only). Unit twin
+    `packageScopedDomainBypassDoesNotLeakToAnotherApplication()` green on CI
+    242-run. Device part open, recorded — not passed.
 - [ ] QUIC allowance does not automatically create HTTPS bypass.
 - [ ] HTTPS bypass does not automatically allow QUIC.
 - [ ] Handshake failure does not mutate or persist policy.
@@ -793,7 +801,13 @@ part of B4.5 and must not be mixed into this policy closure.
 - [ ] WeChat/AliExpress media works with verified QUIC policy (issue #5497).
 - [ ] Google Search/Gboard succeeds on the first attempt (issue #5617).
 - [ ] Chrome MoQT/WebTransport is not broken by QUIC policy (issue #6076).
-- [ ] Restart preserves package, domain, QUIC, decision, and reason state.
+- [x] Restart preserves package, domain, QUIC, decision, and reason state.
+  - 2026-09-16 (Mi A1 A16): pre-restart Chrome OFF / Firefox ON / master ON
+    (dump-verified) → STOP/START cycle → all three preserved + behavioral
+    `example.com` `BYPASS (BYPASS_USER)`, 0 MITM. Chrome restored ON after.
+    Incident during gate: silent VPN death (UI STOP, no tun, pid stable, no
+    self-heal in 25s watch) — open stability defect, see memory.
+    Memory: project_matrix_m2_m12_m3_vpn_desync_20260916.
 
 For each failure, isolate ordinary filtering rules, tracking transformations,
 DNS, QUIC, upstream proxy, and HTTPS interception separately before adding a
