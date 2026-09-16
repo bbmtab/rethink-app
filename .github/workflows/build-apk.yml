@@ -79,6 +79,7 @@ jobs:
           --tests "com.celzero.bravedns.core.proxy.policy.*"
           --tests "com.celzero.bravedns.core.filter.FilterSourceCompilerTest"
           --tests "com.celzero.bravedns.database.*"
+          --tests "com.celzero.bravedns.service.VpnWatchdogTest"
           --console=plain --stacktrace
 
       - name: Report unit-test counts from JUnit XML
