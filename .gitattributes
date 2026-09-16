@@ -4,5 +4,12 @@
 # Preserve the bundled filter catalog byte-for-byte across platforms
 app/src/main/assets/filter_sources/filters.json -text whitespace=cr-at-eol
 
-# Preserve the HTTPS inspection domain preset byte-for-byte across platforms
-app/src/main/assets/https_inspection/ssl_allow_list.txt -text whitespace=cr-at-eol
+# Preserve the HTTPS inspection presets byte-for-byte across platforms
+# (Plus-canonical names; replaces the retired ssl_allow_list.txt rule below —
+# line endings are part of the pinned SHA contract enforced by
+# InspectionPolicyBundledAssetTest)
+app/src/main/assets/https_inspection/https_inspection_protected_domains_plus -text whitespace=cr-at-eol
+app/src/main/assets/https_inspection/https_inspection_package_bypass_plus -text whitespace=cr-at-eol
+app/src/main/assets/https_inspection/https_inspection_known_browsers_plus -text whitespace=cr-at-eol
+app/src/main/assets/https_inspection/https_inspection_compatibility_bypass_plus.json -text whitespace=cr-at-eol
+app/src/main/assets/https_inspection/https_inspection_domain_targets_plus -text whitespace=cr-at-eol

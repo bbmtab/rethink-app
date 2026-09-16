@@ -1335,5 +1335,271 @@
     "private_issue_url": "https://jira.com/browse/AG-29237",
     "comment": null,
     "public": true
+  },
+  {
+    "package_name": "com.tokopedia.tkpd",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Commerce: marketplace + pembayaran; finansial, pinning-prone. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "id.dana",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: e-wallet + QRIS; credential-security. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "ovo.id",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: e-wallet + QRIS; credential-security. Terverifikasi Play/APK 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "com.gojek.gopay",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: e-wallet + QRIS + transfer bank; credential-security. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "id.co.bri.brimo",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: mobile banking BRI (35jt+ pengguna); finansial, pinning-prone. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "id.bni.wondr",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: wondr BNI + QRIS Cross Border; finansial, pinning-prone. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "co.id.bankbsi.superapp",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: BYOND Bank Syariah Indonesia; finansial, pinning-prone. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "com.btpn.dc",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Jenius SMBC + QRIS; credential-security. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "id.co.bankbkemobile.digitalbank",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: SeaBank digital banking + QRIS; finansial, pinning-prone. Terverifikasi Play 2026-09-15.",
+    "public": true
+  },
+  {
+    "package_name": "com.shopee.id",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Shopee Indonesia (e-commerce + ShopeePay/QRIS); transaksi finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "blibli.mobile.commerce",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Blibli consumer (e-commerce + pembayaran angsuran); transaksi finansial. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.traveloka.android",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Traveloka (pembayaran tiket/hotel/pay-later); transaksi finansial. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.bukalapak.android",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Bukalapak (marketplace + pay-bills/pinjaman); transaksi finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.gojek.app",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Gojek super-app (GoPay/QRIS terintegrasi); transaksi finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.telkom.mwallet",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: LinkAja (dompet digital + QRIS); finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.bca.mybca.omni.android",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: myBCA mobile banking (QRIS + NFC Pay); finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.bmri.livin",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Livin' by Mandiri (QRIS + tap-to-pay); finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.bca.halobca.android",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Halo BCA; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.bmri.livinmerchant",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Livin' Merchant by Mandiri; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.bni.wfb",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: wondr merchant by BNI; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "co.id.bankbsi.qrismerchant",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: BYOND Merchant by BSI; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.cimbedc",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: OCTO Merchant; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.jago.digitalBanking",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Bank Jago/Jago Syariah; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.sme.ocbcnisp.corporatebanking",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: OCBC Business mobile Indonesia; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.megasyariah",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: M-Syariah; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.bankmega.merchant",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Mega POS; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.muamalatmerchantapp",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Muamalat Merchant App; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.aladinbank.mobile",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Aladin : Bank Syariah Digital; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.co.btn.smartresidence",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: bale community; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.bnc.finance",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: neobank dari BNC Digital; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.btpn.db",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Jenius Bisniskit; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.btpn.rlb",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: Jenius Daya; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.panin.mypanin",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: MyPanin; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.pactindo.mb.pdsb",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: PDSB Mobile Banking; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "co.id.bankdki.dashboardmerchant",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: JakOne Merchant; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "id.co.bankdki.jakteam",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: JakTeam - Bank DKI; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.kbBukopin.Kbstar",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: KBstar; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
+  },
+  {
+    "package_name": "com.app.vioss4",
+    "public_issue_url": null,
+    "private_issue_url": null,
+    "comment": "Plus-curated ID-Finance: BISA Mobile by KBBS; finansial, pinning-prone. Terverifikasi Play 2026-09-16.",
+    "public": true
   }
 ]

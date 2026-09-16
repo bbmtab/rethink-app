@@ -17,7 +17,7 @@ package com.celzero.bravedns.core.filter
 
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceFileStore
-import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.database.FilterSourceCompilerRepository
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
@@ -52,7 +52,7 @@ import kotlinx.coroutines.withContext
  *                  Plus UI, Room schema/migrations, B2 downloader.
  */
 class FilterSourceCompiler(
-    private val repository: FilterSourceRepository,
+    private val repository: FilterSourceCompilerRepository,
     private val fileStore: FilterSourceFileStore
 ) {
 
@@ -205,15 +205,23 @@ class FilterSourceCompiler(
             )
         }
 
-        // Deterministic sort: dedup + sort by raw text (C0/C11)
-        val sortedLines = allParsedLines.distinct().sorted()
+        // Deterministic sort: in-place dedup + sort by raw text (C0/C11).
+        // The returned reference aliases allParsedLines, so it must remain populated
+        // until the staged artifact has been written and promoted.
+        val sortedLines = sortAndDeduplicateInPlace(allParsedLines)
 
-        // Staged output → atomic promotion → binary cache
-        // If ANY of these steps fails, adblock_rules.txt is NOT promoted (last-known-good preserved).
+        // Staged output → atomic promotion → binary cache streamed from
+        // the promoted compiled file to avoid holding sortedLines in memory.
+        // If ANY of these steps fails, adblock_rules.txt is NOT promoted
+        // (last-known-good preserved).
         try {
             writeStagedArtifact(sortedLines)
             atomicPromoteToCompiled()
-            writeBinaryCache(sortedLines)
+
+            // The promoted compiled file is now authoritative. Release the in-memory
+            // lines before rebuilding the binary cache from that file.
+            sortedLines.clear()
+            writeBinaryCacheFromPromotedFile()
         } catch (e: Exception) {
             return@withContext CompileOutcome.failure(
                 "Staged artifact write/promote/cache failed: ${e.message ?: e.javaClass.simpleName}"
@@ -348,6 +356,31 @@ class FilterSourceCompiler(
         )
     }
 
+    /**
+     * Sort and deduplicate [lines] in place using a two-pointer technique.
+     * Returns the same mutable list (now sorted with duplicates removed)
+     * for chaining convenience.
+     */
+    private fun sortAndDeduplicateInPlace(lines: MutableList<String>): MutableList<String> {
+        if (lines.size < 2) return lines
+
+        lines.sort()
+        var writeIndex = 1
+
+        for (readIndex in 1 until lines.size) {
+            val value = lines[readIndex]
+            if (value != lines[writeIndex - 1]) {
+                lines[writeIndex] = value
+                writeIndex++
+            }
+        }
+
+        if (writeIndex < lines.size) {
+            lines.subList(writeIndex, lines.size).clear()
+        }
+        return lines
+    }
+
     // ---- Staged artifact output ------------------------------------------------
 
     /**
@@ -428,7 +461,7 @@ class FilterSourceCompiler(
         writeStagedArtifact(emptyList())
         atomicPromoteToCompiled()
         try {
-            writeBinaryCache(emptyList())
+            writeBinaryCacheFromPromotedFile()
         } catch (e: Exception) {
             // Non-fatal: cache write failure shouldn't block empty-artifact compilation
         }
@@ -445,16 +478,22 @@ class FilterSourceCompiler(
      * On next startup (or hot-reload), [FilterEngine.loadFromCache] can deserialize this
      * directly, bypassing line-by-line re-parsing of the raw `adblock_rules.txt`.
      */
-    private fun writeBinaryCache(sortedLines: List<String>) {
-        // Re-parse sorted lines into AdblockRule objects for cache serialization.
-        // sortedLines only contains successfully parsed rules (unsupported/invalid excluded),
-        // so parseRule should always return non-null; defensive null skip included.
-        val parsedRules = mutableListOf<FilterEngine.AdblockRule>()
-        for (line in sortedLines) {
-            FilterEngine.parseRule(line)?.let { parsedRules.add(it) }
+    /**
+     * Write `filter_rules_cache.bin` by streaming the promoted compiled file
+     * (`adblock_rules.txt`) line-by-line, parsing and classifying each rule
+     * directly into the bucket lists. This avoids holding the sorted line list
+     * in memory after promotion, and eliminates the intermediate `parsedRules`
+     * list.
+     */
+    private fun writeBinaryCacheFromPromotedFile() {
+        val cacheFile = fileStore.cacheFile()
+        val cacheParent = cacheFile.parentFile
+        if (cacheParent != null && !cacheParent.exists()) {
+            cacheParent.mkdirs()
         }
 
-        // Classify into the same buckets FilterEngine.saveToCache uses
+        val compiledFile = fileStore.compiledRulesFile()
+
         val domainRules = ArrayList<FilterEngine.AdblockRule>()
         val genericRules = ArrayList<FilterEngine.AdblockRule>()
         val cosmeticRules = ArrayList<String>()
@@ -464,30 +503,36 @@ class FilterSourceCompiler(
         val scriptletRules = ArrayList<String>()
         val htmlFilterRules = ArrayList<String>()
 
-        for (rule in parsedRules) {
-            when {
-                rule.isScriptlet -> scriptletRules.add(rule.rawText)
-                rule.isProcedural -> proceduralRules.add(rule.rawText)
-                rule.isHtmlFilter -> htmlFilterRules.add(rule.rawText)
-                rule.isCsp -> cspRules.add(rule.rawText)
-                rule.isCosmetic -> {
-                    if (rule.isWhitelist) cosmeticExceptions.add(rule.rawText)
-                    else cosmeticRules.add(rule.rawText)
+        compiledFile.bufferedReader(Charsets.UTF_8).use { reader ->
+            var line: String? = reader.readLine()
+            while (line != null) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("!") || trimmed.startsWith("[")) {
+                    line = reader.readLine()
+                    continue
                 }
-                else -> {
-                    if (rule.isDomainExact && rule.targetDomain != null) {
-                        domainRules.add(rule)
-                    } else {
-                        genericRules.add(rule)
+                val rule = FilterEngine.parseRule(trimmed)
+                if (rule != null) {
+                    when {
+                        rule.isScriptlet -> scriptletRules.add(rule.rawText)
+                        rule.isProcedural -> proceduralRules.add(rule.rawText)
+                        rule.isHtmlFilter -> htmlFilterRules.add(rule.rawText)
+                        rule.isCsp -> cspRules.add(rule.rawText)
+                        rule.isCosmetic -> {
+                            if (rule.isWhitelist) cosmeticExceptions.add(rule.rawText)
+                            else cosmeticRules.add(rule.rawText)
+                        }
+                        else -> {
+                            if (rule.isDomainExact && rule.targetDomain != null) {
+                                domainRules.add(rule)
+                            } else {
+                                genericRules.add(rule)
+                            }
+                        }
                     }
                 }
+                line = reader.readLine()
             }
-        }
-
-        val cacheFile = fileStore.cacheFile()
-        val cacheParent = cacheFile.parentFile
-        if (cacheParent != null && !cacheParent.exists()) {
-            cacheParent.mkdirs()
         }
 
         java.io.ObjectOutputStream(

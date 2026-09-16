@@ -71,3 +71,8 @@ rethink-adguard-parity-bundle.zip
 # Session-local runtime-verification push directory (REGENERATED each session;
 # don't ship a permanent copy in the repo)
 download/
+
+# OpenCode local-only (Claude Code memory copy + wiring, never commit)
+/.opencode/
+/AGENTS.md
+/opencode.json

@@ -46,18 +46,18 @@ class InspectionPolicyPresetLoader(
 
     companion object {
         const val SYSTEM_HARD_BYPASS_ASSET_PATH =
-            "https_inspection/pkg_exclusions.txt"
+            "https_inspection/https_inspection_package_bypass_plus"
 
         const val PROTECTED_DOMAIN_BYPASS_ASSET_PATH =
-            "https_inspection/ssl_allow_list.txt"
+            "https_inspection/https_inspection_protected_domains_plus"
 
         const val KNOWN_BROWSERS_ASSET_PATH =
-            "https_inspection/filter_https_traffic_inclusions.txt"
+            "https_inspection/https_inspection_known_browsers_plus"
 
         const val COMPATIBILITY_EXCLUSIONS_ASSET_PATH =
-            "https_inspection/filter_https_traffic_exclusions.json"
+            "https_inspection/https_inspection_compatibility_bypass_plus.json"
 
         const val INCLUDED_DOMAIN_MITM_ASSET_PATH =
-            "https_inspection/https_inspection_inclusions.txt"
+            "https_inspection/https_inspection_domain_targets_plus"
     }
 }

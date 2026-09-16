@@ -37,7 +37,6 @@ org.bromite.bromite
 org.cromite.cromite
 com.vivaldi.browser
 com.vivaldi.browser.snapshot
-com.brave.browser
 com.brave.browser_dev
 com.brave.browser_beta
 com.brave.browser_default
@@ -50,15 +49,12 @@ com.naver.whale
 com.mycompany.app.soulbrowser
 us.spotco.mulch
 org.chromium.thorium
-com.qihoo.contents
 com.quark.browser
 com.opera.browser
 net.slions.fulguris.full.fdroid
 net.slions.fulguris.full.playstore
 com.microsoft.amp.apps.bingnews
 ru.yandex.searchplugin
-com.yujian.ResideMenuDemo
 net.quetta.browser
-com.lemurbrowser.exts
 mark.via.gp
 com.xbrowser.play

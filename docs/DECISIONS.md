@@ -2242,4 +2242,28 @@ remaining release gates outside N12.
 
 ---
 
+## DECISION-013: ONLY_INCLUDED NOT EXPOSED — PRODUCT ACCEPT FOR RELEASE (2026-09-15)
+
+**Status:** FINAL · **Deciders:** User (product decision) + Supervisor (records)
+**Refines:** DECISION-011 remaining gate "ONLY_INCLUDED production/UI selector".
+
+### Decision
+
+PRODUCT DECISION: ACCEPT FOR RELEASE. `ONLY_INCLUDED` is intentionally not
+exposed in current production UX. Production remains `ALL_EXCEPT_PROTECTED`
+(`InspectionPolicySnapshotFactory.kt:33-34`, `InspectionPolicyEngine.kt:40-41`).
+The existing engine capability (`InspectionPolicyEngine.kt:95`) plus its
+unit coverage (`InspectionPolicyEngineTest`, `InspectionPolicySnapshotFactoryTest`)
+is retained as a future emergency mitigation path should a severe
+HTTPS-inspection bug require temporary scope restriction.
+
+### Standing
+
+- No UX selector work is opened by this entry.
+- This is not a deferred release blocker and carries no implementation task.
+- Revisit only if a severe HTTPS-inspection incident requires temporary
+  scope restriction (then: expose selector or hard-switch mode + record).
+
+---
+
 **End of Decisions — Append Only**

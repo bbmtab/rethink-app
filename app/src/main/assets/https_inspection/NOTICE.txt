@@ -1,6 +1,10 @@
-HTTPS Inspection data notice
+HTTPS Inspection data notice (Plus canonical nomenclature)
 
-Bundled file: ssl_allow_list.txt
+This notice accompanies the five bundled HTTPS Inspection preset assets.
+Canonical asset names are Plus-functional names. Upstream-reference history is
+recorded factually below where applicable; history is not a license grant.
+
+Bundled file: https_inspection_protected_domains_plus
 Purpose: protected-domain bypass preset for HTTPS Inspection
 Upstream project: AdGuard HTTPS Exclusions
 Upstream repository: https://github.com/AdguardTeam/HttpsExclusions
@@ -14,55 +18,67 @@ Logical line count: 4569
 Local modifications: none
 
 Upstream author: AdGuard
-Upstream license declaration: MIT
+Upstream license declaration: MIT (package-level declaration in pinned
+package.json; no standalone LICENSE/COPYING/NOTICE file at pinned commit)
 SPDX-License-Identifier: MIT
 Pinned license metadata: https://github.com/AdguardTeam/HttpsExclusions/blob/5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8/package.json
 Pinned package.json SHA-256: 17b71aeb539713b0cc56a639f30a35b2687cda97980b1bc54a033111d9772fe2
 Pinned package.json Git blob: 7795ae94de557b592abcc53d3e1c7e9c2b279afe
 Standalone upstream LICENSE/COPYING/NOTICE file at pinned commit: none
 MIT license reference: https://spdx.org/licenses/MIT.html
+Provenance residual: package-level declaration only; reopen only if upstream
+states otherwise or objects. See docs/DECISION-011-BCURATION.md.
 
 This notice records the upstream package metadata and exact generated artifact
-used for ssl_allow_list.txt.
+used for https_inspection_protected_domains_plus.
 
-Additional bundled HTTPS Inspection policy assets
+Additional bundled HTTPS Inspection policy assets (Plus curation)
 
-Bundled file: pkg_exclusions.txt
+Bundled file: https_inspection_package_bypass_plus
 Purpose: package-level routing exclusions for VPN, system-critical, OEM update,
 and other applications that must not be forced through HTTPS inspection.
-Source history: the current content was supplied from an
-AdguardTeam/CompatibilityIssues-derived input.
+Source history: the current content was supplied from a
+upstream-reference input (pre-canonical nomenclature retired).
 Local policy: package identifiers are factual Android identifiers. Their presence
 does not require permission from each application publisher. Inclusion in this
-preset is a Rethink compatibility decision and may evolve through device testing.
-Current redistribution status: unresolved under DECISION-011 because no explicit
-license or redistribution grant was verified for the source dataset.
+preset is a Plus compatibility decision and may evolve through device testing.
+Current curation status: under independent Plus re-curation
+(see docs/DECISION-011-BCURATION.md); excluded from release scope until closed.
 
-Bundled file: filter_https_traffic_inclusions.txt
-Purpose: eligibility candidates for browser and embedded-browser applications
-whose HTTPS traffic may be inspected.
-Source history: the current content was supplied from an
-AdguardTeam/CompatibilityIssues-derived input.
-Local policy: Google Search Lite, Bing News, Yandex Search, and similar hybrid
-applications remain candidates because they expose browser functionality.
-Their native/API paths still require device testing for certificate pinning and
-other compatibility failures.
-Current redistribution status: unresolved under DECISION-011 because no explicit
-license or redistribution grant was verified for the source dataset.
+Bundled file: https_inspection_known_browsers_plus
+Purpose: eligibility registry for browser and embedded-browser applications
+whose HTTPS traffic may be inspected (default-eligible, user-exclusion wins).
+Source history: the current content was supplied from a
+upstream-reference input (pre-canonical nomenclature retired).
+Local policy: every default-eligible entry requires independent verification
+before it confers default eligibility. Unverified entries confer nothing.
+Current curation status: under independent Plus re-curation
+(see docs/DECISION-011-BCURATION.md); excluded from release scope until closed.
 
-Bundled file: filter_https_traffic_exclusions.json
+Bundled file: https_inspection_compatibility_bypass_plus.json
 Purpose: package-level HTTPS inspection compatibility bypass registry.
-Source history: derived from a supplied AdguardTeam/CompatibilityIssues dataset
-and locally maintained for Rethink compatibility.
+Source history: derived from a supplied upstream-reference dataset
+(pre-canonical nomenclature retired) and locally maintained for Plus compatibility.
 Local modifications: ten obsolete package identities were removed in N12B,
-reducing the registry from 201 to 191 unique package entries.
-SHA-256: a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05
+reducing the registry from 201 to 191 unique package entries; seventeen
+Plus-curated ID-Finance entries added in B-curation (Tokopedia, DANA, OVO,
+GoPay, BRImo, wondr BNI, BYOND BSI, Jenius, SeaBank, Shopee, Blibli,
+Traveloka, Bukalapak, Gojek, LinkAja, myBCA, Livin' by Mandiri) and a
+further twenty-one Indonesian financial-app entries verified on Google Play
+and added on 2026-09-16 (Halo BCA, Livin' Merchant by Mandiri, wondr
+merchant by BNI, BYOND Merchant by BSI, OCTO Merchant, Bank Jago/Jago
+Syariah, OCBC Business mobile Indonesia, M-Syariah, Mega POS, Muamalat
+Merchant App, Aladin : Bank Syariah Digital, bale community, neobank dari
+BNC Digital, Jenius Bisniskit, Jenius Daya, MyPanin, PDSB Mobile Banking,
+JakOne Merchant, JakTeam - Bank DKI, KBstar, BISA Mobile by KBBS), bringing
+the registry to 229.
+SHA-256: ac2735cd5fc0e947b74249d4f59e10cd18e421aa4755d03a70ec8c8ddd3b95f9
 Evidence fields: retained public_issue_url values are compatibility references;
 they are not license declarations or redistribution grants.
-Current redistribution status: unresolved under DECISION-011. The remaining
-registry requires first-party maintenance ownership and device verification.
+Current curation status: under independent Plus re-curation (per-entry
+rationale outstanding); excluded from release scope until closed.
 
-Bundled file: https_inspection_inclusions.txt
+Bundled file: https_inspection_domain_targets_plus
 Previous local name: ssl_block_list.txt
 Purpose: domain eligibility list for HTTPS inspection; this is not a direct
 network or DNS blocklist.
@@ -75,16 +91,13 @@ Local modifications: renamed to express inspection semantics and annotated with
 parser-compatible comments.
 SHA-256: 182d55f35f3fff793b3008d73276f14fc6474cd8044a8aac1b7d7ec624141d5b
 Source status: supplied project input; no upstream license or redistribution
-authorization is asserted by this notice.
+authorization is asserted by this notice. Excluded from release scope until
+B-curation closes.
 
 Not bundled:
 - quic_pkg_exclusions.txt
 - filter_https_traffic_inclusions_problematic_devices.txt
 
-AdguardTeam/CompatibilityIssues did not provide a standalone license declaration
-at the audited source snapshot. Recording source history, issue references, and
-local transformations does not grant or imply redistribution permission.
-
-DECISION-011 therefore remains only partially remediated. Stable release remains
-blocked until provenance, redistribution, and first-party maintenance requirements
-are resolved.
+Recording source history, issue references, and local transformations does not
+grant or imply redistribution permission. See docs/DECISION-011-BCURATION.md
+for the governing time-box (7 days from 2026-09-15) and scope-cut default.

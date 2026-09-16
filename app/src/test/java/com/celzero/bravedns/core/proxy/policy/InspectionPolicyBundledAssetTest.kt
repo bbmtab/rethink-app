@@ -12,7 +12,7 @@ class InspectionPolicyBundledAssetTest {
     fun bundledProtectedDomainPresetMatchesPinnedUpstreamArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/ssl_allow_list.txt"
+                "https_inspection/https_inspection_protected_domains_plus"
             )
 
         assertEquals(85173L, asset.length())
@@ -93,12 +93,12 @@ class InspectionPolicyBundledAssetTest {
     fun bundledSystemHardBypassPresetMatchesPinnedArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/pkg_exclusions.txt"
+                "https_inspection/https_inspection_package_bypass_plus"
             )
 
-        assertEquals(523L, asset.length())
+        assertEquals(656L, asset.length())
         assertEquals(
-            "69230a7b5dc586c6dd9bd3da4e65ae749b3c05a099b30eb324c41c9c38ea5d47",
+            "81e950c9765ab1c7833a34dcdf9e0073facdd14e4756a52afaec98f1ee3cc9ec",
             sha256(asset)
         )
 
@@ -115,7 +115,7 @@ class InspectionPolicyBundledAssetTest {
             setOf(
                 "com.android.providers.downloads",
                 "com.android.providers.downloads.ui",
-                "com.adguard.vpn",
+                "com.celzero.bravedns.plus",
                 "com.coloros.providers.downloads.ui"
             ),
             preset.packages
@@ -127,12 +127,12 @@ class InspectionPolicyBundledAssetTest {
     fun bundledKnownBrowserPresetMatchesPinnedArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/filter_https_traffic_inclusions.txt"
+                "https_inspection/https_inspection_known_browsers_plus"
             )
 
-        assertEquals(1500L, asset.length())
+        assertEquals(1415L, asset.length())
         assertEquals(
-            "2da0920ee235c3c34584be859443a27f8fd7d40ba8f55c69b050b716770f7299",
+            "4821ffae9fd3a41ad1ae106ff030671e0398e4a18c155228b3f5d5c6be23e795",
             sha256(asset)
         )
 
@@ -141,7 +141,7 @@ class InspectionPolicyBundledAssetTest {
                 InspectionPackagePresetParser().parsePackages(input)
             }
 
-        assertEquals(63, preset.packages.size)
+        assertEquals(60, preset.packages.size)
         assertTrue(preset.uids.isEmpty())
         assertTrue(preset.unsupportedRules.isEmpty())
         assertTrue("com.android.chrome" in preset.packages)
@@ -154,12 +154,12 @@ class InspectionPolicyBundledAssetTest {
     fun bundledCompatibilityExclusionsMatchPinnedArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/filter_https_traffic_exclusions.json"
+                "https_inspection/https_inspection_compatibility_bypass_plus.json"
             )
 
-        assertEquals(42614L, asset.length())
+        assertEquals(52396L, asset.length())
         assertEquals(
-            "a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05",
+            "ac2735cd5fc0e947b74249d4f59e10cd18e421aa4755d03a70ec8c8ddd3b95f9",
             sha256(asset)
         )
 
@@ -168,8 +168,8 @@ class InspectionPolicyBundledAssetTest {
                 InspectionAppExclusionPresetParser().parse(input)
             }
 
-        assertEquals(191, preset.rules.size)
-        assertEquals(191, preset.excludedPackages.size)
+        assertEquals(229, preset.rules.size)
+        assertEquals(229, preset.excludedPackages.size)
         assertTrue(preset.diagnostics.isEmpty())
         assertTrue(preset.rules.all { it.isPublic })
         assertEquals(
@@ -182,7 +182,7 @@ class InspectionPolicyBundledAssetTest {
     fun bundledIncludedDomainPresetMatchesPinnedArtifact() {
         val asset =
             findBundledAsset(
-                "https_inspection/https_inspection_inclusions.txt"
+                "https_inspection/https_inspection_domain_targets_plus"
             )
 
         assertEquals(811L, asset.length())
