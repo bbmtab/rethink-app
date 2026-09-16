@@ -763,6 +763,16 @@ Remaining work is intentionally narrower:
   identity verification.
 * [ ] Tune post-MITM resource thresholds from device/performance evidence while
   preserving `MITM_STREAM_ONLY` semantics.
+* TRACKED DEFECT — silent VPN death with UI desync (2026-09-16, Mi A1 A16,
+  3 occurrences one session, pid stable, no crash): UI toggle reads STOP
+  while no tun interface exists and no re-establish is attempted.
+  3rd occurrence caught with cause-class: `Vpn: setting
+  state=DISCONNECTED, reason=agentDisconnect` + `NetworkAgent channel lost`
+  during a system lowmemorykiller storm; Rethink threads healthy ≤60s prior.
+  Fix slice (watchdog: detect agent loss → re-establish → sync UI) DEFERRED
+  to post-closure discussion — NOT dropped. Evidence: on-device
+  `/sdcard/vpnwatch.log*` + local `L:/Temp/opencode/vpnwatch1.log`. Memory:
+  project_matrix_m2_m12_m3_vpn_desync_20260916.
 
 Project sequencing after these items is locked by DECISION-012: finish all
 MITM/adblock work and release verification first, integrate and push the
