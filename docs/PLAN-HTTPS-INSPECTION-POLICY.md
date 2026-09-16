@@ -896,6 +896,11 @@ The policy constraints for these inputs remain:
 - [ ] Audit every proposed system hard-bypass UID and package against an authoritative platform source and record a concrete operational rationale. Do not copy third-party VPN or OEM package exclusions merely because they appear in another product.
 - [ ] Build the known-browser registry as first-party maintained data. Verify the production package identifier, browser identity, and essential HTTPS-inspection functionality for each entry.
 - [ ] Start the browser audit with Chrome, Brave, Firefox, and Edge, while recording device evidence and unresolved compatibility failures separately.
+  - 2026-09-16 device evidence (Mi A1 A16, master ON, CA trusted): Chrome
+    `example.com` MITM_KNOWN_BROWSER (DoD #7); Brave `example.com` +
+    `www.example.org` MITM_KNOWN_BROWSER x4 (129 uid flows); Firefox
+    telemetry/ads/youtube/instagram MITM_KNOWN_BROWSER (RULE20-R2). Edge
+    NOT installed — still open. Memory: project_browser_audit_chrome_brave_firefox_20260916.
 - [ ] Resolve the existing Edge package candidate discrepancy during an authorized runtime-integration slice: `com.microsoft.empath` is not the verified Microsoft Edge package identifier; the verified Google Play identifier is `com.microsoft.emmx`.
 - [ ] Define how problematic-device browser entries are selected before creating any corresponding asset.
 - [ ] Do not add a package-specific QUIC registry merely to implement HTTPS
