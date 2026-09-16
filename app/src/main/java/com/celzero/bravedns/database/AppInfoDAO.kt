@@ -22,13 +22,16 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.celzero.bravedns.data.DataUsage
 
 @Dao
 interface AppInfoDAO {
-
     @Update fun update(appInfo: AppInfo): Int
+
+    @Query("update AppInfo set notes = :notes, modifiedTs = :modifiedTs where uid = :uid and packageName = :packageName")
+    fun updateNotes(uid: Int, packageName: String, notes: String, modifiedTs: Long): Int
 
     @Query(
         "update AppInfo set firewallStatus = :firewallStatus, connectionStatus = :connectionStatus, modifiedTs = :modifiedTs where uid = :uid"
@@ -44,7 +47,7 @@ interface AppInfoDAO {
     fun updateUid(oldUid: Int, pkg: String, newUid: Int, modifiedTs: Long): Int
 
     @Query("select * from AppInfo where uid = :uid and packageName = :pkg")
-    fun isUidPkgExist(uid: Int, pkg: String): AppInfo?
+    suspend fun isUidPkgExist(uid: Int, pkg: String): AppInfo?
 
     @Query("select * from AppInfo where uid = :uid limit 1")
     suspend fun getAppInfoByUid(uid: Int): AppInfo?
@@ -63,90 +66,163 @@ interface AppInfoDAO {
     @Query("update AppInfo set uid = :newUid, tombstoneTs = :tombstoneTs, modifiedTs = :modifiedTs where uid = :oldUid")
     fun tombstoneApp(oldUid: Int, newUid: Int, tombstoneTs: Long, modifiedTs: Long)
 
+    // clear stale values before updating
+    @Transaction
+    fun tombstoneAppWithPkg(newUid: Int, uid: Int, packageName: String, tombstoneTs: Long, modifiedTs: Long) {
+        deletePackage(newUid, packageName)
+        tombstoneApp(newUid, uid, packageName, tombstoneTs, modifiedTs)
+    }
+
+    // clear stale values before updating
+    @Transaction
+    fun tombstoneAppByUid(oldUid: Int, newUid: Int, tombstoneTs: Long, modifiedTs: Long) {
+        deleteByUid(newUid)
+        tombstoneApp(oldUid, newUid, tombstoneTs, modifiedTs)
+    }
+
     @Query("select * from AppInfo order by appCategory, uid") fun getAllAppDetails(): List<AppInfo>
 
     @Query(
-        "select * from AppInfo where isSystemApp = 1 and (appName like :search or uid like :search or packageName like :search) and (firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where isSystemApp = 1 and " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getSystemApps(
         search: String,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where isSystemApp = 1 and (appName like :search or uid like :search or packageName like :search) and appCategory in (:filter) and (firewallStatus in (:firewall)  or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where isSystemApp = 1 and " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "appCategory in (:filter) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getSystemApps(
         search: String,
         filter: Set<String>,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where isSystemApp = 0 and (appName like :search or uid like :search or packageName like :search) and (firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where isSystemApp = 0 and " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getInstalledApps(
         search: String,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where isSystemApp = 0 and (appName like :search or uid like :search or packageName like :search) and appCategory in (:filter) and (firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where isSystemApp = 0 and " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "appCategory in (:filter) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getInstalledApps(
         search: String,
         filter: Set<String>,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where (appName like :search or uid like :search or packageName like :search) and (firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getAppInfos(
         search: String,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where (appName like :search or uid like :search or packageName like :search) and appCategory in (:filter)  and (firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "appCategory in (:filter) and " +
+            "(firewallStatus in (:firewall) or isProxyExcluded in (:isProxyExcluded)) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getAppInfos(
         search: String,
         filter: Set<String>,
         firewall: Set<Int>,
         connectionStatus: Set<Int>,
-        isProxyExcluded: Set<Int>
+        isProxyExcluded: Set<Int>,
+        sort: String
     ): PagingSource<Int, AppInfo>
 
     @Query(
-        "select * from AppInfo where (appName like :search or uid like :search or packageName like :search) and appCategory in (:cat) and isSystemApp in (:appType) and firewallStatus in (:firewall) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "appCategory in (:cat) and isSystemApp in (:appType) and " +
+            "firewallStatus in (:firewall) and connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getFilteredApps(
         search: String,
         cat: Set<String>,
         firewall: Set<Int>,
         appType: Set<Int>,
-        connectionStatus: Set<Int>
+        connectionStatus: Set<Int>,
+        sort: String
     ): List<AppInfo>
 
     @Query(
-        "select * from AppInfo where (appName like :search or uid like :search or packageName like :search) and isSystemApp in (:appType) and firewallStatus in (:firewall) and connectionStatus in (:connectionStatus) order by lower(appName)"
+        "select * from AppInfo where " +
+            "(appName like :search or uid like :search or packageName like :search) and " +
+            "isSystemApp in (:appType) and firewallStatus in (:firewall) and " +
+            "connectionStatus in (:connectionStatus) " +
+            "order by case when :sort = 'name' then lower(appName) end asc, " +
+            "case when :sort = 'package' then lower(packageName) end asc, " +
+            "case when :sort = 'uid' then uid end asc, lower(appName) asc"
     )
     fun getFilteredApps(
         search: String,
         firewall: Set<Int>,
         appType: Set<Int>,
-        connectionStatus: Set<Int>
+        connectionStatus: Set<Int>,
+        sort: String
     ): List<AppInfo>
 
     @Query(
@@ -157,6 +233,8 @@ interface AppInfoDAO {
     @Query("select * from AppInfo order by appCategory, uid") fun getAllAppDetailsCursor(): Cursor
 
     @Query("delete from AppInfo where uid = :uid") fun deleteByUid(uid: Int): Int
+
+    @Query("delete from AppInfo") fun deleteAll()
 
     @Query(
         "select uid as uid, downloadBytes as downloadBytes, uploadBytes as uploadBytes from AppInfo where uid = :uid"
@@ -174,11 +252,8 @@ interface AppInfoDAO {
     @Query("select uid from AppInfo where packageName = :packageName")
     fun getAppInfoUidForPackageName(packageName: String): Int
 
-    @Query("update AppInfo set isProxyExcluded = :bypass where packageName = 'com.celzero.bravedns'")
-    fun setRethinkToBypassProxy(bypass: Boolean)
-
-    @Query("update AppInfo set firewallStatus = 7 and connectionStatus = 3 where packageName = 'com.celzero.bravedns'")
-    fun setRethinkToBypassDnsAndFirewall()
+    @Query("update AppInfo set firewallStatus = 7, connectionStatus = 3, isProxyExcluded = 1 where packageName = 'com.celzero.bravedns'")
+    fun exemptRethinkApp()
 
     @Query("select * from AppInfo where tempAllowEnabled = 1 and tempAllowExpiryTime > 0")
     suspend fun getTempAllowedApps(): List<AppInfo>

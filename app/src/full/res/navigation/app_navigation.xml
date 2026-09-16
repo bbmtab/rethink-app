@@ -14,13 +14,7 @@
     <fragment
         android:id="@+id/rethinkPlus"
         android:name="com.celzero.bravedns.ui.fragment.RethinkPlusFragment"
-        android:label="RethinkPlusFragment">
-        <action
-            android:id="@+id/action_switch_to_rethinkPlusDashboardFragment"
-            app:destination="@id/rethinkPlusDashboardFragment"
-            app:popUpTo="@id/rethinkPlus"
-            app:popUpToInclusive="true" />
-    </fragment>
+        android:label="RethinkPlusFragment" />
     <fragment
         android:id="@+id/summaryStatisticsFragment"
         android:name="com.celzero.bravedns.ui.fragment.SummaryStatisticsFragment"
@@ -29,10 +23,8 @@
         android:id="@+id/configureFragment"
         android:name="com.celzero.bravedns.ui.fragment.ConfigureFragment"
         android:label="ConfigureFragment" />
-    <fragment
-        android:id="@+id/rethinkPlusDashboardFragment"
-        android:name="com.celzero.bravedns.ui.fragment.ServerSelectionFragment"
-        android:label="RethinkPlusDashboardFragment" />
+    <!-- Bridge (Plus, O8): retired RPN destinations removed
+         (rethinkPlusDashboardFragment/ServerSelectionFragment). -->
     <action
         android:id="@+id/action_switch_to_homeScreenFragment"
         app:destination="@id/homeScreenFragment" />

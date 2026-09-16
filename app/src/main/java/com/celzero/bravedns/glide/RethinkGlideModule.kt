@@ -36,7 +36,9 @@ import com.bumptech.glide.load.model.ModelLoaderFactory
 import com.bumptech.glide.load.model.MultiModelLoaderFactory
 import com.bumptech.glide.module.AppGlideModule
 import okhttp3.OkHttpClient
+import java.net.Proxy
 import java.io.InputStream
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -79,6 +81,10 @@ class RethinkGlideModule : AppGlideModule() {
         val client: OkHttpClient = OkHttpClient.Builder()
             .readTimeout(5, TimeUnit.SECONDS)
             .connectTimeout(3, TimeUnit.SECONDS)
+            // Pin NO_PROXY: with no explicit proxy, OkHttp consults ProxySelector.getDefault(),
+            // which crashes (IllegalArgumentException: port out of range:-1) on devices where
+            // the platform set http(s).proxyPort=-1 for a global proxy without a port.
+            .proxy(Proxy.NO_PROXY)
             .build()
         registry.replace(GlideUrl::class.java, InputStream::class.java, OkHttpUrlLoader.Factory(client))
 
@@ -94,16 +100,17 @@ class RethinkGlideModule : AppGlideModule() {
         //   NoOpUnitLoader is found first and returns a stable LoadData (backed by a no-op
         //   DataFetcher that calls onLoadFailed) Glide treats that as a clean cache miss and
         //   falls through to the placeholder / error drawable without crashing.
-        registry.prepend(Unit::class.java, InputStream::class.java, NoOpUnitLoaderFactory())
+        registry.prepend(Unit.javaClass, InputStream::class.java, NoOpUnitInputStreamLoaderFactory())
+        registry.prepend(Unit.javaClass, ByteBuffer::class.java, NoOpUnitByteBufferLoaderFactory())
     }
 
-    inner class NoOpUnitLoaderFactory : ModelLoaderFactory<Unit, InputStream> {
+    inner class NoOpUnitInputStreamLoaderFactory : ModelLoaderFactory<Unit, InputStream> {
         override fun build(multiFactory: MultiModelLoaderFactory): ModelLoader<Unit, InputStream> =
-            NoOpUnitLoader()
+            NoOpUnitInputStreamLoader()
         override fun teardown() = Unit
     }
 
-    inner class NoOpUnitLoader : ModelLoader<Unit, InputStream> {
+    inner class NoOpUnitInputStreamLoader : ModelLoader<Unit, InputStream> {
         override fun handles(model: Unit): Boolean = true
 
         override fun buildLoadData(
@@ -114,7 +121,25 @@ class RethinkGlideModule : AppGlideModule() {
         ): ModelLoader.LoadData<InputStream> =
             // A stable, content-free cache key so Glide can generate cache keys without crashing,
             // paired with a fetcher that immediately reports "no data" via onLoadFailed.
-            ModelLoader.LoadData(NoOpKey, NoOpFetcher)
+            ModelLoader.LoadData(NoOpKey, NoOpInputStreamFetcher)
+    }
+
+    inner class NoOpUnitByteBufferLoaderFactory : ModelLoaderFactory<Unit, ByteBuffer> {
+        override fun build(multiFactory: MultiModelLoaderFactory): ModelLoader<Unit, ByteBuffer> =
+            NoOpUnitByteBufferLoader()
+        override fun teardown() = Unit
+    }
+
+    inner class NoOpUnitByteBufferLoader : ModelLoader<Unit, ByteBuffer> {
+        override fun handles(model: Unit): Boolean = true
+
+        override fun buildLoadData(
+            model: Unit,
+            width: Int,
+            height: Int,
+            options: Options
+        ): ModelLoader.LoadData<ByteBuffer> =
+            ModelLoader.LoadData(NoOpKey, NoOpByteBufferFetcher)
     }
 
     private object NoOpKey : Key {
@@ -125,13 +150,23 @@ class RethinkGlideModule : AppGlideModule() {
         override fun hashCode() = javaClass.hashCode()
     }
 
-    private object NoOpFetcher : DataFetcher<InputStream> {
+    private object NoOpInputStreamFetcher : DataFetcher<InputStream> {
         override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in InputStream>) {
             callback.onLoadFailed(Exception("Unit model, no image to load"))
         }
         override fun cleanup() = Unit
         override fun cancel()  = Unit
         override fun getDataClass(): Class<InputStream> = InputStream::class.java
+        override fun getDataSource(): DataSource = DataSource.LOCAL
+    }
+
+    private object NoOpByteBufferFetcher : DataFetcher<ByteBuffer> {
+        override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in ByteBuffer>) {
+            callback.onLoadFailed(Exception("Unit model, no image to load"))
+        }
+        override fun cleanup() = Unit
+        override fun cancel()  = Unit
+        override fun getDataClass(): Class<ByteBuffer> = ByteBuffer::class.java
         override fun getDataSource(): DataSource = DataSource.LOCAL
     }
 }

@@ -1,7 +1,7 @@
 package com.celzero.bravedns.wireguard
 
-import Logger
-import Logger.LOG_TAG_PROXY
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_PROXY
 import com.celzero.bravedns.database.WgHopMap
 import com.celzero.bravedns.database.WgHopMapRepository
 import com.celzero.bravedns.service.ProxyManager.ID_WG_BASE
@@ -17,6 +17,16 @@ object WgHopManager: KoinComponent {
     private val db: WgHopMapRepository by inject()
     private var maps: CopyOnWriteArrayList<WgHopMap> = CopyOnWriteArrayList()
     private const val TAG = "WgHopMgr"
+
+    init {
+        io {
+            try {
+                load(forceRefresh = false)
+            } catch (e: Exception) {
+                Logger.w(LOG_TAG_PROXY, "$TAG err loading hop maps during init: ${e.message}")
+            }
+        }
+    }
 
     suspend fun load(forceRefresh: Boolean): Int {
         if (!forceRefresh && maps.isNotEmpty()) {

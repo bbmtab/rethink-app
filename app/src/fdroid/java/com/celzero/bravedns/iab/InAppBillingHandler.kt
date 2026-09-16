@@ -19,6 +19,9 @@ import android.app.Activity
 import android.content.Context
 import androidx.lifecycle.MutableLiveData
 import com.google.gson.JsonObject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Stub: in-app billing is not available on the F-Droid build.
@@ -40,7 +43,9 @@ object InAppBillingHandler {
     const val REVOKE_WINDOW_SUBS_MONTHLY_DAYS = 3
     const val REVOKE_WINDOW_SUBS_YEARLY_DAYS = 7
     const val REVOKE_WINDOW_ONE_TIME_2YRS_DAYS = 14  // 2 * 7
-    const val REVOKE_WINDOW_ONE_TIME_5YRS_DAYS = 35  // 5 * 7
+    const val REVOKE_WINDOW_ONE_TIME_5YRS_DAYS = 28  // 4 * 7
+
+    const val MONEYBACK_WINDOW_DAYS = 31
 
     const val PLAY_SUBS_LINK = "https://play.google.com/store/account/subscriptions?sku=\$1&package=\$2"
     const val HISTORY_LINK = ""
@@ -55,6 +60,22 @@ object InAppBillingHandler {
 
     // LiveData shared by NotificationHandlerActivity / ManagePurchaseFragment
     val serverApiErrorLiveData: MutableLiveData<ServerApiError?> = MutableLiveData(null)
+
+    // LiveData shared by the dashboard: account-mismatch warning.
+    val accountMismatchLiveData: MutableLiveData<Unit> = MutableLiveData(null)
+
+    /**
+     * Sticky, process-wide record of the last unresolved acknowledgement / verification failure
+     * Always empty on the F-Droid build (no billing client); the dashboard
+     * observes it but it never emits a failure here.
+     */
+    private val _ackFailureFlow = MutableStateFlow<AckFailureInfo?>(null)
+    val ackFailureFlow: StateFlow<AckFailureInfo?> = _ackFailureFlow.asStateFlow()
+
+    /** No-op on F-Droid: there is no billing client to re-verify against. */
+    fun reverifyAfterFailure(callback: ((success: Boolean) -> Unit)? = null) {
+        callback?.invoke(false)
+    }
 
     @Suppress("UNUSED_PARAMETER")
     fun initiate(context: Context, billingListener: Any? = null) { /* no-op */ }

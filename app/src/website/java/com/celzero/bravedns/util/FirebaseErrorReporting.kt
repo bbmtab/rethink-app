@@ -15,138 +15,63 @@
  */
 package com.celzero.bravedns.util
 
-import Logger
-import Logger.LOG_FIREBASE
-import com.celzero.bravedns.service.PersistentState
-import com.celzero.bravedns.util.Utilities.getRandomString
-import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.celzero.bravedns.util.Logger.LOG_FIREBASE
 import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 
 /**
- * Firebase Error Reporting Manager for Play Store variant
- * Handles automatic error reporting using Firebase Crashlytics
+ * Firebase Error Reporting Manager for website variant
+ * This is a stub implementation since Firebase is only available in play builds
  */
 object FirebaseErrorReporting : KoinComponent {
 
-    private val persistentState by inject<PersistentState>()
     const val TOKEN_REGENERATION_PERIOD_DAYS: Long = 45
     const val TOKEN_LENGTH = 16
-
     /**
-     * Initialize Firebase Crashlytics if available and enabled
+     * Initialize Firebase Crashlytics - no-op for website variant
      */
     fun initialize() {
-        if (!isAvailable()) {
-            Logger.w(LOG_FIREBASE, "crashlytics not available in this build variant")
-            return
-        }
-        if (!persistentState.firebaseErrorReportingEnabled) {
-            Logger.i(LOG_FIREBASE, "crashlytics disabled in settings")
-            return
-        }
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            val token = persistentState.firebaseUserToken
-            if (token.isEmpty()) {
-                val newToken = getRandomString(TOKEN_LENGTH)
-                persistentState.firebaseUserToken = newToken
-                persistentState.firebaseUserTokenTimestamp = System.currentTimeMillis()
-                crashlytics.setUserId(newToken)
-                Logger.i(LOG_FIREBASE, "generated new firebase token: $newToken")
-            } else {
-                crashlytics.setUserId(token)
-                Logger.i(LOG_FIREBASE, "existing firebase token found: $token")
-            }
-            setEnabled(persistentState.firebaseErrorReportingEnabled)
-            Logger.i(LOG_FIREBASE, "crashlytics initialized, enabled? ${crashlytics.isCrashlyticsCollectionEnabled}")
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "crashlytics not available: ${e.message}")
-        }
+        Logger.i(LOG_FIREBASE, "crashlytics not available in website variant")
     }
 
     /**
-     * Enable or disable Firebase Crashlytics data collection
+     * Enable or disable Firebase Crashlytics data collection - no-op for website variant
      */
     fun setEnabled(enabled: Boolean) {
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            crashlytics.isCrashlyticsCollectionEnabled = enabled
-            if (enabled) {
-                crashlytics.sendUnsentReports()
-            } else {
-                crashlytics.deleteUnsentReports()
-            }
-            Logger.i(LOG_FIREBASE, "crashlytics enabled state set to: $enabled")
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "err setting crashlytics state: ${e.message}")
-        }
+        Logger.i(LOG_FIREBASE, "crashlytics not available in website variant")
     }
 
     /**
-     * Check if Firebase Crashlytics is available in current build variant
+     * Check if Firebase Crashlytics is available - Always false for website variant
      */
     fun isAvailable(): Boolean {
-        return try {
-            FirebaseCrashlytics.getInstance() != null
-        } catch (e: Exception) {
-            false
-        }
+        return false
     }
 
     /**
-     * Log a custom message to Firebase Crashlytics
+     * Log a custom message - no-op for website variant
      */
-    fun log(message: String) {
-        if (!isAvailable() || !persistentState.firebaseErrorReportingEnabled) return
-
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            crashlytics.log(message)
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "err; log message to crashlytics: ${e.message}")
-        }
+    fun log(msg: String) {
+        // no-op: firebase not available in website variant
     }
 
     /**
-     * Record a non-fatal exception to Firebase Crashlytics
+     * Record a non-fatal exception - no-op for website variant
      */
     fun recordException(throwable: Throwable) {
-        if (!isAvailable() || !persistentState.firebaseErrorReportingEnabled) return
-
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            crashlytics.recordException(throwable)
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "err; rec-ex to crashlytics: ${e.message}")
-        }
+        // no-op: firebase not available in website variant
     }
 
     /**
-     * Set user ID for Firebase Crashlytics
+     * Set user ID - no-op for website variant
      */
-    fun setUserId(userId: String) {
-        if (!isAvailable() || !persistentState.firebaseErrorReportingEnabled) return
-
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            crashlytics.setUserId(userId)
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "err; set user-id crashlytics: ${e.message}")
-        }
+    fun setUserId(uid: String) {
+        // no-op: firebase not available in website variant
     }
 
     /**
-     * Set custom key-value pairs for Firebase Crashlytics
+     * Set custom key-value pairs - no-op for website variant
      */
     fun setCustomKey(key: String, value: String) {
-        if (!isAvailable() || !persistentState.firebaseErrorReportingEnabled) return
-
-        try {
-            val crashlytics = FirebaseCrashlytics.getInstance()
-            crashlytics.setCustomKey(key, value)
-        } catch (e: Exception) {
-            Logger.w(LOG_FIREBASE, "err; set custom key: ${e.message}")
-        }
+        // no-op: firebase not available in website variant
     }
 }

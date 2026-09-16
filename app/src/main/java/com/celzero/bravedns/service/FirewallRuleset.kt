@@ -348,8 +348,22 @@ enum class FirewallRuleset(val id: String, val title: Int, val desc: Int, val ac
                 rule.id == RULE8.id || rule.id == RULE9B.id
         }
 
+        fun isDnsBypassRule(rule: FirewallRuleset): Boolean {
+            // checks for both global and app-specific rules
+            return rule.id == RULE2B.id || rule.id == RULE2C.id || rule.id == RULE2F.id ||
+                    rule.id == RULE2I.id || rule.id == RULE1H.id
+        }
+
         fun isProxied(rule: FirewallRuleset): Boolean {
             return rule.id == RULE12.id
+        }
+
+        // Returns the trust/bypass rule that explains why a connection was allowed (these
+        // take precedence over universal/app block rules), or null when no such rule applied.
+        fun getAllowReason(ruleId: String?): FirewallRuleset? {
+            if (ruleId == null) return null
+            val rule = getFirewallRule(ruleId) ?: return null
+            return if (rule.act == R.integer.allow && isBypassRule(rule)) rule else null
         }
 
         fun isProxyError(rule: String?): Boolean {

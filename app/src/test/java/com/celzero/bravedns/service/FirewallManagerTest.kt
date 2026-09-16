@@ -345,13 +345,11 @@ class FirewallManagerTest : KoinTest {
         assertTrue(FirewallManager.FirewallStatus.BYPASS_DNS_FIREWALL.bypassDnsFirewall())
         assertTrue(FirewallManager.FirewallStatus.EXCLUDE.isExclude())
         assertTrue(FirewallManager.FirewallStatus.ISOLATE.isolate())
-        assertTrue(FirewallManager.FirewallStatus.UNTRACKED.isUntracked())
 
         assertFalse(FirewallManager.FirewallStatus.NONE.bypassUniversal())
         assertFalse(FirewallManager.FirewallStatus.NONE.bypassDnsFirewall())
         assertFalse(FirewallManager.FirewallStatus.NONE.isExclude())
         assertFalse(FirewallManager.FirewallStatus.NONE.isolate())
-        assertFalse(FirewallManager.FirewallStatus.NONE.isUntracked())
     }
 
     // Test ConnectionStatus enum
@@ -492,6 +490,50 @@ class FirewallManagerTest : KoinTest {
 
         // Test with whitespace string
         assertNull(FirewallManager.getAppInfoByPackage("   "))
+    }
+
+    // Regression: same packageName under multiple uids (work-profile / cloned app) must each be
+    // resolvable by (uid, packageName). getAppInfoByPackage collapses them to one; the uid-aware
+    // lookup must return the correct AppInfo per uid. This is the root cause of apps going missing
+    // from ProxyApplicationMapping (and hence from WgIncludeAppsAdapter).
+    @Test
+    fun testGetAppInfoByUidAndPackage_multiUidPerPackage() = runBlocking {
+        clearFirewallManagerState()
+        val dualPkg = "com.dual.app"
+        val user0Uid = 10042
+        val workProfileUid = 1010042 // user 10 (100000 + 10042)
+        val aiUser0 = AppInfo(
+            packageName = dualPkg, appName = "Dual User0", uid = user0Uid,
+            isSystemApp = false, firewallStatus = FirewallManager.FirewallStatus.NONE.id,
+            appCategory = "Other", wifiDataUsed = 0L, mobileDataUsed = 0L,
+            connectionStatus = FirewallManager.ConnectionStatus.ALLOW.id,
+            isProxyExcluded = false, screenOffAllowed = true, backgroundAllowed = true, tombstoneTs = 0L
+        )
+        val aiWork = AppInfo(
+            packageName = dualPkg, appName = "Dual Work", uid = workProfileUid,
+            isSystemApp = false, firewallStatus = FirewallManager.FirewallStatus.NONE.id,
+            appCategory = "Other", wifiDataUsed = 0L, mobileDataUsed = 0L,
+            connectionStatus = FirewallManager.ConnectionStatus.ALLOW.id,
+            isProxyExcluded = false, screenOffAllowed = true, backgroundAllowed = true, tombstoneTs = 0L
+        )
+        FirewallManager.GlobalVariable.appInfos.put(user0Uid, aiUser0)
+        FirewallManager.GlobalVariable.appInfos.put(workProfileUid, aiWork)
+
+        // getAppInfoByPackage can only ever return ONE of the two
+        val collapsed = FirewallManager.getAppInfoByPackage(dualPkg)
+        assertNotNull(collapsed)
+        assertEquals(dualPkg, collapsed!!.packageName)
+
+        // uid-aware lookup must return the exact entry for each uid
+        assertEquals(user0Uid, FirewallManager.getAppInfoByUidAndPackage(user0Uid, dualPkg)?.uid)
+        assertEquals(workProfileUid, FirewallManager.getAppInfoByUidAndPackage(workProfileUid, dualPkg)?.uid)
+
+        // null/blank guards
+        assertNull(FirewallManager.getAppInfoByUidAndPackage(user0Uid, ""))
+        assertNull(FirewallManager.getAppInfoByUidAndPackage(user0Uid, null))
+        assertNull(FirewallManager.getAppInfoByUidAndPackage(99999, dualPkg))
+        // mismatched uid/pkg combo must not return a sibling entry
+        assertNull(FirewallManager.getAppInfoByUidAndPackage(user0Uid, "com.other.pkg"))
     }
 
     // Test trackForegroundApp edge cases
@@ -688,12 +730,6 @@ class FirewallManagerTest : KoinTest {
             FirewallManager.ConnectionStatus.ALLOW
         ))
 
-        assertEquals(R.string.untracked, FirewallManager.getLabelForStatus(
-            FirewallManager.FirewallStatus.UNTRACKED,
-            FirewallManager.ConnectionStatus.ALLOW,
-            FirewallManager.ConnectionStatus.ALLOW
-        ))
-
         assertEquals(R.string.bypass_dns_firewall, FirewallManager.getLabelForStatus(
             FirewallManager.FirewallStatus.BYPASS_DNS_FIREWALL,
             FirewallManager.ConnectionStatus.ALLOW,
@@ -840,7 +876,6 @@ class FirewallManagerTest : KoinTest {
         assertEquals(FirewallManager.FirewallStatus.NONE, FirewallManager.appStatus(testUid1))
         assertEquals(FirewallManager.FirewallStatus.ISOLATE, FirewallManager.appStatus(testUid2))
         assertEquals(FirewallManager.FirewallStatus.BYPASS_UNIVERSAL, FirewallManager.appStatus(systemUid))
-        assertEquals(FirewallManager.FirewallStatus.UNTRACKED, FirewallManager.appStatus(invalidUid))
     }
 
     // Test connectionStatus method

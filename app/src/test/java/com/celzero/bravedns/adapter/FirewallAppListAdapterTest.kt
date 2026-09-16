@@ -51,7 +51,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.koin.android.ext.koin.androidContext
-import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.dsl.module
@@ -70,6 +69,9 @@ class FirewallAppListAdapterTest {
     private lateinit var mockParent: ViewGroup
     private lateinit var lifecycleOwner: LifecycleOwner
 
+    // relaxed: FirewallManager's cached `db` may bind to this mock for the rest
+    // of the JVM's lifetime (object singletons), so unstubbed calls (insert etc.)
+    // triggered by other test classes must not fail
     @MockK(relaxed = true)
     private lateinit var mockAppInfoRepository: AppInfoRepository
 
@@ -98,17 +100,20 @@ class FirewallAppListAdapterTest {
         // Create mock lifecycle owner
         lifecycleOwner = mockk<LifecycleOwner>(relaxed = true)
 
-        // Initialize Koin with proper mock dependencies
-        if (GlobalContext.getOrNull() == null) {
-            startKoin {
-                androidContext(context)
-                modules(
-                    module {
-                        single<AppInfoRepository> { mockAppInfoRepository }
-                        single<PersistentState> { mockPersistentState }
-                    }
-                )
-            }
+        // Initialize Koin with proper mock dependencies; always start fresh so
+        // this test's mocks (not a previous class's) are what singletons bind to
+        try {
+            stopKoin()
+        } catch (_: Exception) {
+        }
+        startKoin {
+            androidContext(context)
+            modules(
+                module {
+                    single<AppInfoRepository> { mockAppInfoRepository }
+                    single<PersistentState> { mockPersistentState }
+                }
+            )
         }
 
         // Mock AppInfoRepository methods that FirewallManager uses
@@ -269,8 +274,7 @@ class FirewallAppListAdapterTest {
             FirewallManager.FirewallStatus.EXCLUDE,
             FirewallManager.FirewallStatus.ISOLATE,
             FirewallManager.FirewallStatus.BYPASS_UNIVERSAL,
-            FirewallManager.FirewallStatus.BYPASS_DNS_FIREWALL,
-            FirewallManager.FirewallStatus.UNTRACKED
+            FirewallManager.FirewallStatus.BYPASS_DNS_FIREWALL
         )
 
         var processedCount = 0
