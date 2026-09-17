@@ -763,16 +763,23 @@ Remaining work is intentionally narrower:
   identity verification.
 * [ ] Tune post-MITM resource thresholds from device/performance evidence while
   preserving `MITM_STREAM_ONLY` semantics.
-* TRACKED DEFECT — silent VPN death with UI desync (2026-09-16, Mi A1 A16,
-  3 occurrences one session, pid stable, no crash): UI toggle reads STOP
-  while no tun interface exists and no re-establish is attempted.
-  3rd occurrence caught with cause-class: `Vpn: setting
+* TRACKED DEFECT — silent VPN death with UI desync — STATUS: UNHEALED
+  (closed for investigation 2026-09-17, NOT fixed). 4 occurrences (UI toggle
+  reads STOP while no tun interface exists, pid stable, no crash, no
+  re-establish). 3rd caught with cause-class: `Vpn: setting
   state=DISCONNECTED, reason=agentDisconnect` + `NetworkAgent channel lost`
   during a system lowmemorykiller storm; Rethink threads healthy ≤60s prior.
-  Fix slice (watchdog: detect agent loss → re-establish → sync UI) DEFERRED
-  to post-closure discussion — NOT dropped. Evidence: on-device
-  `/sdcard/vpnwatch.log*` + local `L:/Temp/opencode/vpnwatch1.log`. Memory:
-  project_matrix_m2_m12_m3_vpn_desync_20260916.
+  Watchdog built to Phase 1 LOG_ONLY only (detect + log; unit 14/14; device
+  no-false-escalation proven; natural-SUSPECT still unobserved) — auto-heal
+  NEVER enabled, so this bug still bites end users exactly as found.
+  RELEASE GATE: a main merge shipping a release must either carry the
+  COMPLETED + verified HEAL phase, or revert the watchdog slice first; the
+  DEBUG inject hook must never ship active (DEBUG-guarded today; preferred
+  home is the debug source set, not yet moved). Do not cut a stable tag
+  while this entry reads UNHEALED unless the exclusion is explicit + recorded.
+  Evidence: on-device `/sdcard/vpnwatch.log*` + local `L:/Temp/opencode/
+  vpnwatch*.log`. Memory: project_matrix_m2_m12_m3_vpn_desync_20260916,
+  project_vpn_watchdog_phase1_20260916.
 
 Project sequencing after these items is locked by DECISION-012: finish all
 MITM/adblock work and release verification first, integrate and push the
