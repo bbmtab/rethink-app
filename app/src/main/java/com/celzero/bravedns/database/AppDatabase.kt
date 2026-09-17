@@ -59,7 +59,7 @@ import com.celzero.bravedns.util.Constants
         SponsorEntity::class,
         SmartDnsEndpoint::class
     ],
-    version = 35,
+    version = 36,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -183,6 +183,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_32_33)
                 .addMigrations(MIGRATION_33_34)
                 .addMigrations(MIGRATION_34_35)
+                .addMigrations(MIGRATION_35_36)
                 .build()
 
         private val roomCallback: Callback =
@@ -1738,6 +1739,35 @@ abstract class AppDatabase : RoomDatabase() {
                                     "'sdns://AQcAAAAAAAAADTkuOS45LjEwOjg0NDMgZ8hHuMh1jNEgJFVDvnVnRt803x2EwAuMRwNo34Idhj4ZMi5kbnNjcnlwdC1jZXJ0LnF1YWQ5Lm5ldA' " +
                                     "WHERE id = 5 AND dnsCryptName = 'Quad9'"
                         )
+                    }
+                }
+            }
+
+        // Bridge (Plus): backfill upstream 30-33 deltas for fork-lineage
+        // DBs. Fork's own 30-33 chain used the same version numbers with
+        // different content, so fork-v33 databases lack: AppInfo.notes,
+        // DoHEndpoint.dohIp, the Sponsor table, and the notes triggers.
+        // All steps guarded/idempotent: no-op on upstream-lineage DBs.
+        private val MIGRATION_35_36: Migration =
+            object : Migration(35, 36) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    if (!doesColumnExistInTable(db, "AppInfo", "notes")) {
+                        db.execSQL(
+                            "ALTER TABLE AppInfo ADD COLUMN notes TEXT NOT NULL DEFAULT ''"
+                        )
+                        Logger.i(LOG_TAG_APP_DB, "MIGRATION_35_36: added notes column to AppInfo")
+                    } else {
+                        Logger.i(LOG_TAG_APP_DB, "MIGRATION_35_36: notes column already exists in AppInfo")
+                    }
+
+                    createAppInfoNotesLengthTriggers(db)
+                    createSponsorTable(db)
+
+                    if (!doesColumnExistInTable(db, "DoHEndpoint", "dohIp")) {
+                        db.execSQL("ALTER TABLE DoHEndpoint ADD COLUMN dohIp TEXT")
+                        Logger.i(LOG_TAG_APP_DB, "MIGRATION_35_36: added dohIp column to DoHEndpoint")
+                    } else {
+                        Logger.i(LOG_TAG_APP_DB, "MIGRATION_35_36: dohIp column already exists in DoHEndpoint")
                     }
                 }
             }
