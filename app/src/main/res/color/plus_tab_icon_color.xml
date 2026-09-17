@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:color="@color/colorGreen_A400" />
+    <!-- Bridge: upstream frost theme removed colorGreen_A400; inline the
+         Plus value (#2B8E18) to preserve the tab look. -->
+    <item android:color="#2B8E18" />
 </selector>

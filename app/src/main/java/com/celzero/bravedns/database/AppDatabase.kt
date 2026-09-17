@@ -1438,7 +1438,7 @@ abstract class AppDatabase : RoomDatabase() {
                 throw e
             }
         }
-        private val MIGRATION_31_32: Migration =
+        internal val MIGRATION_31_32: Migration =
             object : Migration(31, 32) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     try {
@@ -1564,7 +1564,7 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
-        private val MIGRATION_32_33: Migration =
+        internal val MIGRATION_32_33: Migration =
             object : Migration(32, 33) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     if (!doesColumnExistInTable(db, "DoHEndpoint", "dohIp")) {

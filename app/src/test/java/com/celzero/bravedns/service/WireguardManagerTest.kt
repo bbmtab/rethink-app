@@ -172,7 +172,9 @@ class WireguardManagerTest : KoinTest {
         useOnlyOnMetered: Boolean = false,
         isDeletable: Boolean = true,
         ssidEnabled: Boolean = false,
-        ssids: String = ""
+        ssids: String = "",
+        // Bridge: upstream added isSplitProxy (no default); tests default off.
+        isSplitProxy: Boolean = false
     ): WgConfigFilesImmutable {
         return WgConfigFilesImmutable(
             id = id,
@@ -186,7 +188,8 @@ class WireguardManagerTest : KoinTest {
             useOnlyOnMetered = useOnlyOnMetered,
             isDeletable = isDeletable,
             ssidEnabled = ssidEnabled,
-            ssids = ssids
+            ssids = ssids,
+            isSplitProxy = isSplitProxy
         )
     }
 
