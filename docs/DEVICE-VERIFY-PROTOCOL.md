@@ -617,3 +617,37 @@ N10_TEMP_RULE_DELETED=YES
 N10_CONNECTIVITY_RESTORED=YES
 N10_REPO_MUTATIONS_FROM_DEVICE_RUN=0
 ```
+
+## 11. Device closure batch — B-Curation seal + compat matrix + browser audit (2026-09-16/17)
+
+Mi A1 A16 `3595381c0804`, builds g1c0713120 → g6f0ce6721 (device), branch
+`phase1d-advanced-filter`. Fresh-install consent chain re-armed on device
+(VPN consent + CA install = human taps; master auto-ON after CA).
+
+- RULE20 R2/R3: first natural UDP/443 (Firefox/Meta, control BYPASS);
+  direct stall unobserved — ALPN-downgrade structure + app QUIC backoff;
+  BLOCKED-mechanism, no defect. Vimeo MITM-breakage candidate recorded
+  (upstream TLS failure, unverified vs direct).
+- Sideloads (official channels only): Cryptomator 2.0.0 (GitHub), WeChat
+  8.0.76 (Tencent CDN), Edge via Play (installer=vending), Google app via
+  Play. Telegram/WhatsApp absent from the 229 registry (fact-checked).
+- Matrix: #1 (WeChat pre-login BYPASS), #2 (BYPASS_USER beats inclusion),
+  #6 (badssl no-mutate, explicit not-cached), #7 (Chrome MITM positive),
+  #12 (restart preserves UI+decision state) PASS. #3 unit-only (no UI
+  harness). #4/#5/#11 + RULE20 need QUIC stimulus (blocked).
+  #8/#9/Cryptomator-depth DEFERRED-accounts (will retest, not dropped).
+- Browser audit 4/4 MITM_KNOWN_BROWSER live (Chrome/Brave/Firefox/Edge);
+  Edge `emmx`-vs-`empath` discrepancy resolved by evidence.
+- DoD#7 Chrome CA chain proven at display level too (RethinkDNS Root CA on
+  residue-free reload; earlier public-chain sheets = stale-state artifacts).
+- VPN-death desync found 4x (UI STOP, no tun, pid alive, no self-heal; 3rd
+  with agentDisconnect-under-LMK cause-class). Status UNHEALED, release-gated
+  exclusion recorded. Watchdog Phase 1 built (reverted pre-release per
+  commit-only-when-done; design preserved for re-apply).
+- Method corrections banked: tun-name-agnostic checks (agent dumpsys +
+  /proc/net/route; `ip` flaked under pressure), READ→DECIDE→TAP→VERIFY
+  gating, display-beats-logs only from controlled loads, no-cached-evidence
+  for liveness claims.
+
+Evidence index: `.opencode/memory/MEMORY.md` → SESSION 2026-09-16 wrap +
+DEVICE-CLOSURE section. Raw logs under `L:/Temp/opencode/` (temp, not repo).

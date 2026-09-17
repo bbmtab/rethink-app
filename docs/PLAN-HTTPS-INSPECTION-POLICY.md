@@ -663,20 +663,26 @@ Brave OFF→ON:
   MITM_KNOWN_BROWSER + TLS MITM tunnel restored
 ```
 
-Direct RULE20 execution is not yet device-proven. The following natural-control
-fixtures produced zero qualifying UDP/443 flows during the captured control
-windows:
+Direct RULE20 execution is not yet device-proven. Natural UDP/443 HAS been
+captured (Firefox, control BYPASS) but never under MITM policy:
 
 ```text
 Chrome          0
 YouTube         0
 YouTube Music   0
 Google Play     0
+Firefox         22 (2026-09-16) + 9 (2026-09-17), control BYPASS to Meta edge
+ReVanced YT     void (no playback driven)
+Google app      0 usable (sideloaded; feed renders with zero tun flows —
+                GMS-delegation vs keep-alive ambiguity unresolved)
+Opera/Brave     skipped by construction (known-browsers: MITM suppresses QUIC
+                discovery via enforced HTTP/1.1 ALPN, LocalHttpsProxy.kt:602,626)
 ```
 
 Additional donor-preset QUIC fixtures were not installed on the device. No
 RULE20 failure was observed because no real UDP/443 control stimulus reached
-the rule gate.
+the rule gate under MITM policy (R2/R3 verdicts: BLOCKED-mechanism, no code
+defect; memory project_rule20_firefox_quic_r2_verdict_20260916).
 
 #### N10 local-proxy firewall authority closure — 2026-09-08/09
 
@@ -743,8 +749,9 @@ Remaining work is intentionally narrower:
   UDP/443 using the active immutable policy snapshot (`InspectionTransportPolicy`
   + dedicated `FirewallRuleset.RULE20`).
 * [ ] Capture direct real-device RULE20 execution when a natural fixture emits
-  qualifying UDP/443 traffic. Current status: deferred because all available
-  installed control fixtures produced zero UDP/443.
+  qualifying UDP/443 traffic. Current status: natural UDP/443 HAS been
+  captured twice (Firefox, control BYPASS), but never under MITM policy —
+  direct stall still unobserved (see R2/R3 below).
   - 2026-09-16 (RULE20-R2, Mi A1 A16, build g1c0713120): first natural UDP/443
     captured (Firefox 22 conns to Meta edge, control BYPASS, 0 stall/MITM);
     MITM live for Firefox TCP (MITM_KNOWN_BROWSER). Direct stall still
@@ -754,6 +761,36 @@ Remaining work is intentionally narrower:
     YTM/Play 0; Opera/Brave skipped by construction as known-browsers;
     ReVanced playback void). Verdict BLOCKED with mechanism — no code defect,
     gate stays open. Memory: project_rule20_firefox_quic_r2_verdict_20260916.
+  - 2026-09-17 (RULE20-R3, Mi A1 A16, build g6f0ce6721): Alt-Svc two-step
+    (master OFF → control load to seed Alt-Svc → flip ON fast → reload under
+    MITM). Control-2 burst reproduced (Firefox 9 UDP to Meta, BYPASS, fwd
+    clean). Three ON-arms all 0 UDP: warm reels, scrolled reels (media
+    stimulus), fresh `pm clear` profile (virgin load goes TCP+MITM — never
+    learns QUIC through the downgraded proxy, consistent with R2 theory).
+    Backoff evidently persists across days/profiles for tried origins.
+    Vimeo vimeo.com/76979871 under MITM: upstream TLS handshake fails
+    ("Failure in SSL library, protocol error") → error page; probable ECH or
+    h1-intolerant edge — direct-load control NOT done, recorded as compat
+    candidate only, unclaimed (not RULE20: no UDP involved).
+    New fixtures probed: Google app (sideloaded via Play, uid 10467 —
+    Discover/search render with zero tun flows; GMS-delegation vs keep-alive
+    ambiguity unresolved; NOT a QUIC source), Gboard present as system app
+    (uid 10333, untested for stimulus); no maps/tiktok/spotify/snapchat/
+    telegram on device. Verdict BLOCKED-mechanism (2nd seal): code green
+    (InspectionTransportPolicyTest 11/11 on CI), no defect found,
+    environmentally unpassable with available fixtures. Commits frozen per
+    2026-09-17 user rule until RULE20 passes or is excluded by decision.
+    Memory: project_rule20_firefox_quic_r2_verdict_20260916 (Round 3).
+  - Method lessons (self-inflicted, recorded so they are not repeated):
+    interface checks must be NAME-AGNOSTIC (a tun1-only grep missed a live
+    tun0 and fabricated a false 5th death alarm; agent dumpsys + /proc/net/
+    route are ground truth; the `ip` tool itself flaked twice under LMK
+    pressure); toggle taps must be READ→DECIDE→TAP→VERIFY gated, never
+    batched on assumption (one blind tap flipped master OFF mid-round,
+    restored verified); master toggle cannot start a dead service (only the
+    protection toggle or sticky redelivery can — learned during a mid-round
+    LMK process death 19673→23585 with ~6 min non-recovery, fixed by manual
+    START triple-verified: agent + route + flows).
 * [ ] Complete the remaining external compatibility scenarios in §12.3.
 * [ ] Verify package-scoped domain/app edge cases not exercised by the controlled
   N4E three-fixture matrix.
@@ -763,16 +800,32 @@ Remaining work is intentionally narrower:
   identity verification.
 * [ ] Tune post-MITM resource thresholds from device/performance evidence while
   preserving `MITM_STREAM_ONLY` semantics.
-* TRACKED DEFECT — silent VPN death with UI desync (2026-09-16, Mi A1 A16,
-  3 occurrences one session, pid stable, no crash): UI toggle reads STOP
-  while no tun interface exists and no re-establish is attempted.
-  3rd occurrence caught with cause-class: `Vpn: setting
+* TRACKED DEFECT — silent VPN death with UI desync — STATUS: UNHEALED
+  (closed for investigation 2026-09-17, NOT fixed). 4 occurrences (UI toggle
+  reads STOP while no tun interface exists, pid stable, no crash, no
+  re-establish). 3rd caught with cause-class: `Vpn: setting
   state=DISCONNECTED, reason=agentDisconnect` + `NetworkAgent channel lost`
   during a system lowmemorykiller storm; Rethink threads healthy ≤60s prior.
-  Fix slice (watchdog: detect agent loss → re-establish → sync UI) DEFERRED
-  to post-closure discussion — NOT dropped. Evidence: on-device
-  `/sdcard/vpnwatch.log*` + local `L:/Temp/opencode/vpnwatch1.log`. Memory:
-  project_matrix_m2_m12_m3_vpn_desync_20260916.
+  Watchdog built to Phase 1 LOG_ONLY only (detect + log; unit 14/14; device
+  no-false-escalation proven; natural-SUSPECT still unobserved) — auto-heal
+  NEVER enabled, so this bug still bites end users exactly as found.
+  RELEASE GATE: a main merge shipping a release must either carry the
+  COMPLETED + verified HEAL phase, or revert the watchdog slice first; the
+  DEBUG inject hook must never ship active (DEBUG-guarded today; preferred
+  home is the debug source set, not yet moved). Do not cut a stable tag
+  while this entry reads UNHEALED unless the exclusion is explicit + recorded.
+  RELEASE EXCLUSION (user decision 2026-09-17, bypass for now): this defect
+  does NOT block the upcoming release. Rationale (recorded, not silent):
+  all 4 observations under extreme test conditions (reinstalls, 250MB+
+  sideloads, LMK storms, Doze); frequency in normal use unmeasured;
+  watchdog detection built (Phase 1, unit 14/14) with heal path designed;
+  user-side mitigation available (battery unrestricted + Always-on VPN).
+  Status stays UNHEALED + tracked; exclusion is release-scoped and revocable
+  on worse field evidence. Revisit at watchdog promote or any user-reported
+  silent-stop.
+  Evidence: on-device `/sdcard/vpnwatch.log*` + local `L:/Temp/opencode/
+  vpnwatch*.log`. Memory: project_matrix_m2_m12_m3_vpn_desync_20260916,
+  project_vpn_watchdog_phase1_20260916.
 
 Project sequencing after these items is locked by DECISION-012: finish all
 MITM/adblock work and release verification first, integrate and push the
