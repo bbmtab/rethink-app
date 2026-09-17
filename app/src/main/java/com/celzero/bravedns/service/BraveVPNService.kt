@@ -4759,26 +4759,6 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
         return FirewallRuleset.RULE20
     }
 
-    // this method is called when the device is locked, so no need to check for device lock here
-    private fun closeTrackedConnsOnDeviceLock() {
-        io("devLockCloseConns") {
-            val cidsToClose: List<String> = activeClosableCidsMutex.withLock {
-                if (activeClosableCids.isEmpty()) emptyList<String>()
-
-                val snapshot = activeClosableCids.toList()
-                activeClosableCids.clear()
-                snapshot
-            }
-            if (cidsToClose.isNotEmpty()) {
-                vpnAdapter?.closeConnections(cidsToClose, isUid = false, "dev-lock-close-conns")
-            }
-        }
-    }
-
-    private fun isLockdown(): Boolean {
-        return isLockDownPrevious.get()
-    }
-
     private fun createConnTrackerMetaData(
         uid: Int,
         usrId: Int,

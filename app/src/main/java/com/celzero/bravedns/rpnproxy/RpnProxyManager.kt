@@ -3160,8 +3160,8 @@ object RpnProxyManager : KoinComponent {
         }
 
         if (lockdown && !isHealthy) {
-            Logger.d(LOG_TAG_PROXY, "$TAG; lockdown wg for $type is inactive/unhealthy => return $block")
-            return Pair(block, false)
+            Logger.d(LOG_TAG_PROXY, "$TAG; lockdown wg for $type is inactive/unhealthy => exclude")
+            return false
         }
 
         if (lockdown && isEligibleForNetwork(id, usesMobileNw, ssid, config.mobileOnly, config.ssidBased)) {

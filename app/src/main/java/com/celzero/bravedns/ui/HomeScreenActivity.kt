@@ -894,15 +894,6 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
                         currentId == homeId -> {
                             finish()
                         }
-                        currentId == R.id.rethinkPlusDashboardFragment -> {
-                            val btmNavView = findViewById<BottomNavigationView>(R.id.nav_view)
-                            btmNavView.selectedItemId = homeId
-                            navController?.navigate(
-                                homeId,
-                                null,
-                                NavOptions.Builder().setPopUpTo(homeId, true).build()
-                            )
-                        }
                         else -> {
                             // Any other non-home top-level destination (statistics, configure,
                             // about, rethinkPlus), navigate to home and clear the back stack.
@@ -953,14 +944,10 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
 
         val homeId = R.id.homeScreenFragment
 
-        // Keep the rethinkPlus bottom-nav item highlighted whenever the user is on the
-        // dashboard (a child destination of rethinkPlus that is not itself a menu item).
+        // Bridge (Plus, O8): retired RPN dashboard destination removed;
+        // rethinkPlus highlight is handled by its direct menu-item branch.
         navController.addOnDestinationChangedListener { _, destination, _ ->
             when (destination.id) {
-                R.id.rethinkPlusDashboardFragment -> {
-                    // Dashboard is a child of the rethinkPlus flow keep rethinkPlus checked.
-                    btmNavView.menu.findItem(R.id.rethinkPlus)?.isChecked = true
-                }
                 R.id.rethinkPlus,
                 R.id.homeScreenFragment,
                 R.id.summaryStatisticsFragment,
@@ -976,11 +963,10 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
         btmNavView.setOnItemSelectedListener { item ->
             val currentId = navController.currentDestination?.id
 
-            // Prevent re-navigating if we are already on this destination (or its child).
-            // For rethinkPlus this also covers rethinkPlusDashboardFragment.
+            // Prevent re-navigating if we are already on this destination.
             val alreadyThere = when (item.itemId) {
                 R.id.rethinkPlus ->
-                    currentId == R.id.rethinkPlus || currentId == R.id.rethinkPlusDashboardFragment
+                    currentId == R.id.rethinkPlus
                 else -> currentId == item.itemId
             }
             if (alreadyThere) return@setOnItemSelectedListener false

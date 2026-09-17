@@ -31,7 +31,6 @@ import com.celzero.bravedns.databinding.ActivityAdvancedSettingBinding
 import com.celzero.bravedns.service.PersistentState
 import com.celzero.bravedns.ui.BaseActivity
 import com.celzero.bravedns.ui.tour.GuidedTourManager
-import com.celzero.bravedns.ui.tour.RpnOnboardingManager
 import com.celzero.bravedns.util.Themes
 import com.celzero.bravedns.util.Utilities.isAtleastQ
 import com.celzero.bravedns.util.handleFrostEffectIfNeeded
@@ -158,11 +157,6 @@ class AdvancedSettingActivity : BaseActivity(R.layout.activity_advanced_setting)
         b.settingsResetTourRl.setOnClickListener {
             GuidedTourManager.resetForDebug(persistentState)
             b.settingsResetTourDesc.text = getString(R.string.tour_debug_reset_done)
-        }
-
-        b.settingsResetRpnTourRl.setOnClickListener {
-            RpnOnboardingManager.resetForDebug(persistentState)
-            b.settingsResetRpnTourDesc.text = "RPN tour reset, will show again on next dashboard visit ✓"
         }
 
         b.settingsPtModeRl.setOnClickListener {

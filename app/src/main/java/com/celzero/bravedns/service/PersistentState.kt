@@ -879,7 +879,6 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
     var blockDnsForUnknownApp by booleanPref("block_dns_for_unknown_app").withDefault<Boolean>(false)
 
-<<<<<<< HEAD
     /**
      * Monotonic generation counter for Advanced Filter compiler outputs.
      * Bumped by FilterUpdateWorker upon successful compilation (Slice 2/3).

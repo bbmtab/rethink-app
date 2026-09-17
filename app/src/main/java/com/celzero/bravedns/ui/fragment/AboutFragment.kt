@@ -80,6 +80,7 @@ import com.celzero.bravedns.ui.bottomsheet.BugReportFilesBottomSheet
 import com.celzero.bravedns.sponsor.provider.SponsorProvider
 import com.celzero.bravedns.sponsor.repository.SponsorRepository
 import com.celzero.bravedns.util.Constants.Companion.INIT_TIME_MS
+import com.celzero.bravedns.util.Constants.Companion.RETHINKDNS_SPONSOR_LINK
 import com.celzero.bravedns.util.Constants.Companion.TIME_FORMAT_4
 import com.celzero.bravedns.util.FirebaseErrorReporting
 import com.celzero.bravedns.util.FirebaseErrorReporting.TOKEN_LENGTH

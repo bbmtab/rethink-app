@@ -34,8 +34,8 @@ import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.viewmodel.FilterSourceSummaryFormatter
 import com.celzero.bravedns.databinding.FragmentRethinkPlusBinding
 import com.celzero.bravedns.service.PersistentState
-import Logger
-import Logger.LOG_TAG_UI
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_UI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

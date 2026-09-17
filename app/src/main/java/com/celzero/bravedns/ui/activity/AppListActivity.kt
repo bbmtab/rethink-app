@@ -914,8 +914,6 @@ class AppListActivity :
 
         appInfoViewModel.appInfo.observe(this) {
             b.ffaAppList.post {
-        appInfoViewModel.appInfo.observe(this) {
-            b.ffaAppList.post {
                 recyclerAdapter.submitData(
                     lifecycle,
                     it
