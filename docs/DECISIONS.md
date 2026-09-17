@@ -2266,4 +2266,36 @@ HTTPS-inspection bug require temporary scope restriction.
 
 ---
 
+## DECISION-014: RELEASE EXCLUSIONS FOR KNOWN-OPEN ITEMS (2026-09-17)
+
+**Status:** PROPOSED — takes effect only on explicit user-as-decider sign-off.
+Until signed, every item below remains OPEN, not excluded. Refines
+RELEASE-POLICY.md pre-tag checklist item 3 (explicit, recorded exclusion —
+not a silent pass).
+
+### Decision (proposed)
+
+The following known-open items do NOT block the upcoming release. Rationale
+and evidence live in their home docs (referenced, not duplicated here); none
+is closed or downgraded by this entry:
+
+1. VPN-death silent desync (UNHEALED): 4x under extreme test conditions;
+   frequency in normal use unmeasured; watchdog detection built (Phase 1),
+   heal pending; user-side mitigation available. Home:
+   PLAN-HTTPS-INSPECTION-POLICY.md tracked-defect entry (incl. release
+   exclusion note). Revocable on worse field evidence.
+2. RULE20 direct device execution: BLOCKED-mechanism (code green, no defect,
+   environmentally unpassable with available fixtures). Home: PLAN §12 R2/R3.
+3. Matrix #3 (no UI harness; unit twin green), #4/#5/#11 (QUIC-stimulus
+   blocked; policy-half unit green), #8/#9 + Cryptomator depth
+   (deferred-accounts, will retest). Home: PLAN §12.3 notes.
+4. Full-suite 1243/43 (retired-RPN/subscription/Wireguard/stale-EasyList rot):
+   separate test-hygiene debt. Home: docs/TECH-DEBT-FULL-SUITE-CI-43.md.
+
+This entry grants no redistribution authorization, changes no code, and
+closes nothing. Items stay tracked in their home docs; this entry is the
+consolidated release pointer. Sealed only by user sign-off + commit.
+
+---
+
 **End of Decisions — Append Only**

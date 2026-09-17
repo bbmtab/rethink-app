@@ -20,8 +20,9 @@ different claims. This doc exists so that implicit habit is an explicit rule.
 
 ## What actually reaches a user
 
-Verified from `/.github/workflows/` on 2026-09-09; re-check the workflows before
-relying on this section, since triggers change.
+Verified from `/.github/workflows/` on 2026-09-09; workflow updated
+2026-09-16/17 (unit-test gate added, Android SDK setup repaired — see below);
+re-check the workflows before relying on this section, since triggers change.
 
 - **Push to `main` or `dev`**, or a manual `workflow_dispatch` (no tag):
   - `android.yml` runs `lint` + `assembleWebsiteFullDebug` — CI verification only,
@@ -32,7 +33,14 @@ relying on this section, since triggers change.
     `assembleFdroidFullDebug` as a debug-signed fallback. Both paths upload a CI
     artifact named `release-plus-<sha>` with **30-day retention**. This is a **CI artifact,
     not a GitHub Release** — downloadable by maintainers, never served to users.
-    The workflow is build-only and does not run the unit-test suite.
+    Since 2026-09-16 the workflow is NOT build-only: it first runs a scoped
+    unit-test gate (`:app:testFdroidFullDebugUnitTest` over the HTTPS-policy
+    package + `FilterSourceCompilerTest` + the database package, with counts
+    re-reported from JUnit XML — honest green per red-green discipline). The
+    FULL suite is deliberately not gated (1243 tests / 43 pre-existing failures
+    in retired-RPN, subscription, WireGuard, and stale-EasyList areas — see
+    `docs/TECH-DEBT-FULL-SUITE-CI-43.md`). A green run therefore proves
+    compile + the sealed slice, nothing more.
 - **Push a `v*.*.*` tag** (`build-apk.yml` additionally runs `Create GitHub Release`
   via `softprops/action-gh-release@v2`, gated on `startsWith(ref, 'refs/tags/v')`):
   publishes a **public GitHub Release** with the signed `-plus` APKs. This is the
