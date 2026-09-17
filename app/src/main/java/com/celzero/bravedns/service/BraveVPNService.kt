@@ -174,7 +174,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -207,12 +206,6 @@ import kotlin.time.Duration.Companion.milliseconds
 class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge, OnSharedPreferenceChangeListener {
 
     private val vpnScope = MainScope()
-
-    // Silent-dataplane-death watchdog (Phase 1: LOG_ONLY — detect + log, heal
-    // stubbed; see VpnWatchdog KDoc for promotion exit criteria). State is
-    // service-scoped on purpose: the bug class keeps the process alive.
-    private var watchdogJob: Job? = null
-    private var watchdogState = VpnWatchdog.State()
 
     // Advanced Filter HOT runtime activation watermark (Phase 1D B4 Slice-3).
     // In-memory only, NOT a preference; -1L sentinel means "never applied yet".
@@ -1942,73 +1935,6 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         }
     }
 
-    // Phase 1 watchdog ticker: detect silent dataplane death + log. The heal
-    // action stays stubbed until the VpnWatchdog KDoc exit criteria are met
-    // (unit tests green + manual-cycle validation + opportunistic detection).
-    // Idempotent start (cancel-first): mirrors observeVpnRestartRequests().
-    private fun observeVpnWatchdog() {
-        watchdogJob?.cancel()
-        Logger.i(LOG_TAG_VPN, "watchdog: ticker started")
-        watchdogJob = io("watchdog") {
-            val cfg = VpnWatchdog.Config()
-            // First check after one interval: lets a fresh establish settle.
-            // The span rule absorbs it anyway (flaps < desyncSpanMs never
-            // escalate), so this delay is belt-and-suspenders, not load-bearing.
-            // Cancel breaks delay() and ends the loop (no isActive needed).
-            while (true) {
-                delay(cfg.checkIntervalMs)
-                runVpnWatchdogCheck(cfg)
-            }
-        }
-    }
-
-    private suspend fun runVpnWatchdogCheck(cfg: VpnWatchdog.Config) {
-        // A dying watchdog must never be silent (that IS the bug class):
-        // any observation failure is logged and the ticker lives on.
-        // CancellationException rethrows: cancel must still end the loop.
-        try {
-            runVpnWatchdogCheckInner(cfg)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Logger.e(LOG_TAG_VPN, "watchdog: check failed (ticker survives): ${e.message}", e)
-        }
-    }
-
-    private suspend fun runVpnWatchdogCheckInner(cfg: VpnWatchdog.Config) {
-        val shouldRun = persistentState.vpnEnabledLiveData.value == true
-        // Mirror the Home fragment's own guard: paused topology differs.
-        val paused = VpnController.isAppPaused()
-        val presence = VpnWatchdog.scanPresence(this)
-        // Per-check sensor line (Phase 1 forensics: proves the ticker is alive
-        // and what the sensor saw; revisit verbosity at HEAL promotion).
-        Logger.i(LOG_TAG_VPN, "watchdog: check present=$presence misses=${watchdogState.missCount} failed=${watchdogState.failedHeals}")
-        val nowMs = elapsedRealtime()
-        val (ns, action) =
-            VpnWatchdog.decide(watchdogState, nowMs, shouldRun, presence, paused, VpnWatchdog.Phase.LOG_ONLY, cfg)
-        watchdogState = ns
-        when (action) {
-            VpnWatchdog.Action.NOOP -> Unit
-            VpnWatchdog.Action.LOG_SUSPECT ->
-                Logger.i(LOG_TAG_VPN, "watchdog: no VPN network (misses=${ns.missCount}, failedHeals=${ns.failedHeals})")
-            VpnWatchdog.Action.WOULD_HEAL ->
-                Logger.w(LOG_TAG_VPN, "watchdog: desync span ${cfg.desyncSpanMs}ms exceeded (misses=${ns.missCount}); LOG_ONLY — would restart here in HEAL phase")
-            VpnWatchdog.Action.HEAL_RESTART -> {
-                Logger.w(LOG_TAG_VPN, "watchdog: healing silent VPN death")
-                vpnRestartTrigger.value = "watchdogAgentLost"
-            }
-            VpnWatchdog.Action.GIVE_UP_NOTIFY -> {
-                Logger.e(LOG_TAG_VPN, "watchdog: heals exhausted, marking VPN off")
-                persistentState.setVpnEnabled(false)
-                notifyUserOnVpnFailure()
-            }
-        }
-    }
-
-    // Presence scan lives in VpnWatchdog.scanPresence (shared with the DEBUG
-    // hook for fidelity). Deleted the local copy 2026-09-17: two copies would
-    // drift and invalidate hook evidence.
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         rethinkUid = getRethinkUid()
         val pid = Process.myPid()
@@ -2091,7 +2017,6 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
                         // this should always happen after vpn enabled is set to true, as this will
                         // call restart-vpn and there is a check for vpn enabled state
                         observeVpnRestartRequests()
-                        observeVpnWatchdog()
                         // call this *after* a new vpn is created #512
                         uiCtx("observers") { observeChanges() }
                         eventLogger.logLow(EventType.VPN_START, "start new vpn from onStartCommand",

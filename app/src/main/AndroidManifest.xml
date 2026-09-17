@@ -82,19 +82,6 @@
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="true" />
         </service>
-        <!-- DEBUG-only watchdog pipeline proof (VpnWatchdogTestHook).
-             exported=true so `adb shell am broadcast` can reach it (run-as is
-             SELinux-denied on test devices); the BuildConfig.DEBUG
-             early-return is the real boundary — release builds ignore it.
-             Worst case if triggered by anyone: labeled log lines, zero state
-             mutation. -->
-        <receiver
-            android:name=".service.VpnWatchdogTestHook"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.celzero.bravedns.WATCHDOG_TEST_HOOK" />
-            </intent-filter>
-        </receiver>
 
     </application>
 </manifest>
