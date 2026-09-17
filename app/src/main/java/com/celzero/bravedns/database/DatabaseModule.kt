@@ -17,6 +17,7 @@ package com.celzero.bravedns.database
 
 import com.celzero.bravedns.iab.ServerOrderHistoryRepository
 import org.koin.android.ext.koin.androidContext
+import org.koin.dsl.bind
 import org.koin.dsl.module
 
 object DatabaseModule {
@@ -47,8 +48,9 @@ object DatabaseModule {
         single { get<AppDatabase>().rpnProxyDao() }
         single { get<AppDatabase>().wgHopMapDao() }
         single { get<AppDatabase>().subscriptionStatusDao() }
-        single { get<AppDatabase>().subscriptionStateHistoryDao()}
+        single { get<AppDatabase>().subscriptionStateHistoryDao() }
         single { get<AppDatabase>().countryConfigDAO() }
+        single { get<AppDatabase>().filterSourceDao() }
 
         single { get<LogDatabase>().connectionTrackerDAO() }
         single { get<LogDatabase>().dnsLogDAO() }
@@ -85,6 +87,10 @@ object DatabaseModule {
         single { get<AppDatabase>().subscriptionStatusRepository() }
         single { get<AppDatabase>().subscriptionStateHistoryDao() }
         single { get<AppDatabase>().countryConfigRepository() }
+        single { FilterSourceFileStore(androidContext()) }
+        single { FilterSourceRepository(get(), get()) } bind FilterSourceCompilerRepository::class
+        single { com.celzero.bravedns.core.filter.FilterSourceCompiler(get(), get()) }
+        single { com.celzero.bravedns.download.FilterSourceDownloadManager(get()) }
 
         single { get<LogDatabase>().rethinkConnectionLogRepository() }
         single { get<LogDatabase>().connectionTrackerRepository() }

@@ -42,7 +42,6 @@ import com.celzero.bravedns.ui.activity.FragmentHostActivity
 import com.celzero.bravedns.ui.activity.MiscSettingsActivity.BioMetricType
 import com.celzero.bravedns.ui.activity.PauseActivity
 import com.celzero.bravedns.ui.activity.WgMainActivity
-import com.celzero.bravedns.ui.fragment.RethinkPlusDashboardFragment
 import com.celzero.bravedns.util.Constants
 import com.celzero.bravedns.util.Constants.Companion.NOTIF_INTENT_EXTRA_IAB_CONFLICT_NAME
 import com.celzero.bravedns.util.Constants.Companion.NOTIF_INTENT_EXTRA_IAB_CONFLICT_VALUE
@@ -185,10 +184,10 @@ class NotificationHandlerActivity: BaseActivity() {
     /**
      * Rebuilds the [ServerApiError.Conflict409] from the notification intent extras,
      * re-posts it to [InAppBillingHandler.serverApiErrorLiveData], cancels the notification,
-     * then opens [RethinkPlusDashboardFragment]
+     * then opens the Home screen.
      *
-     * [RethinkPlusDashboardFragment.setupServerErrorObserver] observes the LiveData and will
-     * immediately show [com.celzero.bravedns.ui.bottomsheet.PurchaseConflictBottomSheet]
+     * The LiveData is retained so that any active observer can pick up the
+     * pending error and show a conflict-resolution UI.
      */
     private fun launchPurchaseConflictAndFinish(intent: Intent) {
         try {
@@ -216,15 +215,9 @@ class NotificationHandlerActivity: BaseActivity() {
 
             Logger.i(LOG_TAG_UI, "launchPurchaseConflictAndFinish: re-posted conflict409, op=$operation")
 
-            val hostIntent = FragmentHostActivity.createIntent(
-                context = this,
-                fragmentClass = RethinkPlusDashboardFragment::class.java,
-                args = Bundle()
-            ).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(hostIntent)
-            finish()
+            // Phase-1c pivot, O8: Plus-tab dashboard UI retired — no RPN
+            // user-facing destination. Fall through to the Home screen instead.
+            launchHomeScreenAndFinish()
         } catch (e: Exception) {
             Logger.e(LOG_TAG_UI, "launchPurchaseConflictAndFinish: error: ${e.message}", e)
             launchHomeScreenAndFinish()
@@ -234,9 +227,9 @@ class NotificationHandlerActivity: BaseActivity() {
     /**
      * Rebuilds [ServerApiError.DeviceNotRegistered] from the notification intent extras,
      * re-posts it to [InAppBillingHandler.serverApiErrorLiveData], cancels the notification,
-     * then opens [RethinkPlusDashboardFragment]
+     * then opens the Home screen.
      *
-     * [RethinkPlusDashboardFragment.setupServerErrorObserver] will immediately show
+     * The Home screen's Plus-tab listener will immediately show
      * [com.celzero.bravedns.ui.bottomsheet.DeviceNotRegisteredBottomSheet]
      */
     private fun launchDeviceNotRegisteredAndFinish(intent: Intent) {
@@ -247,7 +240,7 @@ class NotificationHandlerActivity: BaseActivity() {
                 deviceIdPrefix = intent.getStringExtra(DeviceNotRegisteredNotifier.EXTRA_DEVICE_ID_PREFIX) ?: ""
             )
 
-            // Re-post to LiveData on main thread so ManageRpnPurchaseBtmSht's observer
+            // Re-post to LiveData on the main thread so the observer
             // picks it up and shows DeviceNotRegisteredBottomSheet automatically.
             InAppBillingHandler.serverApiErrorLiveData.value = error
 
@@ -255,15 +248,9 @@ class NotificationHandlerActivity: BaseActivity() {
 
             Logger.i(LOG_TAG_UI, "launchDeviceNotRegisteredAndFinish: re-posted DeviceNotRegistered error")
 
-            val hostIntent = FragmentHostActivity.createIntent(
-                context = this,
-                fragmentClass = RethinkPlusDashboardFragment::class.java,
-                args = Bundle()
-            ).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(hostIntent)
-            finish()
+            // Phase-1c pivot, O8: Plus-tab dashboard UI retired — no RPN
+            // user-facing destination. Fall through to the Home screen instead.
+            launchHomeScreenAndFinish()
         } catch (e: Exception) {
             Logger.e(LOG_TAG_UI, "launchDeviceNotRegisteredAndFinish: error: ${e.message}", e)
             launchHomeScreenAndFinish()
@@ -273,9 +260,9 @@ class NotificationHandlerActivity: BaseActivity() {
     /**
      * Rebuilds [ServerApiError.Unauthorized401] from the notification intent extras,
      * re-posts it to [InAppBillingHandler.serverApiErrorLiveData], cancels the notification,
-     * then opens [RethinkPlusDashboardFragment].
+     * then opens the Home screen.
      *
-     * [RethinkPlusDashboardFragment.setupServerErrorObserver] will immediately show
+     * The Home screen's Plus-tab listener will immediately show
      * [com.celzero.bravedns.ui.bottomsheet.DeviceAuthErrorBottomSheet].
      */
     private fun launchDeviceAuthErrorAndFinish(intent: Intent) {
@@ -294,7 +281,7 @@ class NotificationHandlerActivity: BaseActivity() {
                 deviceIdPrefix = intent.getStringExtra(DeviceAuthErrorNotifier.EXTRA_DEVICE_ID_PREFIX) ?: ""
             )
 
-            // Re-post to LiveData on the main thread so RethinkPlusDashboardFragment's observer
+            // Re-post to LiveData on the main thread so the observer
             // picks it up and shows DeviceAuthErrorBottomSheet automatically.
             InAppBillingHandler.serverApiErrorLiveData.value = error
 
@@ -302,15 +289,9 @@ class NotificationHandlerActivity: BaseActivity() {
 
             Logger.i(LOG_TAG_UI, "launchDeviceAuthErrorAndFinish: re-posted Unauthorized401, op=$operation")
 
-            val hostIntent = FragmentHostActivity.createIntent(
-                context = this,
-                fragmentClass = RethinkPlusDashboardFragment::class.java,
-                args = Bundle()
-            ).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(hostIntent)
-            finish()
+            // Phase-1c pivot, O8: Plus-tab dashboard UI retired — no RPN
+            // user-facing destination. Fall through to the Home screen instead.
+            launchHomeScreenAndFinish()
         } catch (e: Exception) {
             Logger.e(LOG_TAG_UI, "launchDeviceAuthErrorAndFinish: error: ${e.message}", e)
             launchHomeScreenAndFinish()

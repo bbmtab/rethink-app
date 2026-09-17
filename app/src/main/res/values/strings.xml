@@ -1244,6 +1244,7 @@
     <string name="firewall_rule_foreground" translatable="true">App Not-in-Use</string>
     <string name="firewall_rule_unknown" translatable="true">Source Unknown</string>
     <string name="firewall_rule_block_udp_ntp" translatable="true">UDP Blocked</string>
+    <string name="firewall_rule_https_inspection_force_tcp" translatable="true">HTTPS Inspection</string>
     <string name="firewall_rule_block_dns_bypass" translatable="true">DNS Bypassed</string>
     <string name="firewall_rule_exempt_app_bypass_univ" translatable="true">Bypassed App</string>
     <string name="firewall_rule_exempt_dns_proxied" translatable="true">DNS Proxied</string>
@@ -1279,6 +1280,7 @@
     <string name="firewall_rule_foreground_desc" translatable="true"><![CDATA[This connection was firewalled because the source app was <i>not in the foreground</i>.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_unknown_desc" translatable="true"><![CDATA[This connection was firewalled because the <i>source app</i> could not be determined.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_block_udp_ntp_desc" translatable="true"><![CDATA[A user-set firewall rule blocked this <i>UDP</i> connection.<br/><br/> To change go to <i>Universal</i> tab.]]></string>
+    <string name="firewall_rule_https_inspection_force_tcp_desc" translatable="true"><![CDATA[This <i>UDP/443</i> connection was blocked so the app can retry HTTPS over TCP for inspection.]]></string>
     <string name="firewall_rule_block_dns_bypass_desc" translatable="true"><![CDATA[This connection was blocked because the <i>source app</i> bypassed user-preferred DNS.<br/><br/> To change this behaviour go to <i>Universal</i> tab.]]></string>
     <string name="firewall_rule_exempt_app_bypass_univ_desc" translatable="true"><![CDATA[This connection was allowed because the <i>source app</i> is set to <i>bypass universal</i> firewall rules.<br/><br/> To change go to <i>App-specific Firewall</i> screen.]]></string>
     <string name="firewall_rule_exempt_dns_proxied_desc" translatable="true"><![CDATA[This DNS connection was proxied and forwarded to user-preferred DNS endpoint.<br/><br/> To change disable <i>Prevent DNS leaks</i> from DNS <i>Configure</i> screen.]]></string>
@@ -2033,6 +2035,8 @@
     <string name="vpn_not_active_dialog_desc" translatable="false">Rethink is not started. Please start to use this feature.</string>
 
     <string name="rpn_title" translatable="false">RPN</string>
+    <!-- Phase-1c: bottom-nav Plus-tab label (NOT a blanket rename — rpn_title stays for the ~11 other RPN-network sites). -->
+    <string name="plus_title" translatable="false">Plus</string>
 
     <string name="rpn_troubleshoot_title" translatable="false">troubleshoot</string>
 
@@ -2342,7 +2346,7 @@
     <string name="billing_sub_cancel" translatable="false">Recurring \u2022 Cancel anytime</string>
     <string name="trial_days_format" translatable="false">%1$d days free trial</string>
 
-    <!-- RethinkPlusDashboardFragment hero banner -->
+    <!-- Plus / Filters hero banner -->
     <string name="hero_plan_and_account" translatable="false">%1$s • %2$s</string>
     <string name="placeholder_dash" translatable="false">\u2014</string>
 
@@ -2527,10 +2531,6 @@
 
     <string name="plus_https_inspection_desc">Inspect and filter HTTPS traffic using a local root CA. Requires CA installation.</string>
     <string name="plus_https_inspection_disabled">Enable CA installation first</string>
-
-    <string name="plus_blocklist_bridge_desc">Use your selected DNS blocklists for HTTPS adblocking. Select lists, then tap Sync.</string>
-    <string name="plus_blocklist_bridge_use_dns">Use DNS blocklists for adblock</string>
-    <string name="plus_blocklist_bridge_select_lists">Select Lists…</string>
     <string name="plus_blocklist_bridge_ready">Ready to sync</string>
     <string name="plus_blocklist_bridge_sync">Sync Now</string>
     <string name="plus_blocklist_bridge_syncing">Syncing…</string>
@@ -2544,9 +2544,12 @@
     <string name="plus_advanced_scriptlet_desc">Run JavaScript to neutralize anti-adblock (#%# rules)</string>
     <string name="plus_advanced_procedural_title">Procedural Cosmetic Filters</string>
     <string name="plus_advanced_procedural_desc">Dynamic element removal with :has(), :xpath(), :upward() (#?# rules)</string>
+    <string name="plus_advanced_csp_title">Content Security Policy (CSP) Injection</string>
+    <string name="plus_advanced_csp_desc">Inject CSP headers to restrict script execution (pending backend binding)</string>
+    <string name="plus_advanced_html_title">HTML Filtering</string>
+    <string name="plus_advanced_html_desc">Remove/collapse page elements via HTML rules (pending backend binding)</string>
+    <string name="plus_advanced_filtering_unavailable">Pending FilterEngine toggle-key binding — switches disabled until the backend preference keys exist</string>
 
-    <string name="plus_exclusions_domains">Domain Exclusions</string>
-    <string name="plus_exclusions_domains_desc">Skip MITM for these domains (certificate pinning, banking, etc.)</string>
     <string name="plus_exclusions_manage">Manage</string>
     <string name="plus_exclusions_apps">App Exclusions</string>
     <string name="plus_exclusions_apps_desc">Skip routing these apps through MITM entirely</string>
@@ -2571,22 +2574,89 @@
     <string name="plus_ca_install">Install CA</string>
     <string name="plus_ca_reinstall">Re-install CA</string>
     <string name="plus_ca_export">Export CA</string>
+    <string name="plus_ca_generate">Generate CA Certificate</string>
+    <string name="plus_ca_generate_hint">Generate first, then Install or Save will be enabled</string>
+    <string name="plus_ca_save_to_downloads">Save Certificate to Downloads</string>
 
-    <string name="plus_blocklist_bridge_title">DNS Blocklist → MITM Bridge</string>
-    <string name="plus_blocklist_bridge_toggle">Use DNS blocklists for adblock</string>
+    <string name="plus_blocklist_bridge_title">DNS Blocklist → HTTPS Filtering</string>
+    <string name="plus_blocklist_bridge_desc">Bridge selected Rethink DNS blocklists into compiled HTTPS filtering rules</string>
+    <string name="plus_blocklist_bridge_toggle">Use selected DNS blocklists for HTTPS filtering</string>
     <string name="plus_blocklist_bridge_toggle_desc">Sync selected DNS blocklists to adblock rules for HTTPS filtering</string>
-    <string name="plus_blocklist_bridge_selector_title">Blocklist Selector</string>
-    <string name="plus_blocklist_bridge_selector_desc">Choose which DNS blocklists to use for HTTPS filtering</string>
-    <string name="plus_blocklist_bridge_selector_btn">Select Lists…</string>
+    <string name="plus_blocklist_bridge_selector_title">Selected DNS lists</string>
+    <string name="plus_blocklist_bridge_selector_desc">0 lists selected</string>
+    <string name="plus_blocklist_bridge_selector_btn">Manage DNS Lists</string>
+    <string name="plus_blocklist_selected_title">Selected DNS lists</string>
+    <string name="plus_blocklist_selected_count_format">%d lists selected</string>
+    <string name="plus_blocklist_selected_count_single">1 list selected</string>
+    <string name="plus_blocklist_selected_count_none">0 lists selected</string>
+    <string name="plus_blocklist_manage_dns_lists">Manage DNS Lists</string>
 
-    <string name="plus_advanced_filtering_desc">Experimental features - require FilterEngine support</string>
+    <string name="plus_blocklist_dns_lists_title">Selected DNS lists</string>
+    <string name="plus_blocklist_dns_lists_desc">0 lists selected</string>
+    <string name="plus_blocklist_ad_blocking_title">Use DNS blocklists for ad blocking</string>
+    <string name="plus_blocklist_ad_blocking_desc">Enable HTTPS-level ad blocking using your DNS blocklists</string>
+    <string name="plus_filter_sources_title">Filter Lists</string>
+    <string name="plus_filter_sources_desc">Choose and enable filter lists by category</string>
+    <string name="plus_filter_sources_manage">Manage Filters</string>
+    <string name="plus_filter_sources_empty">Organized by category with source status and rule diagnostics</string>
+    <string name="plus_filter_sources_coming_soon">Advanced filter sources coming soon</string>
+    <string name="plus_filter_sources_no_sources">No filter sources configured</string>
+    <string name="plus_filter_sources_inactive">0 filters enabled • Advanced filtering inactive</string>
+    <string name="plus_filter_sources_pending">%1$d source(s) pending download/compile</string>
+    <string name="plus_filter_sources_summary">%1$d filters enabled • %2$d rules</string>
+    <string name="plus_filter_sources_updated">%1$d filters enabled • %2$d rules • updated %3$s</string>
+    <string name="plus_filter_sources_failed">%1$d filters enabled • %2$d rules • %3$d source(s) failed</string>
+    <string name="plus_manage_filters_title">Manage Filters</string>
+    <string name="plus_manage_filters_empty">No filter sources configured. Add a source to begin.</string>
+
+    <string name="plus_advanced_filtering_desc">Choose filter lists by category to block ads, trackers, annoyances, and threats</string>
     <string name="plus_advanced_filtering_title">Advanced Filtering</string>
     <string name="plus_exclusions_title">Exclusions</string>
-    <string name="plus_exclusions_desc">Configure domains or apps to exclude from HTTPS inspection</string>
+    <string name="plus_exclusions_desc">Configure apps to exclude from HTTPS inspection</string>
 
     <string name="plus_ca_install_success">CA certificate installed successfully</string>
     <string name="plus_ca_install_error">Failed to install CA certificate: %s</string>
     <string name="plus_ca_export_error">Failed to export CA certificate: %s</string>
     <string name="plus_blocklist_bridge_status">Last sync: %s</string>
+
+    <!-- CUSTOM-FILTER-B5: add-dialog resources -->
+    <string name="custom_filter_add">Add custom filter</string>
+    <string name="custom_filter_more_actions">More actions for this custom filter</string>
+    <string name="custom_filter_edit">Edit</string>
+    <string name="custom_filter_remove">Remove</string>
+    <string name="custom_filter_edit_dialog_title">Edit custom filter</string>
+    <string name="custom_filter_edit_saved">Custom filter updated</string>
+    <string name="custom_filter_edit_requires_disabled">Turn off this filter before editing</string>
+    <string name="custom_filter_remove_dialog_title">Remove custom filter?</string>
+    <string name="custom_filter_remove_dialog_message">Remove “%1$s”? This cannot be undone.</string>
+    <string name="custom_filter_removed">Custom filter removed</string>
+    <string name="custom_filter_error_source_missing">This filter no longer exists</string>
+    <string name="custom_filter_error_not_custom">Only custom filters can be edited or removed</string>
+    <string name="custom_filter_error_cleanup_failed">Could not remove the old filter files. Try again.</string>
+    <string name="custom_filter_error_state_changed">The filter state changed. Try again.</string>
+    <string name="custom_filter_error_edit_failed">Could not update this custom filter: %1$s</string>
+    <string name="custom_filter_error_remove_failed">Could not remove this custom filter: %1$s</string>
+    <string name="custom_filter_dialog_title">Add custom filter</string>
+    <string name="custom_filter_name_label">Name</string>
+    <string name="custom_filter_url_label">Filter list URL</string>
+    <string name="custom_filter_error_empty_name">Enter a name</string>
+    <string name="custom_filter_error_empty_url">Enter a URL</string>
+    <string name="custom_filter_error_invalid_url">Enter a valid HTTP or HTTPS URL</string>
+    <string name="custom_filter_error_unsupported_scheme">Only HTTP and HTTPS URLs are supported</string>
+    <string name="custom_filter_error_missing_host">The URL must include a host</string>
+    <string name="custom_filter_error_fragment">Remove the URL fragment (#…)</string>
+    <string name="custom_filter_error_duplicate_name">A filter named “%1$s” is already in your list</string>
+    <string name="custom_filter_error_duplicate_url">This filter URL is already in your list</string>
+    <string name="custom_filter_error_create_failed">Could not save this custom filter: %1$s</string>
+    <string name="custom_filter_saved">Custom filter saved</string>
+
+    <!-- HTTPS Inspection per-app management -->
+    <string name="https_inspection_apps_search_hint">Search installed apps</string>
+    <string name="https_inspection_apps_summary">Browsers are inspected by default. Other apps require explicit opt-in.</string>
+    <string name="https_inspection_known_browser">Known browser · inspected by default</string>
+    <string name="https_inspection_dynamic_browser">Detected browser · inspected by default</string>
+    <string name="https_inspection_other_app">App · inspection off by default</string>
+    <string name="https_inspection_system_bypass">System protected · HTTPS inspection unavailable</string>
+    <string name="https_inspection_app_switch_desc">HTTPS inspection for %1$s</string>
 
 </resources>

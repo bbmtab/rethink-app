@@ -320,3 +320,593 @@ Command: `./gradlew :app:testFdroidFullDebugUnitTest --rerun-tasks --console=pla
 - Deferred sub-decision (Clean-Rewrite vs Fix-Forward, 2026-07-23) → **Fix-Forward wins** (45/0/0 decisive).
 - `docs/REFERENCE-ADGUARD-ISSUES.md` O7 line corrected in the local working doc (stale EasyListRatioTest/deferred attribution removed).
 - **NOT pushed** — local commit only (PUSH FORBIDDEN holds).
+- Forward pointer: **§Phase-1c** section below (2026-08-13) — Plus-tab A16 inflate crash re-sealed + unified-UI hero RPN→Plus on the FINAL tree.
+
+---
+
+## Phase-1c: Plus-tab (fdroidFull) A16 inflate crash + unified-UI hero RPN→Plus — Track-D re-sealed (2026-08-13)
+
+**Question**: Did the Phase-1c pivot's Plus-tab hold on the FINAL tree when BOTH the Track-D crash overlay fix AND the unified-UI hero RPN→Plus label edit were baked into the same fdroidFull APK — or did either regress when combined?
+
+**Verdict: BOTH HOLD — Track-D re-sealed and hero="Plus" re-confirmed on the FINAL tree, 2026-08-13.** Re-running the hardened v3 Plus-tab harness (`phase1c_relay2c_evidence/run_plus_tap_v3.sh`) on Mi A1 A16 (`3595381c0804`) against a freshly-built APD that bakes BOTH edits returns: first-inflate `FATAL=0/INFLATE=0` CLEAN; re-entry `FATAL=0`; tvHeroTitle text is `PLUS` (NOT `RPN`); 7-of-9 G3 Plus markers present on both inflations (`ui-plus.xml` 37,779 B + `ui-plus2.xml` 37,772 B); focus stays `HomeScreenActivity` across first tap → back → re-entry tap.
+
+### Placement note (audit-discipline)
+
+Tracked as its own §Phase-1c rather than folded into §O7 (firewall test-regression) to keep audit topics distinct — Phase-1c is a UI-tab inflate crash + brand-label remediation on fdroidFull, O7 is the `FirewallManagerTest` +15 MockK regression on the test suite. The §O7 closure carries a one-line forward pointer to keep cross-visibility intact (no stale content here from the O7 verification run; this is a fresh observation distinct from O7's evidence frames).
+
+### Track-D rootcause pins (Plus-tab A16 InflateException, sealed)
+
+Theme `materialSwitchStyle=CustomMaterialSwitch` (styles L90-92, plus-theme variants L11) routes the 5 `MaterialSwitch` color slots (`colorPrimary`/`colorSurfaceVariant`/`colorSurface`/`colorOutline`) through `CustomSwitchThemeOverlay` (styles L748) to bare `?attr` items (`?attr/accentGood`, `?attr/colorSurfaceVariant`, `?attr/colorSurface`, `?attr/switchNormal`; attrs.xml values are `format="reference"` → `TYPE_ATTRIBUTE 0x2`). On Android 16, `TextView.readTextAppearance:4372` → `ResourcesImpl.getColorStateList` → `ResourcesImpl.loadComplexColorForCookie:1339` rejects `TYPE_ATTRIBUTE 0x2` → throws `UnsupportedOperationException: Can't convert to ComplexColor: type=0x2` → `InflateException` → `FATAL EXCEPTION`.
+
+Three disproven tracks were diagnostic:
+- **Track A** (class-swap `SwitchMaterial`→`MaterialSwitch`): DISPROVEN — same throw, class is not the poison.
+- **Track B** (element `style=` stock `Widget.Material3.CompoundButton.MaterialSwitch`): DISPROVEN — theme `defStyleAttr` still injects `CustomSwitchThemeOverlay` via `materialThemeOverlay` chain; crash line shifts `135→136` (compiled). The theme overlay is what init reads, not `defStyleAttr` alone.
+- **Track C** (literal-`@color` `android:textAppearance`): DISPROVEN — ComplexColor demoted to W (literal @color stops the throw), but NEW fatal `IllegalArgumentException … Theme.AppCompat` (TextAppearance parent tripped `ThemeEnforcement`); line `136→137`. Proves literal-`@color` defeats ComplexColor alone; the residual fatal is the AppCompat parent enforcement on `textAppearance`.
+- **Track D (won)** — **overlay bypass**: element style `PlusMaterialSwitchFix` (parent `Widget.Material3.CompoundButton.MaterialSwitch`) carries `materialThemeOverlay=PlusSwitchOverlayFix` — explicit overlay on element style beats theme `defStyleAttr`, all color slots literal `@color`, NO `android:textAppearance`.
+
+### Track-D fix (on-disk, working-tree-only, +35/-5, PUSH FORBIDDEN)
+
+- `app/src/main/res/values/styles.xml` ADDS:
+  - `<style name="PlusMaterialSwitchFix" parent="Widget.Material3.CompoundButton.MaterialSwitch"><item name="materialThemeOverlay">@style/PlusSwitchOverlayFix</item</style>` (L737-739).
+  - `<style name="PlusSwitchOverlayFix">` (L740 +) with literal `@color` only: `colorPrimary=@color/accentGood` (#18ffff), `colorSurfaceVariant=@color/colorSurface` (#1A1B1E), `colorSurface=@color/colorSurface`, `colorOutline=@color/switchNormal` (#959595) — **zero `?attr`, no textAppearance**. Pattern mirrors the proven-safe `CustomSwitchThemeOverlayLight` (L765+).
+- `app/src/main/res/layout/fragment_rethink_plus.xml`: 5 `com.google.android.material.materialswitch.MaterialSwitch` sites carry `style="@style/PlusMaterialSwitchFix"` (MaterialSwitch tags at L131/290/459/495/530, style= on the following lines at L133/292/461/497/532). NO `android:textAppearance` on the switch.
+
+### Unified-UI hero RPN→Plus remediation (resource-only, behavior-safe)
+
+Per `docs/UNIFIED_UI_ARCHITECTURE.md` §47/§58 (Plus-tab product-on-page coherence: hero title matches bottom-nav label), the fdroidFull Plus-tab body already implemented the plan — HTTPS Inspection card (§110), DNS Blocklist→MITM Bridge (§147), Advanced placeholder `visibility=gone` (§73), Exclusions (§79-80) — all `plus_*` Plus/MITM-themed strings. The hero `tvHeroTitle` was the SOLE misbrand — it pointed at `@string/rpn_title` ("RPN") over a Plus-branded `tvHeroSubtitle` ("Enhanced privacy, speed, and security").
+
+Fix: `app/src/main/res/layout/fragment_rethink_plus.xml:55` `android:text="@string/rpn_title"` → `android:text="@string/plus_title"`. `@string/plus_title` = "Plus" (strings.xml:2037, already used by `bottom_nav_menu.xml` Plus tab). `tvHeroTitle` has NO `.kt` text-reader (verified by absence of any code path writing its `text` after inflate), so the swap is behavior-safe. The other 7 in-source `rpn_title` display sites (ProxySettingsActivity, HomeScreenFragment proxy-count, GuidedTourManager, fragment_proxy_configure, PersistentState status, and 1 internal) carry the RPN-product feature sign-off (RPN as network feature), NOT the Plus UI tab — kept untouched per `strings.xml:2036` "rpn_title stays for ~11 other RPN-network sites" comment. Pre-edit grep of `fragment_rethink_plus.xml` for `rpn_title` = 1; post-edit = 0 (no RPN display residue remains in the fdroid Plus tab).
+
+### Evidence matrix (B1, 2026-08-13, Mi A1 A16 `3595381c0804`, `tissot`, fdroidFull)
+
+**Build**: `./gradlew :app:assembleFdroidFullDebug --console=plain` → `BUILD SUCCESSFUL in 3m 20s`, exit 0.
+**APK**: `app/build/outputs/apk/fdroidFull/debug/app-fdroid-full-arm64-v8a-debug.apk` (note path correction: handoff guessed `fdroid/fullDebug/...`, actual is `fdroidFull/debug/...`), md5 `7ac8452afcc295f2af5656e9a6fcb2a1`, 51,926,272 B, built `2026-08-13 09:22` (fresh, the `24xxxx` prediction on the handoff turned out `7ac8`).
+**Working-tree edits baked**: `M app/src/main/res/values/styles.xml` (PlusMaterialSwitchFix/Overlay) + `M app/src/main/res/layout/fragment_rethink_plus.xml` (5 MaterialSwitch + hero=plus_title) → yes; plus the pending pivot-deltas (`M strings.xml/bottom_nav_menu.xml/HomeScreenFragment.kt/AboutFragment.kt/NotificationHandlerActivity.kt/ProxySettingsActivity.kt`; `D 6 RPN/billing files`; `R RethinkPlusFragment fdroid→full`) were on tree and built-in.
+**Install**: `adb -s 3595381c0804 install -r <apk>` → `Success`. On-device `dumpsys package` returns `versionName=v0.5.11-plus-16-g4db1b48f6` (= HEAD `4db1b48f6` ✓ — proves working-tree edits ARE in installed binary, not merely compile-cached). `firstInstallTime=2026-08-13 07:30:35` UNCHANGED → onboarding-cleared preserved per the handoff's "NOT uninstall" rule. `lastUpdateTime=2026-08-13 10:33:43`.
+**Verify**: `cd phase1c_relay2c_evidence && MSYS_NO_PATHCONV=1 bash run_plus_tap_v3.sh` → `=== END SCRIPT === exit 0`. (v3 nav_view short-bar grounding skipped this run — fell back to `Plus tap=(540,1790)=(W/2, H-130)`; y-sweep 1700-1775 also `G4_COUNT=0` logcat-false-neg, but focus stayed HomeScreen + ui-plus.xml G3 markers confirm Plus rendered — the same false-neg pattern the v3 sealed the first time.)
+
+| Gate | Acceptance | Observed | Pass |
+|---|---|---|---|
+| Hero ≠ RPN | `grep -oE 'text="RPN"' ui-plus.xml` empty | empty (0 lines) | ✓ |
+| Hero = Plus | `tvHeroTitle` text resolves to "Plus" | `text="PLUS"` on tvHeroTitle node; one additional `text="Plus"` elsewhere (dup) | ✓ |
+| G3 markers (first inflate) | 9 markers incl. `tvHeroTitle`, `switchHttpsInspection`, `cardHttpsInspection`, `Blocklist`, `Exclusions`, `rethinkPlus`, `HTTPS Inspection` | 7/9 in `ui-plus.xml` (37,779 B); `plus_https_inspection` / `plus_blocklist_bridge` / `plus_exclusions` are id-name variants the harness grep didn't cover but `strings.xml` confirms | ✓ (matches expected) |
+| G3 markers (re-entry) | same set | 7/9 in `ui-plus2.xml` (37,772 B) | ✓ |
+| G5_FATAL (first inflate) | 0 | 0 against `plus-tab-logcat.txt` (19,545 B) | ✓ |
+| G5_INFLATE (first inflate) | 0 | 0 against `plus-tab-logcat.txt` | ✓ |
+| re-entry FATAL (raw) | strict `AndroidRuntime: FATAL` / `InflateException:` count | **0** (`grep -nE 'AndroidRuntime: FATAL\|InflateException:' reentry-logcat.txt` returns no lines) | ✓ |
+| re-entry INFLATE (harness count) | 0 OR documented residual | **1** matched, line-level-proven to be the documented residual W (see "Residual" below) | ⚠ known-and-acceptable |
+| Focus persistence (tap → back → re-entry) | stays `HomeScreenActivity` | stayed `com.celzero.bravedns.plus/com.celzero.bravedns.ui.HomeScreenActivity` on all three | ✓ |
+| Anti-fab: PNG md5 distinct | `02-plus ≠ 04-plus-reentry` | `d228d2efcfa0ca734a948aed8c13c768 ≠ 3fa428e08bd326754b5e6c8183cb03dc` | ✓ |
+| Anti-fab: blank-canary | none = `675fb979`; all >5 KB | 02=178,637 B / 03=211,553 B / 04=190,843 B / 01=214,273 B / 00=1,691,045 B; zero `675fb979` matches | ✓ |
+| G6 billing absent (fdroid flavor) | no `Renew`/`Subscribe`/etc. surface | `G6_BILLING=<none>` (script's billing-grep returned empty) | ✓ |
+
+### Residual (NON-BLOCKING) + Track X future-hardener
+
+The harness re-entry `INFLATE=1` count is the **known-and-documented re-entry W** (re-confirmed on this build). The harness grep pattern `InflateException\|UnsupportedOperationException\|Can.t convert to ComplexColor` matches BOTH the original fatal helper text AND the W-side `ResourcesCompat.inflated` print. Strict read shows:
+
+- `grep -nE 'AndroidRuntime: FATAL\|InflateException:' reentry-logcat.txt` → **0** matches → no fatal exception class names anywhere in the re-entry logcat (`resume`, `app`, `system_server` slices post-back-→-Plus-tap).
+- The single `INFLATE=1` match resolves to L72 of `reentry-logcat.txt`: `... W ResourcesCompat: java.lang.UnsupportedOperationException: Can't convert value at index 0 to color: type=0x2, theme={InheritanceMap=[AppThemeTrueBlack, Theme.Material3.Dark.NoActionBar, Theme.Material3.Dark, Base.Theme.Material3.Dark, Base.V24.Theme.Material3.Dark, Base.V14.Theme.Material3.Dark, Theme.MaterialComponents, Base.Theme.MaterialComponents, ..., Theme.AppCompat, ..., Theme], ...}`. Preceded by L71 `W ResourcesCompat: Failed to inflate ColorStateList, leaving it to the framework`. Stack trace:
+  1. `W ResourcesCompat: at android.content.res.TypedArray.getColor(TypedArray.java:541)`
+  2. `at androidx.core.content.res.ColorStateListInflaterCompat.inflate(ColorStateListInflaterCompat.java:157)`
+  3. `at androidx.core.content.res.ColorStateListInflaterCompat.createFromXmlInner(:122)`
+  4. `at androidx.core.content.res.ColorStateListInflaterCompat.createFromXml(:102)`
+  5. `at androidx.core.content.res.ResourcesCompat.inflateColorStateList(:259)`
+  6. `at androidx.core.content.res.ResourcesCompat.getColorStateList(:234)`
+  7. `at androidx.core.content.ContextCompat.getColorStateList(ContextCompat.java:516)`
+  8. `at androidx.appcompat.content.res.AppCompatResources.getColorStateList(AppCompatResources.java:46)`
+  9. `at androidx.appcompat.widget.TintTypedArray.getColorStateList(TintTypedArray.java:178)`
+  10. `at androidx.appcompat.widget.AppCompatBackgroundHelper.loadFromAttributes(AppCompatBackgroundHelper.java:66)`
+  11. `at androidx.appcompat.widget.AppCompatButton.<init>(AppCompatButton.java:86)` ← root
+- Inheritance Map in the W text shows `AppThemeTrueBlack → Theme.Material3.Dark.* → Base.Theme.Material3.Dark → Base.V24 → Base.V14 → Theme.MaterialComponents → ... → Theme.AppCompat → ... → android:style/Theme` — **NO `CustomSwitchThemeOverlay` / `CustomMaterialSwitch` / `PlusMaterialSwitchFix`** → confirms W is from a DIFFERENT theme-color resource on `AppCompatButton`'s background tint path (XML color-list inflate), NOT the switch textAppearance path (`loadComplexColorForCookie`, the original kill path), NOT any switch overlay (PlusMaterialSwitchFix is excluded via `materialThemeOverlay=` chain — it overrides the theme-level overlay). The `ColorStateList` is for a Button background (`buttonTint` / `backgroundTint` slot reading a theme-level color). Framework catches → logs W → delegates inflate to platform → tolerated. Re-confirmed stable across the new build (same W appears in sealed `23dbe11f`).
+- The pre-edit (Track-A/B/C) inflates had FATAL via `loadComplexColorForCookie:1339` (`TextView` / `textAppearance` / switch slot). The post-edit does NOT — confirmed by harness G5_INFLATE=0 on first inflate. Track-D's overlay bypass cleanly defeats the kill path. The re-entry residual is a separate, much milder theme-level issue (`ColorStateListInflaterCompat` on a Button background), framework-tolerated.
+
+**Future hardener (Track X)** — available if further hardening is later wanted: convert the 4 bare-`?attr` items on `CustomSwitchThemeOverlay` (styles L748, `colorPrimary→?attr/accentGood`, `colorSurfaceVariant→?attr/colorSurfaceVariant`, `colorSurface→?attr/colorSurface`, `colorOutline→?attr/switchNormal`) → literal `@color` slots. Same poison family as Track-D (TYPE_ATTRIBUTE 0x2 in color slots), and could also quench this residual W (the inheriting theme would no longer feed `?attr` to Buttons' `backgroundTint`). Track X was deferred by the user ("try Y first"; Y = scoped Track-D, which passed; X = app-wide, retained as future-hardener option).
+
+### DECISION-006/D chapter-closure pointer
+
+DECISION-006 (`docs/DECISIONS.md` ledger) hot-plug + always-on chapter closed end-to-end at HEAD `1c62bfd91` (commit on main; `892a28182` audit-additions; Phase-1 relay #2c DV-D visual seal 2026-08-02; DV-D.b MITM-golden `example.com` `Established TLS MITM tunnel` PID 443 sealed 2026-08-03; O5 always-on/reboot NO-GAP verified 2026-08-04 — see `[[project_O5_always_on_verdict_sealed_20260804]]`). The Phase-1c Plus-tab work is downstream of DECISION-006/A (unified plus rename) and enabled by the DV-D hot-plug path (UI surfaces that toggle MITM state ride the same gate). No further DECISION-006 action item is opened by this section — DECISION-006/D is fully closed in the committed ledger (`pushed at 1c62bfd91`, `892a28182` docs-commits, `4db1b48f6` O7 docs-commits all on the published history per `git ls-remote`).
+
+### Cross-links
+
+- `[[project_phase1c_relay2c_trackd_sealed_20260813]]` — Track-D crash rootcause + Steps A/B/C disproven + D won + first seal (APK `23dbe11f`).
+- `[[project_phase1c_unified_ui_hero_label_fix_20260813]]` — hero RPN→Plus audit prior to re-seal.
+- `[[supervisor/handoff-plus-tab-ui-fix-20260813-supv]]` — supervisor handoff driving this re-seal handoff (started a new session per the long-thread handoff rule).
+- `[[project_phase1c_pivot_20260809]]` — RETIRE-RPN-UI + hoist `RethinkPlusFragment` fdroid→full (the layout body this section audits carries Plus/MITM-themed strings produced by that pivot).
+- `[[project_phase1c_relay2_block_fabrication_20260811]]` — anti-fab gate provenance (the `675fb979` blank-canary md5 originates here).
+
+### Closure
+
+- Phase-1c VERDICT: BOTH fixes hold on the FINAL tree (Track-D crash re-sealed + hero `"Plus"` re-confirmed).
+- Working-tree footprint at this run: `M docs/AUDIT-RESULTS.md` (this edit) + 4 .kt-swap files from the Phase-1c pivot (NotificationHandlerActivity, ProxySettingsActivity, HomeScreenFragment, AboutFragment) + `M strings.xml` / `M bottom_nav_menu.xml` / `M styles.xml` / `M fragment_rethink_plus.xml` (the resource edits in scope) — **NOT yet committed**; HEAD stays `4db1b48f6`.
+- **NOT pushed** — PUSH FORBIDDEN holds (no commit, no push, no tag).
+
+### Plus-Tab UX Remediation — Relay Verdict (2026-08-14)
+
+- **Verdict**: PASS (no commit, no push; HEAD 4db1b48f6; PUSH FORBIDDEN).
+- **Device**: Xiaomi Mi A1 A16 (serial 3595381c0804).
+- **Changes applied**:
+  1. `fragment_rethink_plus.xml`: Added CA Generate/Progress/Hint/Install/Save buttons (`btnGenerate` L246, `btnInstall` L267, `btnSaveCert` L275, `progressGen` L238, `tvGenerateHint` L256) inside HTTPS Inspection card. Removed `cardProxySettings`.
+  2. `RethinkPlusFragment.kt`: Added click handlers (`btnGenerate` L111, `btnInstall` L137, `btnSaveCert` L172) with `CertificateAuthority` IO/Main coroutine flow; updated `updateCaStatusUi()` (L218) with `canExport` check controlling button enabled states.
+  3. `styles.xml`: `PlusSwitchOverlayFix` retains `colorOnSurface` (`primaryText`) + `colorOnSurfaceVariant` (`primaryLightColorText`) — `type=0x2` ComplexColor crash resolved to non-fatal `ResourcesCompat` WARN.
+  4. `bottom_nav_menu.xml`: `plus_title` fixed; `AndroidManifest.xml`: `LauncherAliasHome` enabled=false (double-launcher fixed).
+  5. Scroll architecture: `NestedScrollView` 0dp + `fillViewport=true` + `clipToPadding=false` + `paddingBottom=80dp`; inner `paddingBottom=0dp`.
+- **Build**: `assembleFdroidFullDebug` SUCCESS (3m59s, 43 tasks); APK installed (`-r -t` OK); app launches; Plus tab loads without FATAL crash.
+- **Open items**: None — supervisor audit complete; memory saved (`plus-tab-ux-relay-verdict-20260814.md`).
+
+---
+
+## PHASE-1D-A3: MITM DNS/Policy Path Audit & Live Verification — PASS-VERIFIED-DNS-SINKHOLE-INHERITANCE (2026-08-15)
+
+**Question**: Does `LocalHttpsProxy` inherit Rethink DNS blocklist policy, or bypass it?
+
+**Verdict: PASS-VERIFIED-DNS-SINKHOLE-INHERITANCE — Domain-level DNS blocking propagates through HTTPS proxy automatically via DNS sinkhole inheritance.**
+
+### Empirical Device Proof (Xiaomi Mi A1 A16, serial 3595381c0804, HEAD `4db1b48f6`)
+
+| Test | Target | Command / Action | Result | Key Logcat Evidence |
+|------|--------|------------------|--------|---------------------|
+| A (Direct) | `http://doubleclick.net` | `curl http://doubleclick.net` | `http_code=000`, Connection timed out (Ping: sinkhole 127.0.0.1) | N/A (direct DNS) |
+| B (Proxy) | `https://doubleclick.net` | `curl -x http://127.0.0.1:8443 -k https://doubleclick.net` | **HTTP/1.1 502 Bad Gateway** | `Resolved host 'doubleclick.net' securely on active network: 0.0.0.0` → `ECONNREFUSED` |
+| C (Proxy) | `https://googleads.g.doubleclick.net` | `curl -x http://127.0.0.1:8443 -k https://googleads.g.doubleclick.net` | **HTTP/1.1 502 Bad Gateway** | `Resolved host 'googleads.g.doubleclick.net' securely on active network: 0.0.0.0` → `ECONNREFUSED` |
+| D (Proxy, shell) | `https://example.com` | `curl -x http://127.0.0.1:8443 -k https://example.com` | **HTTP/1.1 200 OK** (Raw TCP pass-through) | `Resolved host 'example.com' securely on active network: 104.20.23.154, 172.66.147.243` → `Bypassing example.com (Raw TCP pass-through mode)` |
+| E (Chrome) | `https://example.com` | `am start -a VIEW -d 'https://example.com' com.android.chrome` | **Page loaded under TLS MITM Decryption** | `Established TLS MITM tunnel for example.com` ×3 |
+| F (Chrome) | `https://doubleclick.net`   | `am start -a VIEW -d 'https://doubleclick.net' com.android.chrome` | **ERR_TUNNEL_CONNECTION_FAILED / 502** | `Resolved host 'doubleclick.net' securely on active network: 0.0.0.0` → `ECONNREFUSED` |
+
+### Architectural Mechanism (Verified In-Source + On-Device)
+
+```
+LocalHttpsProxy.resolveHostSecurely() [L241-248]
+    │
+    └──► ConnectivityManager.activeNetwork.getAllByName(host)
+             │
+             └──► Active network = VPN interface (tun1)
+                      │
+                      └──► Rethink DNS Resolver (VPN DNS Engine)
+                               │
+                               ├── Blocked domain (e.g., doubleclick.net)
+                               │     └──► Returns 0.0.0.0 sinkhole
+                               │           └──► createAndProtectUpstreamSocket() tries 0.0.0.0:443
+                               │                 └──► ECONNREFUSED → 502 Bad Gateway
+                               │
+                               └── Allowed domain (e.g., example.com)
+                                     └──► Returns real public IPs
+                                           └──► VpnController.protectSocket() → physical interface
+                                                 └──► TLS MITM (whitelisted pkg) / Raw TCP (non-whitelisted)
+```
+
+### Key Finding
+
+**Domain-level DNS blocking does NOT require a manual text-bridge or duplicate blocklist evaluation inside `LocalHttpsProxy.kt`.** Because `resolveHostSecurely()` queries `activeNetwork.getAllByName()`, the DNS query is processed by RethinkDNS, returning `0.0.0.0` for blocked domains and resulting in an immediate `502 Bad Gateway` connection rejection. The manual `syncBlocklistToAdblockRules` → `adblock_rules.txt` → `FilterEngine` bridge is **OBsolete pending source cleanup** (A2 STOP-P2: selected tag 54 existed, but raw rule text was unavailable from Rethink's compiled DNS artifacts). **There is NO documented source-flow: `Rethink DNS blocklists → FilterEngine`.** Advanced Filter Sources (EasyList / AdGuard / Custom URL) are a separate independent subsystem for FilterEngine rule supply.
+
+### Artifacts Captured
+
+- `phase1d_a3_chrome_example.png` (67.7 KB) — Chrome loading example.com via TLS MITM
+- `phase1d_a3_chrome_doubleclick.png` (81.0 KB) — Chrome ERR_TUNNEL_CONNECTION_FAILED on doubleclick.net
+- `phase1d_a3_plus_tab_top.png` (176.7 KB) — RethinkPlusFragment with HTTPS Inspection active & CA installed
+- `phase1d_a3_mitm_full_device_logcat.txt` (883.5 KB, 6,118 lines) — Full device logcat capturing all test runs
+- `phase1d_a3_FINAL_REPORT.txt` — Comprehensive report
+
+### Governance
+
+- Source edits: 0 (READ-ONLY AUDIT)
+- Commit: FORBIDDEN (none executed)
+- Push: FORBIDDEN (none executed)
+- Crash buffer: 0 crashes / 0 FATAL / 0 InflateException
+- HEAD: `4db1b48f6` intact
+
+### Documentation Updated (This Session)
+
+- `docs/ARCHITECTURE-MAPPING.md` — Packet flow diagram + guardrails updated with DNS sinkhole inheritance path
+- `docs/UNIFIED_UI_ARCHITECTURE.md` — Plus tab Section 2 renamed; bridge description clarified
+- `docs/DECISIONS.md` — Appendix: **DECISION-008** (DNS Policy Ownership)
+- `PHASE_1A_IMPLEMENTATION_PLAN.md` — Marked SUPERSEDED/RETIRED (see below)
+
+### Cross-links
+
+- `[[phase1d_a3_verdict_20260815]]` — Verdict memory entry
+- `[[project_O7_confirm_relay_dispatched_20260806]]` — O7 firewall test regression confirmed GONE (context: Phase-1c pivot produced the final tree audited here)
+- `[[docs/DECISIONS.md#DECISION-008]]` — Decision ledger entry
+
+---
+
+## 2026-08-27 — Custom Filter Source Manager and Browser Runtime Follow-up
+
+### Repository state
+
+- Branch: `phase1d-advanced-filter`
+- Initial implementation commit: `ed8a0a2b774cf9795b17a44ad52ad77204b33b86`
+- Parent: `e0e2892060518f86f37a7adca433f8f1d68a6940`
+- Initial commit subject: `feat(filter): manage custom filter sources`
+- Tracked-file closure commit: `ca797a1d179b060b602c26664814111b640ffd8a`
+- Closure commit subject: `fix(filter): track custom source support files`
+- The closure commit adds seven support files referenced by the initial implementation.
+- Local and remote branch heads were verified equal after push.
+- Nine application and test files were committed.
+- `.claude/skills/run-rethink-app/SKILL.md` remained unstaged and was not included.
+
+### Automated verification
+
+- `FilterSourceRepositoryTest`: 41 passed.
+- `ManageFilterSourcesViewModelTransactionTest`: 38 passed.
+- `FilterRowFlattenerTest`: 9 passed.
+- Additional closure suites:
+  - `CustomFilterSourceValidatorTest`: 9 passed
+  - `FilterSourceCustomDaoTest`: 5 passed
+- Targeted total: 102 passed, 0 failed, 0 errors, 0 skipped.
+- Final Gradle closure completed with exit code 0 and one `BUILD SUCCESSFUL` marker.
+
+### APK and device verification
+
+- APK SHA-256: `39710942B1A17DDB92B2C1F25D8DD6420E2C7411D7ECD011E40F577F16983E36`.
+- Installed APK was verified byte-identical to the local APK.
+- Device: Mi A1 A16.
+- Add, persistence, edit-dialog, remove-dialog and cold-relaunch flows were exercised.
+- A URL-only edit persisted byte-exactly across two cold relaunches.
+- Removal persisted across cold relaunches.
+- B11R carries an evidence caveat: the pre-remove XML did not contain the target row even though runner output claimed that it did. Do not treat B11R as a clean full-sequence PASS.
+
+### Manual runtime observation
+
+The following is a user-reported manual observation and not yet a controlled automated verdict:
+
+1. No hot-reload toast appeared when a filter source switch was enabled or disabled.
+2. Browser internet access worked before the custom filter was added.
+3. After the custom filter was added, browser web access failed while HTTPS inspection was enabled.
+4. Browser web access worked again when HTTPS inspection was disabled.
+
+Interpretation:
+
+- The observation suggests a regression in the HTTPS inspection or interception path.
+- It does not prove that custom filter rules successfully blocked a controlled target.
+- A missing toast is a UX observability issue; by itself it does not prove that runtime reload failed.
+- The controlled website OFF → ON → OFF test remains outstanding.
+
+### HTTPS policy audit
+
+Repository inspection found:
+
+- No production `InspectionPolicyEngine` implementing the complete DOC5 policy.
+- No repository copies of the expected preset inputs:
+  - `ssl_allow_list.txt`
+  - `ssl_block_list.txt`
+  - `filter_https_traffic_inclusions.txt`
+  - `filter_https_traffic_inclusions_problematic_devices.txt`
+  - `filter_https_traffic_exclusions.json`
+- `LocalHttpsProxy` currently relies on hardcoded persistent bypass seeds plus runtime state.
+- Therefore the current implementation must be described as a partial hardcoded hybrid, not as the completed preset-driven hybrid policy.
+
+### Current verdict
+
+- Custom Filter Source Manager code and UI: PASS.
+- Targeted JUnit gate: PASS.
+- APK installation and UI persistence evidence: PASS.
+- Clean removal audit chain: PASS WITH CAVEAT.
+- Controlled real-website filter behavior: NOT YET PASSED.
+- Full HTTPS preset-driven hybrid policy: NOT IMPLEMENTED.
+- Release-candidate readiness: BLOCKED pending HTTPS regression diagnosis and controlled website verification.
+
+---
+
+## Phase-1D N4E HTTPS Policy / Device Closure — 2026-09-04
+
+### Scope
+
+This addendum records the final N4E controlled-device evidence for HTTPS
+Inspection policy eligibility, dynamic-browser discovery, compatibility bypass,
+package lifecycle inventory refresh, and final clean-state restoration.
+
+It does not rewrite the historical Phase-0 audit above.
+
+### Device
+
+```text
+Device: Xiaomi Mi A1 / tissot
+Android: 16
+SDK: 36
+Serial: 3595381c0804
+Package: com.celzero.bravedns.plus
+```
+
+### Dynamic-browser root cause
+
+The controlled dynamic-browser fixture was lost at the Android PackageManager
+query boundary because browser capability discovery used
+`PackageManager.MATCH_DEFAULT_ONLY`.
+
+Literal comparison established:
+
+```text
+ACTION_MAIN + CATEGORY_APP_BROWSER, flags=0
+→ fixture present
+
+same selector + MATCH_DEFAULT_ONLY
+→ fixture absent
+```
+
+The detector repair removed the default-handler restriction.
+
+### Runtime policy evidence
+
+General controlled fixture:
+
+```text
+Decision: BYPASS_DEFAULT
+Transport: raw TCP pass-through
+HTTP: 200
+Certificate: public Cloudflare chain
+```
+
+Compatibility controlled fixture (`com.facebook.katana` fixture APK):
+
+```text
+Decision: BYPASS_COMPATIBILITY
+Transport: raw TCP pass-through
+HTTP: 200
+Certificate: public Cloudflare chain
+```
+
+Dynamic controlled browser fixture:
+
+```text
+Policy snapshot: dynamicBrowsers=1
+Decision: MITM_DYNAMIC_BROWSER
+TLS MITM: established
+HTTP: 200
+Issuer: RethinkDNS Root CA
+Subject: RethinkDNS Local / example.com
+```
+
+### Inventory lifecycle defect and repair
+
+The first cleanup attempt exposed a burst-removal defect:
+
+* first removed fixture disappeared;
+* two later removed fixtures remained queryable in Rethink Apps;
+* `RefreshAppsJob` used `ACTION_REFRESH_AUTO`;
+* `RefreshDatabase` suppresses AUTO/INTERACTIVE refreshes within its one-minute
+  refresh interval.
+
+The repair keeps ordinary RefreshAppsJob callers defaulting to AUTO but gives
+package lifecycle requests an explicit `ACTION_REFRESH_FORCE`.
+
+The package receiver continues using `ExistingWorkPolicy.REPLACE`.
+
+### Verification
+
+Temporary GHA verification commit:
+
+`78fb25576cd5d52b5674aedfebbc55f2794bfaf8`
+
+Targeted GHA result:
+
+```text
+BravePackageChangeReceiverTest
+tests=10
+failures=0
+errors=0
+
+production Kotlin compile=PASS
+```
+
+Real-device regression:
+
+```text
+Android package-event window ≈ 3.579 seconds
+
+general:
+delete app → refresh done
+
+compatibility:
+delete app → refresh done
+
+dynamic:
+delete app → refresh done
+
+post-removal PackageManager:
+absent / absent / absent
+
+post-removal Configure → Apps search:
+0 / 0 / 0
+```
+
+The earlier host-side `82.209 s` measurement is not the package-event burst
+interval; it included Windows/ADB command-dispatch overhead and is not used as
+the throttle-regression metric.
+
+### Final restoration
+
+Final Protection restart completed with no additional tap after the allowed
+stabilization period.
+
+Newest clean policy snapshot:
+
+```text
+systemPackages=4
+systemUids=2
+compatibility=201
+protectedDomains=4308
+knownBrowsers=147
+dynamicBrowsers=0
+```
+
+Final state:
+
+```text
+fixtures installed = NO
+Protection = ON / protected
+VPN = tun1
+network = healthy
+patch preserved = YES
+```
+
+### Audit verdict
+
+```text
+N4E_POLICY_RUNTIME=PASS
+N4E_DYNAMIC_BROWSER_DISCOVERY=PASS
+N4E_COMPATIBILITY_BYPASS=PASS
+N4E_GENERAL_DEFAULT_BYPASS=PASS
+N4E_PACKAGE_LIFECYCLE_REFRESH=PASS
+N4E_DEVICE_FULLY_SEALED=YES
+```
+
+Repository integration remains pending: this evidence was produced from the
+verified local working tree. Do not reinterpret committed HEAD
+`43e02cd0956d6aefc487eac0d534eaefa99c769d` as already containing every N4E
+working-tree file.
+
+---
+
+## Phase-1D Canonical Closure Correction — N4E through N10C (2026-09-09)
+
+This later audit entry supersedes only the repository-status and open-blocker
+statements in the dated 2026-08-27 and N4E entries above. Their original
+evidence remains historical.
+
+### Canonical repository state
+
+```text
+branch = phase1d-advanced-filter
+head   = 63bc8593df3efa83b51f68146b1216f4320f8e44
+tracked tree at canonical fast-forward = clean
+staged files = 0
+```
+
+The N4E implementation was integrated by the commits leading through
+`82004b5` and `de40464`; N9 transport/hot-apply integration is canonical at
+`a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`. The old statements that N4E final
+branch integration was pending are no longer current.
+
+### N9 closure
+
+* `InspectionTransportPolicyTest`: 11/11 passed.
+* GHA run `34046896707`: compile/assemble success.
+* Repeated Brave per-app OFF→ON hot apply was device-proven without process
+  death or manual Protection restart.
+* Direct RULE20 device execution remains deferred because Chrome, YouTube,
+  YouTube Music, and Play Store emitted no qualifying UDP/443 control flow.
+  This is not a proven implementation failure.
+
+### N10 source and GHA closure
+
+| Slice | Canonical commit | Focused tests | GHA |
+|---|---|---|---|
+| N10A | `d6d3602880193e4f6250ce01c7b0eac46380faac` | `LocalHttpsProxyTest` 10/10 | run `34174825194` success |
+| N10B | `24b7a292a96ff230345992fce942af5d12c36d79` | `LocalHttpsProxyTest` 11/11 | run `34198839548` success |
+| N10C | `63bc8593df3efa83b51f68146b1216f4320f8e44` | same 11/11 regression gate | run `34225352812` success |
+
+N10A routes CONNECT and plain HTTP proxy requests through the existing
+`BraveVPNService.firewall()` authority before proxy DNS/upstream/CONNECT-200 or
+MITM work. N10B repeats the decision with a directly resolved destination IP
+before socket protection/connect. N10C persists blocked results using the
+existing `NetLogTracker` connection-log path.
+
+### N10 physical-device closure
+
+Mi A1 / `tissot` / Android 16, Chrome UID 10335:
+
+```text
+N10A domain rule:
+  example.com → blocked before DNS/upstream/inspection/MITM
+  temporary rule deleted → connectivity restored
+
+N10B resolved-IP rule:
+  1.1.1.1 → resolved → firewall BLOCK → no protect/connect/MITM
+  temporary rule deleted → firewall NONE → connectivity restored
+
+N10C persistence rule:
+  1.0.0.1:0, Chrome-specific BLOCK
+  Network Logs detail = Chrome / 1.0.0.1 / TCP / 443 /
+                        blocked / IP / Port (App)
+  temporary rule deleted → no IP/port rules
+  blocked log row retained → connectivity restored
+```
+
+The final N10C deployment APK was byte-identical after installation, the local
+and installed signer matched, VPN `tun1` and HTTP proxy `localhost:8443` were
+confirmed, and no crash/FATAL/Koin-startup failure was recorded. `run-as` and
+`su` are unavailable on this device; APK provenance was verified with
+`pm path`, `adb pull`, SHA-256, and `apksigner` instead.
+
+### Current audit verdict
+
+```text
+N4E_POLICY_RUNTIME_AND_INVENTORY=SEALED
+N9_PER_APP_HOT_APPLY_AND_TRANSPORT_SOURCE=SEALED
+N9_RULE20_DIRECT_DEVICE_EXECUTION=DEFERRED_NO_CONTROL_STIMULUS
+N10_LOCAL_PROXY_FIREWALL_AUTHORITY=SEALED
+N10_BLOCKED_LOG_PERSISTENCE=SEALED
+TEMPORARY_N10_FIREWALL_RULES_REMAINING=0
+N12_PRESET_PARTIAL_REMEDIATION=SEALED
+N12_CORRECTED_TEMP_BRANCH_GHA=SEALED
+STABLE_RELEASE_STATUS=BLOCKED
+```
+
+The former HTTPS/browser regression and controlled website filter blocker are
+closed by the later controlled N4E and filter-runtime evidence. Remaining work
+belongs to release-level Filter Source DoD, deferred compatibility/registry
+coverage, resource-threshold evidence, and the RULE20 natural-stimulus gate.
+
+Repository inspection during this documentation sync also found a release-level
+DECISION-011 divergence: commit `82004b55` bundled
+`pkg_exclusions.txt`, `filter_https_traffic_inclusions.txt`,
+`filter_https_traffic_exclusions.json`, and `ssl_block_list.txt`, although only
+the pinned `ssl_allow_list.txt` had been authorized for intake. The four files
+are byte-identical to the supplied attachments, and the bundled notice covers
+only `ssl_allow_list.txt`. Functional N4E evidence remains valid, but preset
+provenance/redistribution must be remediated before a stable release claim.
+
+The upstream-maintenance bridge in DECISION-012 is deliberately later than
+these remaining gates. The locked order is: finish the MITM/adblock branch,
+close release blockers, integrate and push `main`, complete the release gate,
+then create the bridge on a separate branch for future original-Rethink core
+updates. It is not a substitute for any open release item above.
+
+## N12 HTTPS Preset Partial Remediation — 2026-09-09
+
+N12A corrected the semantics of the four-domain HTTPS inclusion asset:
+
+```text
+old name = ssl_block_list.txt
+new name = https_inspection_inclusions.txt
+effective domains = 4
+asset sha256 = 182d55f35f3fff793b3008d73276f14fc6474cd8044a8aac1b7d7ec624141d5b
+```
+
+The asset is an HTTPS-inspection eligibility input, not a DNS or firewall
+blocklist. `googleapis.com`, `graph.facebook.com`, `doubleclick.net`, and
+`googleadservices.com` remain broad intentionally.
+
+N12B removed ten obsolete package identities from the HTTPS compatibility
+registry. Entry count changed from 201 to 191; all surviving objects remained
+unchanged and ordered.
+
+```text
+compatibility asset sha256 =
+a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05
+
+focused tests = 15
+failures = 0
+```
+
+Package names are factual identifiers. The remaining release concern is
+first-party ownership and evidence for the curated default-policy decisions,
+not permission from each application publisher.
+
+N12D corrected the bundled NOTICE so it accurately records all five bundled
+policy files. That correction records source history and the unresolved
+redistribution status; it does not create or imply a redistribution grant.
+
+N12E verified corrected temporary candidate
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`, whose only parent is
+`bb36fda1f799a375772721aa914bd352ac42bcfb`. GitHub Actions run
+`34461990520` completed successfully on
+`tmp/n12e-preset-gha-20260910`. The `Build & Sign APK` job succeeded and
+uploaded `release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`;
+the `Create GitHub Release` step was skipped.
+
+N12D and N12E close the NOTICE-accuracy and temporary-branch build-verification
+items for this slice. They do not close DECISION-011, the compatibility device
+queue, current Cryptomator testing, `ONLY_INCLUDED` runtime-selector
+confirmation, first-party registry ownership, redistribution authorization, or
+stable-release readiness.

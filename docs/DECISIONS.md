@@ -456,7 +456,11 @@ Revisit when:
 
 ## DV-B nav-gap residual (A14+) — DOCUMENTED LIMITATION, not a fixable gap
 
-**Status:** recorded 2026-08-04. The B-path fix [d28f807bb](retarget PendingIntent → CertificateSetupActivity) is **technically INEFFECTIVE on A14+**: `BACKGROUND_ACTIVITY_LAUNCH_BLOCKED` is target-agnostic post-death — even a correctly-targeted pending-intent relaunch is BAL_BLOCKed. So the B-path could not close the nav-gap on A16 (Mi A1, see `logcat_Dnav.txt`).
+**Status:** recorded 2026-08-04. The B-path fix `d28f807bb` (retarget
+PendingIntent → CertificateSetupActivity) is **technically INEFFECTIVE on
+A14+**: `BACKGROUND_ACTIVITY_LAUNCH_BLOCKED` is target-agnostic post-death —
+even a correctly-targeted pending-intent relaunch is BAL_BLOCKed. So the B-path
+could not close the nav-gap on A16 (Mi A1, see `logcat_Dnav.txt`).
 
 **Resolved in practice by DECISION-006/D (`1c62bfd91`):** the D-fix retired the entire `killProcess` → process-death → PendingIntent → BAL chain. With no kill, the process never dies (PID constant), no post-death relaunch/PI fires, so there is no BAL and **no navigation to restore** — the user stays on CertificateSetupActivity throughout (DV-D.a/c/d SEALED). The nav-gap is therefore OPERATIVELY RESOLVED by construction: the mechanism that created it no longer runs.
 
@@ -531,6 +535,1765 @@ The warm `updateTun` path (isNewVpn=false) BY DESIGN does not re-read, but only 
 ### Limitation noted (honest)
 
 `establishVpn` catches the `start()` exception ([L3819](../app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt#L3819)) and logs it but does NOT stop the VPN — a partial-start failure (e.g. rules unreadable, CA present) leaves the tunnel up with a proxy that failed its setup. This is a pre-existing edge posture, NOT introduced by DECISION-006/D and NOT the AdGuard #6084 concern; recorded for completeness, not an O5 gap.
+
+---
+
+## DECISION-007: RETIRE RPN USER-FACING UI; PLUS = FILTERS UX ACROSS ALL FLAVORS
+
+### Rationale (2026-08-13 — supervisor directive)
+The Plus tab in the canonical fork is the MITM/adblock Filters surface. The previous Phase-1 architecture that split Plus by flavor (fdroid = MITM-only, full/play/website = MITM + RPN subscription) is superseded by a unified, flavor-agnostic Filters surface. RPN as a backend-enabled proxy protocol continues to live in `Configure → VPN / Proxy` (TunnelSettingsActivity, RpnProxyManager), but the Plus-tab user-facing RPN subscription, purchase, account-state, and server-selection UI is retired/deferred. This is a product/UX decision, not an execution drift: the RPN UI removal aligns with the current working tree (HEAD `4db1b48f6` — the executed pivot RETIRE-RPN + HOIST fdroid→full). The Plus UX is rebuilt as `Filters`, not as `RPN + MITM`.
+
+### Scope (final — applies to fdroid / full / play / website)
+All four flavors expose the same Plus tab content (Filters):
+
+| Section | Sub-features | Source file |
+|---------|--------------|-------------|
+| 1. HTTPS Inspection | Master toggle; CA status badge; CA Install / Re-install / Export CA; Per-app HTTPS filtering (`HttpsFilteredAppsFragment` pattern) | `styles.xml` PlusMaterialSwitchFix / `fragment_rethink_plus.xml` |
+| 2. Advanced Filtering | Manage Filters (category-oriented source selector: Ads, Privacy, Social, Annoyances, Security, Language-specific, Other Filters, Custom Filters) with source enable/disable toggles + enabled-source summary (`X lists enabled • N rules`); presets EasyList, AdGuard Base, AdGuard Annoyances, Custom URL | Added to Plus design (reuses FilterEngine cosmetic/scriptlet/procedural/CSP/HTML rules automatically; per-engine rule-type toggles retired per DECISION-009 — rule types handled automatically, subtype counts kept in diagnostics) |
+| 3. Exclusions | Domain exclusions; App exclusions | `fragment_rethink_plus.xml` L385+ area |
+
+**DNS Blocklist → MITM bridge: OBSOLETE per DECISION-008.** Domain-level DNS blocking propagates automatically via `activeNetwork.getAllByName()` → Rethink DNS resolver → `0.0.0.0` sinkhole. No DNS-to-Plus bridge UI exists.
+
+The `Plus` bottom-nav label and hero label (`plus_title` = "Plus") survive; the `rpn_title` label ("RPN") stays preserved for the RPN-feature/protocol sites elsewhere (no blanket rename). The Plus nav item (`bottom_nav_menu.xml:17`) uses `plus_title`. The layout hero (`fragment_rethink_plus.xml:55`) uses `plus_title`.
+
+### Flavor result (all flavors = same Plus/Filters surface)
+- fdroid: Plus → Filters (MITM/adblock) — no RPN UI
+- full: Plus → Filters (MITM/adblock) — no RPN UI
+- play: Plus → Filters (MITM/adblock) — no RPN UI; Play billing/IAB files (`InAppBillingHandler` / `BillingListener` / `SubscriptionCheckWorker` / `GooglePlaySubsAdapter` / `SubscriptionPurchaseProcessor` / etc.) are out of Plus UX scope (some retained in `play/` flavor if needed for non-Plus purchase flows; Plus surface itself is MITM-only).
+- website: Plus → Filters (MITM/adblock) — no RPN UI; Stripe billing/IAB files out of Plus UX scope.
+
+### Deleted / out of Plus UX scope (accepted as executed — NO restoration)
+These files were deleted from the working tree at the executed pivot (`project_phase1c_pivot_20260809.md` — supervisor-audited APPROVE 2026-08-10):
+- `RethinkPlusDashboardFragment.kt` (the RPN+MITM dashboard; full flavor)
+- `ServerSelectionFragment.kt` (RPN server picker; full flavor)
+- `ManageRpnPurchaseBtmSht.kt` (RPN purchase bottom sheet; full flavor)
+- `RethinkPlusFragment.kt` in `play/` and `website/` flavors (RPN/purchase UI; deprecated in play/website flavors)
+- `InAppBillingHandler.kt` / `SubscriptionCheckWorker.kt` / `GooglePlaySubsAdapter.kt` / `BillingListener.kt` (play billing layer; full flavor / play flavor copies — out of Plus UX; some fdroid copies kept for non-Plus billing if needed)
+- `fragment_rethink_plus_premium.xml`, `fragment_server_selection.xml`, `activity_rethink_plus_dashboard.xml`, `nav_rethink_plus.xml`
+The `RethinkPlusFragment.kt` in `full/` is the hoisted fdroid MITM-only fragment (from R100 `fdroid→full` rename); it remains the canonical Filters surface.
+
+### Supersedes
+- DECISION-001 L52 (`docs/DECISIONS.md`:52): the "fdroid gets free MITM/adblock; **play/website gets RPN + MITM**" flavor-gating for Plus is superseded by "All flavors get Plus/Filters; RPN UI is retired/deferred". The RPN subscription/management portion is no longer a Plus-tab feature; the MITM/adblock portion remains the canonical Plus-tab feature (unchanged from Phase-1b fdroid work, sealed by Track-D 2026-08-13).
+- `docs/UNIFIED_UI_ARCHITECTURE.md` §Plus (L15, L47-89, L206-208, L396) — updated in the same session to the unified Filters surface.
+- Active Phase-1c relay `project_phase1c_pivot_20260809.md` / `project_phase1c_relay1_pivot_verdict_20260810.md`: the RETIRE-RPN-UI + HOIST fdroid→full pivot is ratified by this decision.
+
+### References (source-of-truth anchors — working tree HEAD `4db1b48f6`)
+- Plus hero label: `app/src/main/res/layout/fragment_rethink_plus.xml:55` — `android:text="@string/plus_title"` (reads "Plus")
+- Plus bottom-nav label: `app/src/main/res/menu/bottom_nav_menu.xml:17` — `android:title="@string/plus_title"`
+- Filters sections layout: `app/src/main/res/layout/fragment_rethink_plus.xml` (line 68+: HTTPS Inspection card; blocklist bridge section; exclusions section; hero banner L36-56 with `plus_title`)
+- SwitchMaterial crash fix (Track-D):
+  [UNIFIED_UI_ARCHITECTURE.md](UNIFIED_UI_ARCHITECTURE.md)
+  (`PlusMaterialSwitchFix` / `PlusSwitchOverlayFix` overlay with literal
+  `@color` values, zero `?attr` refs); 5 `MaterialSwitch` elements in
+  `app/src/main/res/layout/fragment_rethink_plus.xml`.
+- Filters backend machinery (unchanged): `PersistentState.httpsInspectionEnabled` (L15 in arch doc), `CertificateAuthority`, `RethinkBlocklistManager`, `FilterEngine`, `LocalHttpsProxy` — observed, toggled, NOT edited by this UX phase (DECISION-006/D hot-plug verified 2026-08-04/2026-08-03).
+- Auto-restart / always-on: DECISION-006/D (`killProcess`/`PendingIntent` retired; `vpnRestartTrigger` hot-plug; no BAL, no crash) — sealed 2026-08-04; O7 `WgHop` 84/0/0; `FirewallManagerTest` 45/0/0.
+
+### Status
+**GOVERNING** — supersedes the Phase-1c plan-file `plans/zippy-snuggling-brook.md` (scope B supervisor-approved 2026-08-07) only where it conflicts with the RETIRE-RPN + HOIST fdroid→full pivot. The plan-file's scope B constraints (no engine edits, no new MITM mechanism, flavor-gated nav graph, `plus_title` relabel, build + serial-lowRAM test, device verify no-crash) remain intact and are satisfied by the Track-D fix + relabel execution. The pivot replaces "merge RPN + MITM" with "Plus = Filters (single surface, all flavors)". No new RPN UI is to be introduced. No restoration of `RethinkPlusDashboardFragment` or the billing/IAB layer into Plus is permitted.
+
+### Wait-gate / deferred gates
+- DV5 (cert-swap / MITM engine end-to-end): NOT a Phase-1c gate; remains a separately-verified, separately-closed subsystem (DECISION-006/D DV-D.b MITM golden sealed 2026-08-03; CA-trust sealed by `LocalHttpsProxy.kt:543` `useClientMode=false` semantics; `badssl-UNEXERCISED` is a documented non-gap per 2026-08-03 entry — not reopened).
+- CA install: remains HUMAN-ONLY (no automation); remains out of plus-tab automation scope.
+- Play/website billing/IAB layer: deferred/retired from Plus; any future billing UI is outside Phase-1c/this decision.
+- RPN subscription UI: deferred; only restored if a NEW product decision supersedes DECISION-007.
+
+### Honesty / residual notes
+- `InAppBillingHandler` hub deleted (working-tree `D`) with ~26 surviving references (`BillingResponse`, `PricingPhase`, `SubscriptionPurchaseProcessor`, etc. across `play/` and `website/`) — these references are currently masked by the `google-services` build gap (play/website APK assembly depends on `google-services` which is missing in the fdroid build); if `google-services` is restored, these dangling references become active compile-breaks. Closing them (delete or redirect) is deferred to a follow-on executor relay (NOT bundled in this supervisor-audited audit); the supervisor's audit notes them for future tracking.
+- `RpnWinProxyDetailsActivity.kt` (win proxy detail screen) still exists in `full/` — it is not part of the Plus UI; remains out of scope.
+- `RethinkPlusViewModel.kt` (full / play / website copies) and `SubscriptionStateMachineV2.kt` / `SubscriptionStatus.kt` (main) survive — these are backend subscription-state machinery, not Plus-UI surface; no action required unless a future decision revives subscription UI.
+- The `action_switch_to_rethinkPlusDashboardFragment` nav action (and `rethinkPlusDashboardFragment` nav destination in `app/src/full/res/navigation/app_navigation.xml`) remains in the graph; since `ServerSelectionFragment` is deleted from tree, the nav dest resolves to a non-existent class. This is a known residual: the nav graph was not fully cleaned at the pivot; the action is unreachable via Plus-tab navigation (since Plus lands on RethinkPlusFragment), but references in `HomeScreenActivity.kt` L819/865/888 (back press / highlight) and `play/website` RethinkPlusFragment L294 (`FragmentHostActivity` pop-back) still reference it. Cleaning the nav graph (removing dead actions/dests or redirecting to `RethinkPlusFragment`) is deferred to executor relay #2b / #2c (not included in this supervisor audit).
+
+---
+
+---
+
+## DECISION-008: DNS POLICY OWNERSHIP — TWO INDEPENDENT SUBSYSTEMS
+
+**Date:** 2026-08-15
+**Status:** FINAL
+**Deciders:** User + Supervisor
+**Origin:** Phase-1D-A3 MITM DNS/Policy Path Audit + A2 STOP-P2 (empirical device proof on Xiaomi Mi A1 A16)
+
+### Context
+
+Phase-1D-A3 was commissioned to answer: **Does LocalHttpsProxy inherit Rethink DNS blocklist policy, or bypass it?**
+
+The initial static-source hypothesis (Phase-1D-A3 relay #1) claimed "LIVE-B" — that `resolveHostSecurely()` bypasses the VPN DNS resolver and connects to real IPs. **This was conclusively disproven by empirical device testing on Mi A1 A16 (serial 3595381c0804).**
+
+Simultaneously, **A2 STOP-P2** proved the manual DNS→MITM bridge (`syncBlocklistToAdblockRules`) is **unimplementable** — selected tag 54 existed, but the implementation expected raw text unavailable from Rethink's compiled DNS artifacts.
+
+### Decision
+
+**Original Rethink DNS subsystem is the sole source-of-truth for DNS blocklist selection and DNS blocking policy.**
+
+**HTTPS Inspection does not expose a separate DNS bridge UI.**
+
+**Rethink DNS blocklists are NOT FilterEngine source material.**
+
+**Advanced Filter Sources are a separate independent subsystem** supplying FilterEngine with dedicated filter syntax (EasyList, AdGuard, Custom URL).
+
+**Legacy `syncBlocklistToAdblockRules()` is obsolete pending source cleanup.**
+
+### Two Independent Systems (Locked Final Architecture)
+
+```
+A. ORIGINAL RETHINK DNS POLICY
+
+Configure
+  └── DNS
+      └── Rethink Blocklists
+          └── Original Rethink DNS policy
+              ├── domain-level DNS blocking
+              ├── sinkhole behavior
+              └── original Rethink DNS list selection
+```
+
+```
+B. ADVANCED FILTERING (NEXT/PLANNED — independent subsystem)
+
+Plus
+  └── Advanced Filtering
+      └── Filter Sources (Manage Sources)
+          ├── EasyList
+          ├── AdGuard Base
+          ├── AdGuard Annoyances
+          └── Custom URL
+              ↓
+          FilterEngine
+              ├── network HTTP rules
+              ├── cosmetic rules
+              ├── scriptlets
+              ├── procedural rules
+              ├── CSP rules
+              └── HTML filtering rules
+```
+
+**There is NO documented source-flow: `Rethink DNS blocklists → FilterEngine`**
+
+### Implementation Consequences
+
+| Area | Change |
+|------|--------|
+| **Plus Tab UI** | NO DNS blocklist section. Sections: HTTPS Inspection, Advanced Filtering, Exclusions only. |
+| **Configure → DNS** | Remains sole DNS blocklist manager (RethinkBlocklistFragment, LocalBlocklistsBottomSheet). |
+| **Plus UX** | No manual DNS→HTTPS bridge, no "Sync Now", no DNS list selector. |
+| **FilterEngine** | Receives rules ONLY from dedicated Advanced Filter Sources (EasyList/AdGuard/Custom URL), NOT from Rethink DNS blocklists. |
+| **Legacy syncBlocklistToAdblockRules** | OBSOLETE pending source cleanup. Not repurposed for advanced filters. |
+| **adblock_rules.txt** | OBSOLETE — no current production role. |
+
+### A2 STOP-P2 (Preserved)
+
+**A2 result (2026-08-14):** `syncBlocklistToAdblockRules()` was implemented but failed — selected tag 54 existed, but implementation expected raw rule text unavailable from Rethink's compiled DNS artifacts. **STOP-P2 issued.** Bridge not completed.
+
+### A3 Sinkhole Inheritance (Preserved)
+
+**A3 result (2026-08-15):** Phase-1D-A3 live device audit (Xiaomi Mi A1 A16) proved domain-level blocking propagates automatically via DNS sinkhole inheritance:
+- `resolveHostSecurely()` uses `ConnectivityManager.activeNetwork.getAllByName(host)`
+- Active network = VPN interface → DNS resolved by Rethink DNS engine
+- Blocked domains → `0.0.0.0` sinkhole → `ECONNREFUSED` → `502 Bad Gateway`
+- Allowed domains → real IPs → `VpnController.protectSocket()` → TLS MITM / Raw TCP
+
+**Manual DNS raw-list bridge is obsolete** — not retained for cosmetic/scriptlet extraction.
+
+### Advanced Filter Source Ownership (NEXT/PLANNED)
+
+Advanced Filter Sources are a **new independent subsystem** NOT yet implemented:
+
+```
+FilterSource (entity/model)
+├── id
+├── name
+├── url
+├── enabled
+├── update metadata
+├── parsed count
+├── unsupported count
+├── invalid count
+└── subtype counts
+
+Storage:
+├── Room → metadata only
+└── Filesystem → raw source content → staged compiled content
+
+Pipeline:
+download.tmp → validate → parse → compatibility stats → compile staged output → sanity checks → atomic swap → FilterEngine reload
+Failure: retain last-known-good active source
+```
+
+**Status: NEXT/PLANNED — not implemented.**
+
+### Verification
+
+- [x] A2 STOP-P2 preserved: bridge failed, stopped, not repurposed
+- [x] A3 sinkhole inheritance verified: 6 live device tests on Mi A1 A16
+- [x] Full logcat captured (6,118 lines)
+- [x] Zero source edits required (architecture already correct)
+- [x] HEAD `4db1b48f6` intact; commit=FORBIDDEN; push=FORBIDDEN
+
+### Review Trigger
+
+Revisit only if:
+- Android API changes break `activeNetwork.getAllByName()` VPN routing behavior
+- A new use case requires domain-level blocking inside MITM *before* DNS resolution
+- Upstream (if ever) adds competing MITM stack with different DNS integration
+- Advanced Filter Source Foundation (Phase-1D-B) is implemented
+
+---
+
+## DECISION-009: ADVANCED FILTER UX OWNERSHIP — SOURCE/CATEGORY-ORIENTED, NOT ENGINE-CAPABILITY-ORIENTED
+
+**Date:** 2026-08-15
+**Status:** FINAL
+**Deciders:** User + Supervisor
+**Origin:** Phase-1D-DOC4 UX taxonomy re-seal; supersedes the legacy Plus-tab "capability toggle" framing
+
+### Context
+
+The pre-DECISION-008 Plus-tab architecture exposed a flat list of rule-family
+"feature" toggles to normal users:
+
+```
+Advanced Filtering
+├── Cosmetic CSS injection toggle
+├── Scriptlet injection toggle
+├── Procedural cosmetic toggle
+├── CSP (Content Security Policy) toggle
+└── HTML filtering toggle
+```
+
+These are **FilterEngine implementation capabilities** (parser rule-type subtypes), not
+intuitive user-facing filter features. Presenting them as normal user toggles causes:
+
+1. **Confusion** — users do not know whether to enable "Cosmetic CSS" for adblocking;
+2. **Mis-aligned mental model** — users think they are choosing techniques rather than
+   filter *content*;
+3. **Category ambiguity** — a single source such as "AdGuard Annoyances" spans multiple
+   rule subtypes, so per-subtype toggles are the wrong decomposition.
+
+### Decision
+
+```
+Advanced Filtering
+│
+├── enabled filter/source summary
+└── Manage Filters
+        ├── Ads
+        ├── Privacy
+        ├── Social
+        ├── Annoyances
+        ├── Security
+        ├── Language-specific
+        ├── Other Filters
+        └── Custom Filters
+```
+
+Plus is **source/category-oriented**, **not** engine-capability-oriented:
+
+1. Normal users select *what filter content* to enable — filter **sources** grouped by
+   purpose (Ads, Privacy, Social, Annoyances, Security, Language-specific, Other Filters,
+   Custom Filters).
+2. Users toggle **sources**, never individual engine rule-type techniques.
+3. **Network / Cosmetic / Scriptlet / Procedural / CSP / HTML handling is automatic**
+   inside `FilterEngine`: it inspects compiled rule subtypes and applies each supported
+   injection path without a per-type user toggle.
+4. **Subtype support and per-source rule-type counts remain available in diagnostics
+   only** (per-source detail screen), so users can audit coverage without gating engine
+   behavior.
+
+> A `category` attached to a `FilterSource` is **organizational metadata**. It does
+> **not** restrict the parser — `FilterSourceCompiler` auto-detects every rule subtype
+> present in the fetched list regardless of category.
+
+### What changed (documentation only)
+
+| Before (retired) | After |
+|------------------|-------|
+| "Cosmetic CSS toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Scriptlet toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Procedural toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "CSP toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "HTML Filtering toggle" (user toggle) | Automatic; subtype count in diagnostics |
+| "Manage Filter Sources" label | "Manage Filters" (category-oriented) |
+| — | Category taxonomy: Ads / Privacy / Social / Annoyances / Security / Language-specific / Other Filters / Custom Filters |
+
+### What did NOT change
+
+- **DECISION-008 remains intact:** Original Rethink DNS policy and Advanced Filter
+  Sources are two independent subsystems. There is **NO documented source-flow**:
+  `Rethink DNS blocklists → FilterEngine`. The legacy `syncBlocklistToAdblockRules()`
+  bridge is **obsolete pending source cleanup** (A2 STOP-P2) — not repurposed.
+- **FilterEngine sub-engines are unchanged:** `FilterEngine` (network rules),
+  `CosmeticFilter`, `ProceduralFilter`, `ScriptletFilter`, `CspInjector`, `HtmlFilter`
+  all remain; only their *UX exposure* changes (automatic, not user-toggled).
+- **`adblock_rules.txt` ownership** remains EXCLUSIVE to Advanced Filter Source
+  compilation (Documented in docs/DECISIONS.md §DECISION-008 L675,
+  docs/PLAN-FILTER-SOURCE-MANAGER.md §5 NOTE + §Phase 3).
+- **No code behavior changes.** This is a UX/documentation decision only.
+
+### Implementation consequence (Phase-1D-B)
+
+- 1D-B5 (Manage Filters UI) must render the category taxonomy and per-source
+  diagnostics; it must **not** render per-engine-capability toggles as normal controls.
+- `FilterSourcesBottomSheet` / `FilterSourceActivity` expose `Manage Filters`; each
+  source item shows enable/disable (source-level) + subtype badge diagnostics.
+- Any residual `switchCosmeticFilter` / `switchProceduralFilter` / `switchScriptletFilter`
+  / `switchCspFiltering` / `switchHtmlFiltering` flags in the proxy layer are
+  **engine-level / internal** and surfaced only via diagnostics, never as Plus-tab UI.
+
+### Status: GOVERNING
+
+---
+
+## DECISION-010: HTTPS INSPECTION ELIGIBILITY AND BYPASS POLICY
+
+**Date:** 2026-08-15
+**Status:** GOVERNING
+**Deciders:** User + Supervisor
+**Origin:** PHASE-1D-DOC5 baseline `5ec97f93` — documentation-only relay; no implementation committed.
+
+### Context
+
+HTTPS Inspection requires a per-connection eligibility decision before the MITM proxy
+accepts a `CONNECT` tunnel. The decision interacts with:
+
+- whether the originating application is a browser the project wishes to inspect,
+- whether the user has explicitly opted an application in or out,
+- whether the connection targets a domain or (application, port) tuple that must
+  never be intercepted for safety or operational reasons,
+- whether the body of an already-established MITM session is large enough to
+  justify downgrading from full modification to stream-only pass-through.
+
+Rethink adapts concepts from the ADBye project
+(`BypassManager` / `uidAllowlist` / domain-suffix and port bypass /
+resource-threshold logic). ADBye is a **design reference only**:
+
+```
+ADBye BypassManager
+        ↓
+adapt concepts
+        ↓
+Rethink policy architecture
+
+NOT:
+copy class unchanged
+```
+
+ADBye targets PCAPdroid / JNI capture; Rethink uses a userspace HTTP proxy
+injected via `VpnService.Builder.setHttpProxy`. The transport assumptions are
+different, so any code reuse requires architectural adaptation, not direct copy.
+
+### Decision
+
+Eligibility for HTTPS Inspection is resolved by `InspectionPolicyEngine` before
+the proxy accepts or rejects a `CONNECT` tunnel. The engine is the **sole
+authority** for MITM/bypass decisions; no other component (UI, VPN service,
+connection tracker) may bypass it.
+
+#### Donor architecture
+
+- ADBye `BypassManager` is a design/source reference demonstrating hard app
+  bypass, HTTPS exemptions, domain-suffix bypass, protected ports, and resource
+  thresholds — all concepts retained in Rethink's policy model.
+- ADBye implementation details (PCAPdroid/JNI, `uidAllowlist` mixing names and
+  UIDs, automatic conversion of domain bypasses to AdGuard exception rules, and
+  global port bypass) are **rejected**; see §4, §6, §7 for each rejection.
+
+#### Known browser default policy
+
+A **maintained hardcoded package registry** identifies known browsers. An entry
+is added only after the maintainer has verified both the production package ID
+and the branding correctness of the application.
+
+```
+KNOWN BROWSER
+├── maintained hardcoded package registry
+├── if installed → HTTPS Inspection ON by default
+└── primary / default fast deterministic path
+```
+
+Package names such as `Chrome/Brave/Firefox/Edge` are cited as examples;
+authoritative package IDs are recorded in the `InspectionPolicyEngine` registry
+(or its backing data) at implementation time and verified against the Google
+Play production signatures.
+
+**Do not invent or hardcode package names in DECISION-010 without that
+verification.**
+
+#### Dynamic browser fallback
+
+Browsers not in the known registry are handled via dynamic discovery. This
+fallback is **best-effort** only: results depend on Android **package visibility**
+(API 30+), and apps without appropriate `<queries>` declarations in their
+manifest may not appear even when installed. Known-registry browsers are not
+affected by an empty discovery result.
+
+```
+DYNAMIC BROWSER DISCOVERY
+├── fallback for browser not present in known registry
+├── detected through Android browser capability signals
+└── OFF by default until user enables it
+```
+
+**Primary discovery signal:** query `PackageManager` for activities handling
+`ACTION_VIEW` + `CATEGORY_BROWSABLE` with an `https://` URI scheme.
+
+**Supplementary signals** (where available, in addition to the primary query):
+- `ROLE_BROWSER` role (Android API 29+ via `RoleManager`)
+- `CATEGORY_APP_BROWSER` (secondary signal only; Android documentation warns
+  against using this category alone as a primary intent-filter key — it is
+  used here only to supplement the `ACTION_VIEW` + `CATEGORY_BROWSABLE` query)
+
+Only browsers are eligible for dynamic discovery. Non-browser applications are
+never auto-discovered for HTTPS inspection.
+
+#### Other applications
+
+```
+OTHER APPLICATIONS
+├── OFF by default
+└── explicit user opt-in required
+```
+
+#### Policy precedence
+
+Decisions are resolved in the following order. **Hard bypass always beats user
+inclusion.**
+
+```
+connection
+    ↓
+SYSTEM HARD BYPASS?
+    YES → BYPASS_SYSTEM
+    ↓ NO
+
+USER APP EXCLUSION?
+    YES → BYPASS_USER
+    ↓ NO
+
+PROTECTED DOMAIN?
+    YES → BYPASS_DOMAIN
+    ↓ NO
+
+PROTECTED APP + PORT?
+    YES → BYPASS_APP_PORT
+    ↓ NO
+
+KNOWN BROWSER INSTALLED?
+    YES → MITM_KNOWN_BROWSER
+    ↓ NO
+
+USER EXPLICIT APP INCLUDE?
+    YES → MITM_USER_APP
+    ↓ NO
+
+DYNAMICALLY DETECTED BROWSER
+(ACTION_VIEW + CATEGORY_BROWSABLE + https;
+ CATEGORY_APP_BROWSER/ROLE_BROWSER supplementary)
+AND USER ENABLED?
+    YES → MITM_DYNAMIC_BROWSER
+    ↓ NO
+
+BYPASS (no-match default)
+```
+
+#### Package vs UID model
+
+The ADBye `uidAllowlist` pattern mixes package names and UID strings in one
+collection. Rethink **rejects this ambiguity**:
+
+```
+Set<String> uidAllowlist           ← REJECTED (ambiguous, ADBye pattern)
+
+Rethink target model:
+
+protectedPackages : package names
+
+protectedUids :
+    only if implementation proves a UID-level policy is actually needed
+```
+
+A collection of package-name strings must never be named `uidAllowlist`. If a
+UID-level override is eventually needed (e.g., shared-UID application groups),
+`protectedUids` is introduced as a separate typed set with its own resolution
+rules — not by conflating the two namespaces.
+
+#### System hard bypass
+
+System hard bypass is an **internal safety layer for critical services**. It
+operates outside the ordinary user-editable exclusion list.
+
+Conceptual examples inherited from donor research (Play Services / Play Store,
+GSF, IMS) are research context only. The final Rethink registry **must be
+audited and validated** before implementation; entries must not be copied blindly
+from ADBye or any other source.
+
+```
+SYSTEM HARD BYPASS
+≠ normal user exclusion
+```
+
+Hard-bypass entries are not surfaced in the standard exclusions UI and are not
+removable by the user without root or developer intervention.
+
+#### Domain bypass is not a FilterEngine whitelist
+
+HTTPS MITM bypass and adblock exception rules are **mechanistically distinct**:
+
+```
+HTTPS MITM bypass       ≠    adblock exception rule
+```
+
+A domain that is HTTPS-bypassed must **not** automatically generate an AdGuard
+exception rule (`@@||domain^`). ADBye currently couples these two concerns by
+exporting its domain bypasses as AdGuard exception rules; Rethink must **not
+inherit that coupling**.
+
+```
+InspectionPolicy
+    → whether TLS is MITMed or bypassed
+
+FilterEngine
+    → whether request/content is blocked or modified
+```
+
+These subsystems operate independently. A domain may be HTTPS-bypassed while
+still being blocked at the DNS or FilterEngine level, and vice versa.
+
+#### App + port protection
+
+ADBye uses global port bypass (`port 5228 → bypass every application`). Rethink
+rejects global port trust:
+
+```
+port 5228 → bypass every application     ← REJECTED (global, unscoped)
+```
+
+Rethink policy is **scoped to (application, destination port)**:
+
+```
+critical push service
++   5228 / 5229 / 5230
+→  protected (app + port) connection
+```
+
+The tuple `(protectedPackage, destinationPort)` is the minimum resolvable unit
+for port-level protection. Global port bypass is not permitted because it trusts
+all applications on that port regardless of origin.
+
+#### Resource protection
+
+Resource protection governs behavior after a MITM tunnel is already established
+and a large body is detected in-flight.
+
+```
+TLS MITM already established
+        ↓
+large body detected
+        ↓
+DO NOT switch to raw TCP
+        ↓
+degrade expensive body processing
+        ↓
+STREAM_ONLY
+```
+
+| Body size | Decision | Processing |
+|-----------|----------|------------|
+| Small (within rewrite-size limit) | `MITM_FULL` | Full parsing, DOM injection, modification |
+| Large (exceeds rewrite-size or DOM-processing limit) | `MITM_STREAM_ONLY` | TLS proxy remains; no whole-body buffering; no DOM/Jsoup processing |
+
+**Locking the following as prohibited:**
+
+```
+MITM TLS
+→ threshold reached
+→ reconnect same flow as raw TLS
+```
+
+Switching from MITM to raw TCP mid-flow is forbidden. Once the proxy has
+accepted the `CONNECT` and completed the TLS handshake with both client and
+upstream, the TLS tunnel is maintained for the lifetime of the connection. Only
+the *processing depth* is degraded. This preserves the integrity of the MITM
+session and prevents observable reconnect artifacts that some clients would
+treat as a MITM downgrade attack.
+
+#### Decision / result model
+
+Conceptual decision reasons used for diagnostics and device evidence. Exact
+enumeration names may differ in implementation.
+
+```
+BYPASS_SYSTEM
+BYPASS_USER
+BYPASS_DOMAIN
+BYPASS_APP_PORT
+
+MITM_KNOWN_BROWSER
+MITM_USER_APP
+MITM_DYNAMIC_BROWSER
+
+MITM_STREAM_ONLY
+```
+
+These reason codes are diagnostic identifiers, not public API contracts.
+
+#### Target component architecture
+
+**Pre-MITM decision — `InspectionPolicyEngine`**
+
+```
+                  CONNECTION
+                       ↓
+               app / UID / host / port
+                       ↓
+            InspectionPolicyEngine
+             /                 \
+            ↓                   ↓
+        BYPASS                  MITM
+                                      ↓
+                               TLS interception
+                                      ↓
+                                 HTTP response
+                                      ↓
+                            ResourceProtectionPolicy
+                                 /             \
+                                ↓               ↓
+                          MITM_FULL       MITM_STREAM_ONLY
+                                \             /
+                                 ↓           ↓
+                           FilterEngine
+                   (where applicable)
+```
+
+`InspectionPolicyEngine` (and its three sub-policies) resolves BYPASS vs MITM
+using only data available before `CONNECT`: package/UID, host, port. It has no
+visibility into response body size and must not attempt to use it.
+
+`ResourceProtectionPolicy` acts only after MITM is established and the HTTP
+response is available. It downgrades `MITM_FULL` → `MITM_STREAM_ONLY` based on
+body size. It never produces a BYPASS decision. `MITM_STREAM_ONLY` is a
+processing mode, not an initial eligibility result.
+
+Responsibility boundaries:
+
+| Component | Scope |
+|-----------|-------|
+| `HttpsInspectionPolicy` | App eligibility: known registry, dynamic discovery, user includes, user exclusions |
+| `SystemBypassPolicy` | Internal safety: protected packages, optional UIDs, protected domains, protected (app, port) tuples |
+| `ResourceProtectionPolicy` | Post-MITM only: body-size thresholds; downgrades MITM_FULL → MITM_STREAM_ONLY. Never produces BYPASS decisions. |
+| `InspectionPolicyEngine` | Pre-MITM orchestrator: resolves precedence, returns (BYPASS / MITM, reason). Must not consult body size. |
+
+`InspectionPolicyEngine` is called before the proxy accepts `CONNECT`. It does
+not modify `FilterEngine` state; it only decides MITM vs bypass. FilterEngine
+receives flows that have already passed the MITM gate.
+
+#### UX architecture consequence
+
+The Plus tab HTTPS Inspection screen exposes the following user controls:
+
+```
+PLUS
+├── HTTPS Inspection
+│   ├── master toggle
+│   ├── CA status badge (✅ INSTALLED / ⚠️ NOT INSTALLED)
+│   ├── Install / Re-install CA
+│   ├── Save / Export CA
+│   └── Apps
+│       ├── Known browsers      default ON
+│       ├── Detected browsers   default OFF if not in known registry
+│       └── Other apps          default OFF, explicit opt-in
+│
+├── Advanced Filtering
+│   └── Manage Filters
+│
+└── Exclusions
+    ├── App exclusions (user-editable, BYPASS_USER)
+    └── Domain exclusions (user-editable, BYPASS_DOMAIN)
+```
+
+System hard bypass entries are **internal safety only**. They are not surfaced
+as ordinary user-editable exclusions and are not mixed with `BYPASS_USER`
+entries.
+
+Detected browsers (dynamic fallback) appear in the Apps list but start in the
+OFF state. The user flips each one to ON individually; there is no bulk-enable
+for the entire detected-browser category.
+
+#### Roadmap
+
+```
+B1  Data / storage foundation              SEALED  √
+B2  Downloader + validation                PENDING (blocked by DECISION-010)
+B3  Parser / compiler + diagnostics        PENDING
+B4  Atomic activation + rollback           PENDING
+
+B4.5 HTTPS Inspection Policy               ← DOC5 / DECISION-010 governs this
+     ├── known-browser registry
+     ├── dynamic discovery fallback
+     ├── per-app opt-in
+     ├── user exclusions (app + domain)
+     ├── hard system bypass
+     ├── protected domain / app-port policy
+     └── resource protection
+
+B5  Manage Filters + Exclusions UI         PENDING
+B6  Full physical-device verification      PENDING
+```
+
+DECISION-010 must be sealed **before** B2 implementation starts. B4.5
+implementation must be scoped to the architecture documented here; no component
+crosses the boundary defined in Target component architecture without a new
+decision.
+
+### What changed (documentation only)
+
+- DECISION-010 appended to `docs/DECISIONS.md`.
+- `docs/ARCHITECTURE-MAPPING.md` updated to insert `InspectionPolicyEngine` boundary
+  before the LocalHttpsProxy MITM section.
+- `docs/UNIFIED_UI_ARCHITECTURE.md` updated to reflect known-browser default-ON /
+  detected-browser default-OFF / other-app default-OFF apps list under Plus →
+  HTTPS Inspection.
+- `docs/PLAN-FILTER-SOURCE-MANAGER.md` updated to reference B4.5 as the HTTPS
+  inspection policy phase in the roadmap.
+- `docs/PLAN-HTTPS-INSPECTION-POLICY.md` created as the dedicated authority
+  document for this subsystem, preventing PLAN-FILTER-SOURCE-MANAGER from
+  becoming a dumping ground for HTTPS policy details.
+
+### What did NOT change
+
+- No Kotlin, Java, or XML source files were modified.
+- No Room migration was added.
+- No `gradle` command was run.
+- No device verification was performed.
+- No commit or push occurred.
+- B2 (Downloader + Validation) was not started.
+- B4.5 implementation was not started.
+- `gradle.properties` was not touched.
+
+### Implementation consequence
+
+DECISION-010 is an architecture lock for Phase-1D-B4.5. B2 and B4.5
+implementations must each include a boundary-review step verifying that their
+code respects the precedence order, the package-name model, the system-bypass
+isolation, the domain-vs-FilterEngine separation, the scoped port policy, and
+the resource-protection rules documented here.
+
+### Review Trigger
+
+Re-open this decision if any of the following occur before implementation:
+
+- A new application type (non-browser) is proposed for default-ON inspection.
+- A request is made to expose system hard-bypass entries in the user-facing
+  exclusions UI.
+- A request is made to merge domain MITM bypass with FilterEngine exception rules.
+- An implementation proposes switching from MITM to raw TCP mid-flow for any
+  reason.
+- Any change to the locked semantics: large body → MITM_STREAM_ONLY → never
+  raw-TCP mid-flow.
+
+**Threshold note:** Numerical byte thresholds (rewrite-size, DOM-processing) are
+implementation-tunable by B4.5 from device and performance evidence without
+reopening DECISION-010. Adjusted values must preserve the locked semantics above.
+
+## DECISION-010 — Implementation Status Addendum (2026-08-27)
+
+This addendum records implementation status only. It does not reopen or alter the governing HTTPS Inspection Policy decision.
+
+### Completed since the original decision
+
+- Filter-source download, validation, compilation and atomic runtime-generation work has been implemented.
+- Manage Filters now supports custom-source add, edit, remove, enable and disable operations.
+- The implementation is committed at `ed8a0a2b774cf9795b17a44ad52ad77204b33b86` on `phase1d-advanced-filter`.
+- Targeted repository, ViewModel and row-flattener tests total 88 passes with no failures.
+- APK installation, source persistence and URL-edit persistence were verified on a physical device.
+
+### Not yet implemented
+
+- The complete DOC5 `InspectionPolicyEngine`.
+- Loading and applying the documented allow, block, inclusion, problematic-device and exclusion preset files.
+- A verified default HTTPS whitelist/eligibility policy matching the full three-tier design.
+- A user-visible reload-status message for source switch operations.
+
+### Open runtime finding
+
+Manual testing reported that browser web access failed with HTTPS inspection enabled after a custom filter was added, while disabling HTTPS inspection restored access.
+
+This is an unresolved HTTPS-path regression. It must not be recorded as proof that the custom filter successfully blocked a website.
+
+Required closure evidence:
+
+1. Diagnose whether the failure is caused by certificate trust, interception eligibility, upstream TLS, policy selection, or filter execution.
+2. Verify a neutral control domain with HTTPS inspection enabled.
+3. Verify a deterministic target using an OFF → ON → OFF custom-filter sequence.
+4. Confirm runtime generation changes and active rules with observable evidence.
+5. Verify that unrelated domains continue to load.
+6. Implement and verify the full preset-driven policy before declaring B4.5 complete.
+
+### Status
+
+- DECISION-010 architecture: GOVERNING.
+- Filter Source Manager: IMPLEMENTED.
+- Full HTTPS policy implementation: OPEN.
+- Controlled browser filtering proof: OPEN.
+- Release-candidate gate: BLOCKED.
+
+---
+
+## DECISION-010 TRACKED-FILE CLOSURE ADDENDUM — 2026-08-28
+
+**Status:** EVIDENCE UPDATE — ORIGINAL DECISION AND EARLIER ADDENDUM UNCHANGED
+**Implementation baseline:** `ca797a1d179b060b602c26664814111b640ffd8a`
+
+The initial custom-source feature commit
+`ed8a0a2b774cf9795b17a44ad52ad77204b33b86` referenced seven support files that
+were present during local testing but were not tracked by that commit.
+
+Closure commit `ca797a1d179b060b602c26664814111b640ffd8a`
+adds exactly those files:
+
+* `FilterRowFlattener.kt`
+* `CustomFilterSourceValidator.kt`
+* `dialog_add_custom_filter.xml`
+* `list_item_filter_add_custom.xml`
+* `FilterRowFlattenerTest.kt`
+* `CustomFilterSourceValidatorTest.kt`
+* `FilterSourceCustomDaoTest.kt`
+
+Five targeted suites pass **102/102 tests**:
+
+* `FilterSourceRepositoryTest`: 41
+* `ManageFilterSourcesViewModelTransactionTest`: 38
+* `FilterRowFlattenerTest`: 9
+* `CustomFilterSourceValidatorTest`: 9
+* `FilterSourceCustomDaoTest`: 5
+
+This closes tracked-file reproducibility for custom-source management. It does
+not seal B4.5, controlled website filtering, or release-candidate readiness.
+
+---
+
+## DECISION-011: Third-Party HTTPS Preset Data Intake (2026-08-31)
+
+**Status:** GOVERNING — REQUIRED BEFORE PRESET ASSET INTAKE
+**Scope:** Phase-1D-B4.5 HTTPS Inspection policy data only
+**Related decisions:** DECISION-004 and DECISION-010
+
+### Purpose
+
+This decision governs the provenance, licensing, transformation, and update
+rules for bundled HTTPS Inspection preset data. It does not authorize runtime
+integration or change the policy precedence locked by DECISION-010.
+
+### Source and license findings
+
+| Source | Finding | Intake decision |
+|---|---|---|
+| `AdguardTeam/HttpsExclusions` | `package.json` at pinned commit `5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8` declares author `AdGuard` and license `MIT` | Eligible for attributed, hash-pinned domain-data intake |
+| `AdguardTeam/CompatibilityIssues` | Public data repository, but no `LICENSE`, `NOTICE`, or package-level license declaration was found | Research reference only; its files must not be redistributed verbatim without explicit permission |
+| `AdguardTeam/AdguardForAndroid` | Its official README states that AdGuard for Android is not an open-source project | Design and issue reference only; not an implementation or asset source |
+
+Public visibility alone is not treated as redistribution permission.
+
+### Locked domain-source artifact
+
+The only domain corpus authorized for the next asset-intake slice is generated
+from:
+
+- repository:
+  `https://github.com/AdguardTeam/HttpsExclusions`
+- pinned commit:
+  `5d3e4ca4b79958e28e30c8cc48a9e0be95c813b8`
+- generator:
+  `node index.js`
+- generated source artifact:
+  `dist/android_exclusions.txt`
+- expected SHA-256:
+  `cf2699dbd93b9a3c6a94e1927bd58803ffbaa61ef2a814df36858b37652ad856`
+- expected Git blob hash:
+  `4349f8b56fc83f8a0a5ab020ffc0aa2c66ba17b5`
+- expected byte count:
+  `85173`
+- expected logical-line count:
+  `4569`
+
+The generated artifact may later be copied without content modification to:
+
+`app/src/main/assets/https_inspection/ssl_allow_list.txt`
+
+A bundled notice must accompany it at:
+
+`app/src/main/assets/https_inspection/NOTICE.txt`
+
+The notice must record the upstream repository, pinned commit, generator,
+upstream author and MIT declaration, generated hashes, and a direct link to the
+pinned license declaration.
+
+### Prohibited transformed attachment
+
+The separately supplied `ssl_allow_list.txt` with SHA-256
+
+`fe6e2505590e772a00413229c4017802b6d379e97257f294948b96c86f8d42dc`
+
+must not be used as the canonical asset.
+
+It was verified to equal the pinned generated artifact only after:
+
+1. prepending an additional generated-file comment; and
+2. changing `"lastpass.com"` to `lastpass.com`.
+
+Even though another unquoted `lastpass.com` entry currently produces the same
+effective suffix set after deduplication, removing exact-domain quotes is a
+semantic transformation and is not accepted as the canonical provenance path.
+
+### Parser contract for the pinned raw artifact
+
+With the currently accepted `InspectionDomainPresetParser`, the pinned raw
+artifact must produce:
+
+- 4,308 unique global protected domains;
+- 27 package keys;
+- 51 unique package-domain pairs;
+- 2 retained unsupported-rule diagnostics;
+- line 4,302:
+  `"lastpass.com"` → `MALFORMED_RULE`;
+- line 4,542:
+  `ping.*.adguard.io` → `UNSUPPORTED_WILDCARD`.
+
+Unsupported rules must remain visible as diagnostics. They must not be silently
+discarded, widened, converted to global rules, or repaired by modifying donor
+data.
+
+Support for quoted exact-domain rules and embedded wildcards requires a
+separate policy-model decision and test-first implementation slice.
+
+### Browser and system-bypass registries
+
+The following `CompatibilityIssues` files are not authorized for verbatim
+bundling by this decision:
+
+- `filter_https_traffic_inclusions.txt`;
+- `pkg_exclusions.txt`;
+- `filter_https_traffic_inclusions_problematic_devices.txt`;
+- `filter_https_traffic_exclusions.json`;
+- `quic_pkg_exclusions.txt`.
+
+Known-browser and system-hard-bypass assets must instead be created as
+Rethink-owned registries from independently verified package IDs, Android UID
+contracts, and documented operational rationales, unless explicit
+redistribution permission is obtained.
+
+This preserves the existing application defaults:
+
+- independently verified known browsers: eligible for default ON;
+- dynamically discovered browsers: default OFF until explicitly enabled;
+- all general applications: default OFF;
+- unresolved applications: default BYPASS.
+
+### Update policy
+
+Preset updates are compile-time, deliberate, and hash-pinned.
+
+No runtime download, floating branch, unpinned URL, automatic donor refresh, or
+silent corpus replacement is permitted.
+
+Every future update requires:
+
+1. a new pinned upstream commit;
+2. regenerated artifact hashes;
+3. corpus-count and diagnostic review;
+4. focused parser tests;
+5. full policy regression tests;
+6. an append-only decision or evidence addendum.
+
+### Current implementation status
+
+At this decision point:
+
+- the pure policy engine, parsers, snapshot factory, and preset-loader core
+  exist;
+- the loader core has passed 30/30 policy tests;
+- no preset asset exists;
+- no Android adapter or DI binding exists;
+- no runtime call site exists;
+- no browser, system-bypass, JSON, block-list, problematic-device, or QUIC
+  corpus is authorized by this decision.
+
+This decision authorizes only the later hash-pinned domain-asset intake. It does
+not itself add that asset.
+
+### Review triggers
+
+Re-open or append to this decision if:
+
+- the upstream license declaration changes;
+- a standalone upstream license contradicts the package declaration;
+- a transformed donor artifact is proposed;
+- exact-domain or wildcard semantics are added;
+- a `CompatibilityIssues` file is proposed for redistribution;
+- preset data is proposed for runtime download or automatic refresh.
+
+---
+
+**Earlier decision log continues below — append only**
+
+---
+
+## DECISION-010 — N4E POLICY SEMANTICS AND DEVICE CLOSURE ADDENDUM (2026-09-04)
+
+**Status:** GOVERNING SUPERSEDING ADDENDUM — original DECISION-010 remains historical; only the explicitly listed semantics below are superseded
+**Scope:** HTTPS Inspection application eligibility, dynamic-browser default behavior, installed-app inventory ownership, and N4E runtime/device closure
+**Committed branch baseline:** `phase1d-advanced-filter` @ `43e02cd0956d6aefc487eac0d534eaefa99c769d`
+**Implementation state:** verified local working-tree implementation; final branch commit pending
+
+### Why this addendum exists
+
+The original DECISION-010 defined known browsers as default-ON but dynamic
+browsers as default-OFF until individually enabled. N4E implementation and
+real-device verification established the final product contract differently.
+
+This addendum supersedes only the original dynamic-browser opt-in semantics and
+the corresponding `DYNAMIC_BROWSER + USER_ENABLED` precedence condition.
+All unrelated DECISION-010 architecture — system hard bypass, user exclusion
+precedence, protected domains, protected app+port tuples, FilterEngine
+separation, and post-MITM resource semantics — remains governing.
+
+### Final browser eligibility contract
+
+```text
+KNOWN BROWSER
+→ MITM by default
+→ unless USER APP EXCLUSION wins first
+
+DYNAMIC BROWSER
+→ capability-detected
+→ MITM by default
+→ unless USER APP EXCLUSION wins first
+
+GENERAL / NON-BROWSER APP
+→ BYPASS by default
+→ explicit user inclusion may enable MITM
+
+UNKNOWN / UNRESOLVED APP
+→ BYPASS
+```
+
+Dynamic browsers do not require a separate per-package enabled set.
+
+For a browser, the user-visible OFF state is an exclusion escape hatch:
+OFF adds/uses the app exclusion; ON removes that exclusion and restores the
+browser's normal default MITM eligibility.
+
+### Revised precedence portion
+
+The governing application-related order is:
+
+```text
+1. SYSTEM HARD BYPASS?           YES → BYPASS_SYSTEM
+2. USER APP EXCLUSION?           YES → BYPASS_USER
+3. PROTECTED DOMAIN?             YES → BYPASS_DOMAIN
+4. PROTECTED APP + PORT?         YES → BYPASS_APP_PORT
+5. KNOWN BROWSER INSTALLED?      YES → MITM_KNOWN_BROWSER
+6. USER EXPLICIT APP INCLUDE?    YES → MITM_USER_APP
+7. DYNAMIC BROWSER DETECTED?     YES → MITM_DYNAMIC_BROWSER
+8. NO MATCH                            → BYPASS_DEFAULT
+```
+
+User exclusion therefore remains the compatibility escape hatch and wins before
+either known-browser or dynamic-browser default-ON eligibility.
+
+### Dynamic-browser capability discovery
+
+N4E uses Android browser capability signals rather than browser-name guessing.
+
+The classifier accepts a package when either:
+
+* the browser-app capability query resolves it, or
+* both HTTP and HTTPS browser probes resolve it.
+
+Real-device diagnosis identified `PackageManager.MATCH_DEFAULT_ONLY` as the
+first-loss mechanism for the controlled dynamic-browser fixture. Removing that
+restriction restored the fixture to discovery.
+
+Observed snapshot transition:
+
+```text
+before detector repair / controlled failure: dynamicBrowsers=0
+controlled dynamic fixture after repair:     dynamicBrowsers=1
+final clean device after fixture removal:    dynamicBrowsers=0
+```
+
+### Installed-app inventory ownership
+
+HTTPS Inspection must reuse Rethink's existing installed-app inventory for
+package/UID/name/icon/install/remove lifecycle state.
+
+Do not create a second installed-app inventory for HTTPS Inspection.
+
+The future dedicated HTTPS app management surface should layer browser
+capability classification and HTTPS inclusion/exclusion state over the existing
+Rethink app inventory.
+
+### N4E runtime matrix — physical Mi A1 / Android 16
+
+Controlled fixtures proved all three primary branches:
+
+```text
+GENERAL
+→ BYPASS_DEFAULT
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+COMPATIBILITY
+→ BYPASS_COMPATIBILITY
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+DYNAMIC BROWSER
+→ MITM_DYNAMIC_BROWSER
+→ TLS MITM established
+→ HTTP 200
+→ RethinkDNS Root CA
+
+```
+
+### Package lifecycle inventory repair
+
+N4E also verified automatic app-inventory reconciliation.
+
+Package lifecycle broadcasts enqueue `RefreshAppsJob`. Package-change requests
+use `ACTION_REFRESH_FORCE` so authoritative install/remove events cannot be
+suppressed by the normal one-minute AUTO/INTERACTIVE refresh throttle.
+
+The controlled three-package removal test produced Android package-removal
+events within approximately 3.579 seconds. Each package was independently
+removed from Rethink's Room inventory and the final Configure → Apps exact
+search counts were:
+
+```text
+general fixture        0
+compatibility fixture  0
+dynamic fixture        0
+```
+
+### Final clean device state
+
+Device:
+Xiaomi Mi A1 (`tissot`), Android 16 / SDK 36, serial `3595381c0804`.
+
+Final N4E state:
+
+```text
+controlled fixtures installed = NO
+Protection                  = ON / protected
+VPN interface               = tun1
+network                     = healthy
+dynamicBrowsers             = 0
+HTTPS state changed by cleanup = NO
+```
+
+The final clean Protection OFF→ON restart produced a fresh policy snapshot with
+`dynamicBrowsers=0`.
+
+### Closure
+
+```text
+N4E_INVENTORY_REFRESH_REPAIR_SEALED=YES
+N4E_DYNAMIC_BROWSER_RUNTIME_SEALED=YES
+N4E_DV2_RUNTIME_SEALED=YES
+N4E_DEVICE_FULLY_SEALED=YES
+N4E_DEVICE_TESTING_COMPLETE=YES
+```
+
+This closure records verified runtime/device behavior. It does not claim that
+HEAD `43e02cd0956d6aefc487eac0d534eaefa99c769d` already contains every verified
+working-tree implementation file. Final code integration/commit remains a
+separate repository operation.
+
+---
+
+## DECISION-010 — N9 PER-APP HOT-APPLY AND HTTPS TRANSPORT ENFORCEMENT ADDENDUM (2026-09-07)
+
+**Status:** GOVERNING IMPLEMENTATION/TRANSPORT ADDENDUM — does not reopen unrelated DECISION-010 semantics
+**Canonical implementation:** `phase1d-advanced-filter` @ `a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82`
+**Verification:** GHA source/build gates sealed; repeated per-app hot apply real-device sealed; direct RULE20 execution deferred for lack of a natural UDP/443 control fixture
+
+### Canonical precedence precision
+
+The canonical engine evaluates:
+
+```text
+1. SYSTEM HARD BYPASS             → BYPASS_SYSTEM
+2. USER APP EXCLUSION             → BYPASS_USER
+3. COMPATIBILITY EXCLUSION        → BYPASS_COMPATIBILITY
+4. PROTECTED DOMAIN               → BYPASS_DOMAIN
+   DOMAIN MODE REJECTION          → BYPASS_DOMAIN_MODE
+5. PROTECTED APP + PORT           → BYPASS_APP_PORT
+6. KNOWN BROWSER                  → MITM_KNOWN_BROWSER
+7. USER APP INCLUDE               → MITM_USER_APP
+8. DYNAMIC BROWSER                → MITM_DYNAMIC_BROWSER
+9. NO MATCH                       → BYPASS_DEFAULT
+```
+
+The compatibility and domain-mode rows are a documentation precision correction
+for already accepted runtime behavior. They are not new behavior introduced by
+this addendum.
+
+### HTTPS transport invariant
+
+An effective MITM decision must also be transport-inspectable.
+
+For traffic that traverses the firestack connection path:
+
+```text
+existing firewall block?
+    YES → preserve existing firewall result
+
+otherwise:
+active HTTPS runtime snapshot?
+    NO → preserve ordinary firewall result
+
+otherwise:
+UDP destination port 443?
+    NO → preserve ordinary firewall result
+
+otherwise:
+InspectionPolicyEngine result
+    BYPASS → preserve ordinary firewall result
+    MITM   → dedicated RULE20 stall
+```
+
+`RULE20` exists only to stop an MITM-eligible UDP/443 attempt so the application
+can retry HTTPS over an inspectable TCP path.
+
+This rule:
+
+* does not replace ordinary firewall precedence;
+* does not reuse RULE6;
+* does not hardcode browser package names;
+* does not use the donor `quic_pkg_exclusions.txt` file as its decision source;
+* reuses the exact immutable policy snapshot installed in `LocalHttpsProxy`.
+
+### Repeated per-app hot-apply semantics
+
+Per-app ON/OFF writes mutate the HTTPS included/excluded package preferences.
+
+Two consecutive changes may target the same preference key. A
+`MutableStateFlow<String>` suppresses an assignment equal to its current value,
+so the original fixed reason string could lose a legitimate second restart
+event.
+
+Canonical N9 uses a process-local monotonic sequence:
+
+```text
+httpsInspectionAppPolicy[<sequence>]: <preference-key>
+```
+
+Each real per-app preference event therefore publishes a distinct StateFlow
+value.
+
+The existing 3000 ms debounce remains intentional. Rapid changes may collapse
+to one final VPN rebuild because the rebuilt VPN consumes the latest persisted
+policy state.
+
+### Verification closure
+
+Source/build verification:
+
+```text
+temporary verification head = 7c9408616aef8120356b4d4b06c6161abb21030d
+GHA run                    = 34046896707
+transport tests            = 11/11 PASS
+fdroidFullDebug compile    = PASS
+fdroidFullDebug assemble   = PASS
+artifact ID                = 9993434969
+```
+
+The temporary verification workflow is not part of canonical history.
+
+Canonical commit contains exactly the five verified implementation/test files:
+
+```text
+InspectionTransportPolicy.kt
+InspectionTransportPolicyTest.kt
+BraveVPNService.kt
+FirewallRuleset.kt
+strings.xml
+```
+
+### Real-device per-app hot-apply closure
+
+Mi A1 / Android 16 proved:
+
+```text
+browser ON
+→ ON→OFF
+→ distinct app-policy restart event
+→ VPN rebuilt
+→ public certificate
+
+browser OFF
+→ OFF→ON
+→ second distinct app-policy restart event
+→ VPN rebuilt without manual Protection restart
+→ RethinkDNS Root CA
+→ MITM_KNOWN_BROWSER
+→ TLS MITM tunnels
+```
+
+The Rethink process PID remained alive; this is a VPN hot rebuild, not a process
+restart.
+
+### RULE20 device-verification status
+
+Direct RULE20 execution remains deferred, not failed.
+
+Natural control traffic produced zero qualifying UDP/443 flows for:
+
+```text
+Chrome
+YouTube
+YouTube Music
+Google Play Store
+```
+
+TikTok, AliExpress, and Shadow Fight Arena donor-preset fixture candidates were
+not installed.
+
+YouTube separately proved that explicit non-browser opt-in reaches
+`MITM_USER_APP`, but its captured traffic did not produce a qualifying UDP/443
+flow, so RULE20 could not be exercised.
+
+No source or GHA failure is inferred from absence of a runtime stimulus.
+
+Future direct RULE20 device verification requires a fixture that first proves a
+real control flow containing the same connection metadata:
+
+```text
+uid=<fixture uid>
+destination port=443
+protocol=UDP
+```
+
+Only after that control exists may absence of RULE20 in the corresponding
+MITM-eligible ON arm be treated as a transport-enforcement failure.
+
+### Closure
+
+```text
+N9_CANONICAL_INTEGRATION_SEALED=YES
+N9_PER_APP_HOT_APPLY_SOURCE_GHA_SEALED=YES
+N9_PER_APP_HOT_APPLY_DEVICE_SEALED=YES
+N9_TRANSPORT_POLICY_SOURCE_GHA_SEALED=YES
+N9_RULE20_DEVICE_EXECUTION=DEFERRED_NO_NATURAL_UDP443_FIXTURE
+N9_RULE20_DEVICE_FAILURE_PROVEN=NO
+```
+
+---
+
+## DECISION-010 — N10 LOCAL PROXY FIREWALL AUTHORITY ADDENDUM (2026-09-09)
+
+**Status:** GOVERNING IMPLEMENTATION ADDENDUM — N10A/N10B/N10C canonical and device-sealed
+**Canonical implementation:** `phase1d-advanced-filter` @ `63bc8593df3efa83b51f68146b1216f4320f8e44`
+**Scope:** ordinary firewall authority for HTTPS CONNECT and absolute-URI plain HTTP traffic handled by `LocalHttpsProxy`, including blocked connection-log persistence
+
+### Context
+
+`LocalHttpsProxy` creates its upstream socket on the physical network so that
+the VPN application does not loop its own traffic back through firestack. That
+socket therefore cannot rely on the Go packet path to apply the original
+client application's domain/IP/port firewall rules.
+
+This is a policy-authority gap, not a reason to create a second firewall.
+
+### Decision
+
+`BraveVPNService.firewall()` remains the sole ordinary firewall decision
+authority. `LocalHttpsProxy` receives a narrow suspend evaluator and invokes it
+using the original client socket identity.
+
+The proxy must evaluate twice for a direct upstream connection:
+
+```text
+Gate 1: client UID + hostname + destination port + destinationIp=""
+        before proxy DNS, protectSocket, upstream connect, CONNECT 200,
+        request inspection, or MITM
+
+Gate 2: same client identity + hostname + destination port + resolved IP
+        after direct DNS resolution but before protectSocket/upstream connect
+```
+
+The second gate is not fabricated for a configured upstream HTTP proxy. That
+proxy receives an unresolved destination because it owns DNS resolution.
+
+### Failure and response contract
+
+* Missing evaluator → BLOCK with `FIREWALL_EVALUATOR_MISSING`.
+* Ordinary evaluator exception → BLOCK with `FIREWALL_EVALUATION_FAILED`.
+* `CancellationException` → rethrow; cancellation is not converted into a
+  firewall decision.
+* Firewall BLOCK → send `HTTP/1.1 403 Forbidden`, close the connection, and do
+  not continue to DNS/upstream/CONNECT-200/MITM work applicable after that
+  gate.
+
+### Existing-rule and logging ownership
+
+The evaluator constructs `ConnTrackerMetaData` with the resolved original UID,
+TCP protocol, hostname, port, and destination IP when available. It calls the
+existing `firewall()` function and maps grounded rules to BLOCK.
+
+For blocked results it sets:
+
+```text
+metadata.isBlocked = true
+metadata.blockedByRule = rule.id
+metadata.proxyDetails = Backend.Block
+```
+
+It then writes through the existing `NetLogTracker` path:
+
+* `writeRethinkLog(metadata)` for `rethinkUid`;
+* `writeIpLog(metadata)` for every other UID.
+
+N10 must not call `processFirewallRequest()` or
+`persistAndConstructFlowResponse()` from the evaluator and must not introduce
+direct proxy ownership of `DomainRulesManager` or `IpRulesManager`.
+
+### Canonical slices
+
+| Slice | Commit | Closure |
+|---|---|---|
+| N10A | `d6d3602880193e4f6250ce01c7b0eac46380faac` | hostname/port firewall gate before upstream work; fail-closed contract; CONNECT and plain HTTP coverage |
+| N10B | `24b7a292a96ff230345992fce942af5d12c36d79` | resolved destination-IP gate before socket protection/connect |
+| N10C | `63bc8593df3efa83b51f68146b1216f4320f8e44` | blocked decisions persisted in the existing connection log |
+
+### Verification closure
+
+```text
+N10A LocalHttpsProxyTest = 10/10 PASS
+N10B/N10C LocalHttpsProxyTest = 11/11 PASS
+
+GHA 34174825194 = success on d6d360288
+GHA 34198839548 = success on 24b7a292a
+GHA 34225352812 = success on 63bc8593d
+```
+
+Physical Mi A1 / Android 16 evidence proved:
+
+* Chrome-specific `example.com` domain BLOCK stops before DNS/upstream and
+  restores after deletion;
+* Chrome-specific `1.1.1.1` IP BLOCK stops after resolution but before
+  protection/connect/MITM and restores after deletion;
+* Chrome-specific `1.0.0.1:0` IP BLOCK appears in Network Logs as Chrome,
+  destination `1.0.0.1`, TCP/443, blocked, reason `IP / Port (App)`;
+* the persisted row remains visible after the temporary rule is deleted;
+* no temporary N10 firewall rule remains and connectivity is restored.
+
+### Closure
+
+```text
+N10A_PRE_UPSTREAM_FIREWALL_AUTHORITY=SEALED
+N10B_RESOLVED_IP_FIREWALL_AUTHORITY=SEALED
+N10C_BLOCKED_CONNECTION_LOG_PERSISTENCE=SEALED
+N10_CANONICAL_HEAD=63bc8593df3efa83b51f68146b1216f4320f8e44
+N10_TEMPORARY_DEVICE_RULES_REMAINING=0
+```
+
+This addendum closes local-proxy firewall parity. It does not close the separate
+RULE20 natural-UDP/443 device stimulus, external compatibility matrix,
+first-party preset-registry, or post-MITM resource-threshold follow-ups.
+
+---
+
+## DECISION-011 — CANONICAL PRESET-ASSET DIVERGENCE ADDENDUM (2026-09-09)
+
+**Status:** OPEN RELEASE BLOCKER — records implementation divergence; grants no redistribution authorization
+**Observed canonical head:** `63bc8593df3efa83b51f68146b1216f4320f8e44`
+**Introducing commit:** `82004b55eb195ae8b4aa0a65cb685a1f4a250423`
+
+DECISION-011 authorized only the pinned `ssl_allow_list.txt` intake. Canonical
+runtime nevertheless contains four additional assets that are byte-identical
+to the supplied attachments:
+
+```text
+pkg_exclusions.txt
+69230a7b5dc586c6dd9bd3da4e65ae749b3c05a099b30eb324c41c9c38ea5d47
+
+filter_https_traffic_inclusions.txt
+2da0920ee235c3c34584be859443a27f8fd7d40ba8f55c69b050b716770f7299
+
+filter_https_traffic_exclusions.json
+4ae3b2fd7a0a9898378334150433886683671abed390adb6529ec7b4878723a4
+
+ssl_block_list.txt
+ae59d79d6534a797a9e7ca9fa62c6131c600c2f2ea83c2022b1e1e8156359a7b
+```
+
+The bundled `NOTICE.txt` documents only `ssl_allow_list.txt` and says
+CompatibilityIssues-derived files were not bundled by that slice. It is not an
+accurate provenance/redistribution notice for the four files above.
+
+This finding does not invalidate the functional N4E/N9/N10 test evidence. It
+does block a stable release claim until one of these paths is completed and
+separately authorized:
+
+1. remove/replace the four files with Rethink-owned registries whose entries,
+   semantics, and package identities are independently verified; or
+2. obtain explicit redistribution authorization, verify the intended Rethink
+   semantics, and update the shipped notice accurately.
+
+Documentation edits alone must not be treated as authorization. The original
+DECISION-011 source, license, semantic, parser, and update gates remain binding.
+
+---
+
+## DECISION-012: POST-RELEASE UPSTREAM MAINTENANCE BRIDGE (2026-09-09)
+
+**Status:** PLANNED — sequencing locked; implementation branch/name and merge method not yet selected
+
+### Purpose
+
+The fork depends heavily on Rethink's original core networking, DNS, firewall,
+WireGuard, VPN, and platform-maintenance work. A permanent freeze would make the
+MITM/adblock fork increasingly expensive and unsafe to maintain.
+
+The final project phase will therefore create an upstream-maintenance bridge on
+a separate branch. Its purpose is Git/source integration with the original
+Rethink project, not a runtime DNS-to-FilterEngine bridge.
+
+### Locked sequence
+
+```text
+1. Finish every authorized MITM/adblock task on phase1d-advanced-filter
+2. Close documentation, source, tests, GHA, device, and release blockers
+3. Integrate and push the completed shipping state to main
+4. Complete the intended release gate/tag/public artifact
+5. Create the upstream-maintenance bridge on a separate branch
+6. Use that branch to evaluate and import future original-Rethink core updates
+```
+
+The bridge must not be started early by mixing upstream reconciliation into the
+current MITM/adblock release closure.
+
+### Ownership boundary
+
+DECISION-001 remains the starting conflict map:
+
+* upstream/core-friendly territory: DNS, firewall, WireGuard, RPN, VPN tunnel,
+  platform compatibility, and unrelated application maintenance;
+* fork-owned territory: CA, LocalHttpsProxy, HTTPS inspection policy,
+  FilterEngine, advanced filter sources, and their Plus UI;
+* shared conflict territory, especially `BraveVPNService.kt` and
+  `PersistentState.kt`, requires explicit manual review.
+
+The bridge may use merge, rebase, or selected cherry-picks only after a fresh
+upstream-delta audit. This decision does not choose that mechanism in advance
+and does not authorize any source mutation, branch creation, merge, push, tag,
+or release during the current documentation sync.
+
+---
+
+## DECISION-011 — N12 PARTIAL PRESET REMEDIATION ADDENDUM (2026-09-09)
+
+**Status:** PARTIALLY REMEDIATED — RELEASE BLOCKER REMAINS
+**Working-tree baseline:** `bb36fda1f799a375772721aa914bd352ac42bcfb`
+**Scope:** N12A HTTPS inclusion semantics and N12B obsolete compatibility-package pruning
+
+### Completed remediation
+
+N12A renamed `ssl_block_list.txt` to
+`https_inspection_inclusions.txt`. The new name records the actual policy
+semantics: this is an HTTPS-inspection inclusion preset, not a DNS or
+firewall blocklist.
+
+The asset retains the following four broad parent domains:
+
+```text
+googleapis.com
+graph.facebook.com
+doubleclick.net
+googleadservices.com
+```
+
+A matching domain only makes a connection eligible for HTTPS inspection when
+the active domain mode and application eligibility permit it. Actual blocking
+still requires a matching filtering or firewall rule. Higher-priority system,
+user, compatibility, and package-scoped bypass policy remains authoritative.
+
+N12B removed exactly ten obsolete package identities from
+`filter_https_traffic_exclusions.json`:
+
+```text
+com.microsoft.cortana
+com.google.android.apps.fireball
+com.amazon.drive
+com.bbm
+com.jet.jet.app
+com.nuance.swype.dtc
+com.nuance.swype.trial
+com.sonymobile.androidapp.audiorecorder
+com.poloniumarts.svyaznoy
+org.cryptomator.beta
+```
+
+The registry changed from 201 to 191 unique entries. All 191 surviving objects
+were preserved unchanged and in their original order. The resulting asset has
+SHA-256 `a204969c31dbae110a2a19aebab9cdbd99dc6f1c3a8d6263102d23ded313ac05`.
+
+The focused package-preset, preset-loader, and bundled-asset test selection
+passed 15 tests with zero failures.
+
+### Registry ownership clarification
+
+Android package identifiers are factual identifiers. Recording such an
+identifier in a Rethink-owned compatibility registry does not inherently
+require permission from the application publisher or from another filtering
+product.
+
+The remaining governance concern is not ownership of individual package names.
+It is whether Rethink can explain, maintain, and verify its complete curated
+default-policy dataset instead of indefinitely redistributing or trusting an
+external vendor snapshot without independent adjudication.
+
+Future entries may be added through Rethink testing and field evidence. Each
+entry must record a current package identity and a reproducible compatibility
+reason. It does not require permission from the affected app vendor.
+
+### Preserved policy decisions
+
+ColorOS update and download components remain intentionally protected in the
+package-routing exclusion policy because intercepting or rerouting those
+system-critical paths may break Oppo-group firmware and component updates.
+
+Google Search Lite, Bing News, and Yandex Search remain browser-capable
+inclusion candidates because they provide embedded browsing functionality.
+Their native API paths may use certificate pinning, so login, content, account,
+media, native API, and embedded-browser paths require device testing before any
+final compatibility classification.
+
+`quic_pkg_exclusions.txt` and
+`filter_https_traffic_inclusions_problematic_devices.txt` remain unbundled.
+QUIC policy and device-specific browser policy are separate concerns.
+
+### Remaining release blockers
+
+This addendum does not declare preset intake release-clean. The following remain
+open:
+
+* first-party rationale and maintenance metadata for the retained compatibility
+  registry;
+* device verification of weak, contradictory, or old compatibility entries;
+* independent testing of the current `org.cryptomator` package;
+* confirmation or implementation of the production/UI selector for
+  `ONLY_INCLUDED`;
+* accurate bundled NOTICE/provenance text;
+* compatibility testing for hybrid browser/native applications;
+* final temporary-branch GHA and release-level review.
+
+Documentation alone does not close these gates.
+
+---
+
+## DECISION-011 — N12D/N12E EVIDENCE ADDENDUM (2026-09-10)
+
+**Status:** PARTIALLY REMEDIATED — RELEASE BLOCKER REMAINS
+**Candidate branch:** `tmp/n12e-preset-gha-20260910`
+**Candidate commit:** `776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`
+**Candidate parent:** `bb36fda1f799a375772721aa914bd352ac42bcfb`
+
+### Completed evidence
+
+N12D corrected the bundled HTTPS Inspection NOTICE. It now records all five
+bundled policy files, distinguishes the two unbundled inputs, preserves the
+pinned `ssl_allow_list.txt` provenance, and explicitly states that documenting
+source history does not grant redistribution permission.
+
+N12E verified the corrected combined candidate using the existing
+`.github/workflows/build-apk.yml` workflow. GitHub Actions run
+`34461990520` was dispatched with `workflow_dispatch` for
+`tmp/n12e-preset-gha-20260910` at
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`.
+
+The `Build & Sign APK` job completed successfully. It uploaded artifact
+`release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`, size
+173746306 bytes, with artifact digest
+`sha256:4db466557bf929dc197a97645e78561f55c7dfd5272ec800e81b495e32e5de14`.
+The artifact was not expired when audited. The `Create GitHub Release` step was
+skipped, as required for a branch dispatch.
+
+The candidate is one non-merge commit above
+`bb36fda1f799a375772721aa914bd352ac42bcfb` and changes exactly the ten
+reviewed N12 paths. The earlier focused test selection passed 15 tests with zero
+failures.
+
+### Release boundary
+
+This successful temporary-branch build is verification evidence only. It did
+not create a GitHub Release, tag, pull request, or merge, and it did not advance
+`phase1d-advanced-filter`.
+
+Stable release remains blocked by the unresolved first-party registry
+rationale and maintenance metadata, redistribution authorization or independent
+replacement of donor-derived curated datasets, compatibility device testing,
+current Cryptomator testing, `ONLY_INCLUDED` production/UI selection, and the
+remaining release gates outside N12.
+
+---
+
+## DECISION-013: ONLY_INCLUDED NOT EXPOSED — PRODUCT ACCEPT FOR RELEASE (2026-09-15)
+
+**Status:** FINAL · **Deciders:** User (product decision) + Supervisor (records)
+**Refines:** DECISION-011 remaining gate "ONLY_INCLUDED production/UI selector".
+
+### Decision
+
+PRODUCT DECISION: ACCEPT FOR RELEASE. `ONLY_INCLUDED` is intentionally not
+exposed in current production UX. Production remains `ALL_EXCEPT_PROTECTED`
+(`InspectionPolicySnapshotFactory.kt:33-34`, `InspectionPolicyEngine.kt:40-41`).
+The existing engine capability (`InspectionPolicyEngine.kt:95`) plus its
+unit coverage (`InspectionPolicyEngineTest`, `InspectionPolicySnapshotFactoryTest`)
+is retained as a future emergency mitigation path should a severe
+HTTPS-inspection bug require temporary scope restriction.
+
+### Standing
+
+- No UX selector work is opened by this entry.
+- This is not a deferred release blocker and carries no implementation task.
+- Revisit only if a severe HTTPS-inspection incident requires temporary
+  scope restriction (then: expose selector or hard-switch mode + record).
+
+---
+
+## DECISION-014: RELEASE EXCLUSIONS FOR KNOWN-OPEN ITEMS (2026-09-17)
+
+**Status:** SIGNED 2026-09-17 — user-as-decider sign-off given; exclusions
+below take effect for the upcoming release. Refines RELEASE-POLICY.md pre-tag
+checklist item 3 (explicit, recorded exclusion — not a silent pass).
+
+### Decision
+
+The following known-open items do NOT block the upcoming release. Rationale
+and evidence live in their home docs (referenced, not duplicated here); none
+is closed or downgraded by this entry:
+
+1. VPN-death silent desync (UNHEALED): 4x under extreme test conditions;
+   frequency in normal use unmeasured; watchdog detection built (Phase 1),
+   heal pending; user-side mitigation available. Home:
+   PLAN-HTTPS-INSPECTION-POLICY.md tracked-defect entry (incl. release
+   exclusion note). Revocable on worse field evidence.
+2. RULE20 direct device execution: BLOCKED-mechanism (code green, no defect,
+   environmentally unpassable with available fixtures). Home: PLAN §12 R2/R3.
+3. Matrix #3 (no UI harness; unit twin green), #4/#5/#11 (QUIC-stimulus
+   blocked; policy-half unit green), #8/#9 + Cryptomator depth
+   (deferred-accounts, will retest). Home: PLAN §12.3 notes.
+4. Full-suite 1243/43 (retired-RPN/subscription/Wireguard/stale-EasyList rot):
+   separate test-hygiene debt. Home: docs/TECH-DEBT-FULL-SUITE-CI-43.md.
+
+This entry grants no redistribution authorization, changes no code, and
+closes nothing. Items stay tracked in their home docs; this entry is the
+consolidated release pointer. Signed 2026-09-17 by user-as-decider.
 
 ---
 

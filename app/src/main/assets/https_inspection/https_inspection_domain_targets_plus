@@ -1,0 +1,16 @@
+// HTTPS inspection inclusion preset.
+// This is NOT a DNS, firewall, or domain blocklist.
+// A matching domain only makes the connection eligible for MITM inspection
+// when include-only domain mode is active and the application is otherwise
+// eligible for inspection. Actual blocking requires a matching filter rule.
+// Parent-domain entries include their subdomains. If inspection breaks a
+// specific application, use a package compatibility exclusion or a
+// package-scoped domain bypass; do not silently narrow these global entries.
+
+// Google API infrastructure can carry advertising or tracking-related traffic.
+googleapis.com
+// Meta Graph API traffic can include advertising and analytics.
+graph.facebook.com
+// Google advertising and measurement infrastructure.
+doubleclick.net
+googleadservices.com

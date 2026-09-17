@@ -27,64 +27,78 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.observe
 import by.kirich1409.viewbindingdelegate.viewBinding
 import com.celzero.bravedns.R
+import com.celzero.bravedns.core.ca.CaCertificateExporter
 import com.celzero.bravedns.core.ca.CertificateAuthority
+import com.celzero.bravedns.database.FilterSource
+import com.celzero.bravedns.database.FilterSourceRepository
+import com.celzero.bravedns.viewmodel.FilterSourceSummaryFormatter
 import com.celzero.bravedns.databinding.FragmentRethinkPlusBinding
-import com.celzero.bravedns.download.AppDownloadManager
 import com.celzero.bravedns.service.PersistentState
-import com.celzero.bravedns.service.RethinkBlocklistManager
-import com.celzero.bravedns.service.VpnController
 import Logger
 import Logger.LOG_TAG_UI
-import com.celzero.bravedns.util.Utilities
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.progressindicator.CircularProgressIndicator
-import com.google.android.material.switchmaterial.SwitchMaterial
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * F-Droid flavour Plus tab — full MITM/Adblock UI.
  *
  * Sections:
  * 1. HTTPS Inspection — master toggle, CA status badge, CA actions (Install/Re-install/Export)
- * 2. DNS Blocklist → MITM Bridge — toggle, list selector, Sync button, status/result
- * 3. Advanced Filtering — cosmetic/scriptlet/procedural toggles (hidden until FilterEngine supports)
- * 4. Exclusions — domain exclusions, app exclusions
+ * 2. Advanced Filtering — read-only aggregate summary of enabled filter sources + Manage Filters action
+ * 3. Exclusions — app exclusions
+ *
+ * The DNS Blocklist → MITM Bridge card and the obsolete cosmetic/scriptlet/procedural/CSP/HTML
+ * filtering toggles are retired in B5 Slice-1. The bridge is superseded by the FilterSource
+ * backend (B1–B4); the rule-subtype toggles are obsolete because FilterEngine auto-detects
+ * subtypes (DECISION-009).
  */
 class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private val b by viewBinding(FragmentRethinkPlusBinding::bind)
 
     private val persistentState by inject<PersistentState>()
-    private val appDownloadManager by inject<AppDownloadManager>()
-    private val vpnController by inject<VpnController>()
+    private val filterSourceRepo by inject<FilterSourceRepository>()
+
+    private val isCaExportInProgress = AtomicBoolean(false)
 
     companion object {
         private const val TAG = "RethinkPlusFragment"
-        private const val CA_INSTALL_REQUEST_CODE = 1001
         private const val CA_INSTALL_POLL_INTERVAL_MS = 1000L
-        private const val CA_INSTALL_POLL_MAX_ATTEMPTS = 30
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         initHttpsInspectionSection()
-        initBlocklistBridgeSection()
         initAdvancedFilteringSection()
         initExclusionsSection()
+
+        // Immediate refresh of CA status on view creation
+        updateCaStatusUi()
 
         // Start CA status polling
         startCaStatusPolling()
 
-        observeBlocklistBridgeState()
+        observeFilterSourcesState()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Refresh CA status when returning to fragment (e.g. from system certificate installer)
+        updateCaStatusUi()
     }
 
     // ========== HTTPS INSPECTION SECTION ==========
 
     private fun initHttpsInspectionSection() {
+        // Restore the persisted master state before installing the listener.
+        // LiveData is process-local and may not have emitted after process recreation.
+        updateHttpsInspectionToggle(persistentState.httpsInspectionEnabled)
+
         // Master toggle
         b.switchHttpsInspection.setOnCheckedChangeListener { _, isChecked ->
             // DECISION-006/D: HTTPS Inspection is hot-pluggable — setting
@@ -98,14 +112,98 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
             updateHttpsInspectionToggle(enabled)
         }
 
-        // CA Action button (Install / Re-install / Export)
-        b.btnCaAction.setOnClickListener { showCaActionDialog() }
+        // CA Action button removed — canonical flows use Generate, Install, Save
+        // b.btnCaAction.setOnClickListener { showCaActionDialog() }
 
-        // CA Re-install button
-        b.btnCaReinstall.setOnClickListener { launchCaInstall() }
+        // Generate CA Certificate button
+        b.btnGenerate.setOnClickListener {
+            b.progressGen.isVisible = true
+            b.btnGenerate.isEnabled = false
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    CertificateAuthority.initializeCA(requireContext())
+                    withContext(Dispatchers.Main) {
+                        b.progressGen.isVisible = false
+                        showToast(getString(R.string.plus_ca_install_success))
+                        updateCaStatusUi()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        b.progressGen.isVisible = false
+                        b.btnGenerate.isEnabled = true
+                        showToast(getString(R.string.plus_ca_install_error, e.message ?: "Unknown error"))
+                    }
+                }
+            }
+        }
 
-        // CA Export button
-        b.btnCaExport.setOnClickListener { exportCaCertificate() }
+        // Install CA Certificate button
+        b.btnInstall.setOnClickListener {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    CertificateAuthority.initializeCA(requireContext())
+                    val certBytes = CertificateAuthority.exportCaCert()
+                    val file = File(requireContext().cacheDir, "rethinkdns_root_ca.crt")
+                    file.writeBytes(certBytes)
+                    val uri = FileProvider.getUriForFile(
+                        requireContext(),
+                        "${requireContext().packageName}.provider",
+                        file
+                    )
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        setDataAndType(uri, "application/x-x509-ca-cert")
+                    }
+                    withContext(Dispatchers.Main) {
+                        if (intent.resolveActivity(requireContext().packageManager) != null) {
+                            startActivity(intent)
+                        } else {
+                            val settingsIntent = Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
+                            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(settingsIntent)
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        showToast(getString(R.string.plus_ca_install_error, e.message ?: "Unknown error"))
+                    }
+                }
+            }
+        }
+
+        // Save Certificate button
+        b.btnSaveCert.setOnClickListener {
+            if (!isCaExportInProgress.compareAndSet(false, true)) {
+                return@setOnClickListener
+            }
+            b.btnSaveCert.isEnabled = false
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val certificateBytes = CertificateAuthority.exportCaCert()
+                    val result = CaCertificateExporter.exportToDownloads(
+                        requireContext().applicationContext,
+                        certificateBytes
+                    )
+                    withContext(Dispatchers.Main) {
+                        showToast("Certificate saved to Downloads: ${result.displayName}")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        showToast(getString(R.string.plus_ca_export_error, e.message ?: "Unknown error"))
+                    }
+                } finally {
+                    isCaExportInProgress.set(false)
+                    withContext(Dispatchers.Main) {
+                        if (view != null) {
+                            updateCaStatusUi()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun updateHttpsInspectionToggle(enabled: Boolean) {
@@ -128,278 +226,110 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         lifecycleScope.launch {
             while (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
                 updateCaStatusUi()
+                // If CA is already installed, no need for active continuous polling
+                val installed = runCatching { CertificateAuthority.isCaInstalled() }.getOrDefault(false)
+                if (installed) {
+                    break
+                }
                 kotlinx.coroutines.delay(CA_INSTALL_POLL_INTERVAL_MS)
             }
         }
     }
 
     private fun updateCaStatusUi() {
-        val isInstalled = CertificateAuthority.isCaInstalled()
-        val httpsEnabled = persistentState.httpsInspectionEnabled
+        val caAvailable = runCatching {
+            CertificateAuthority.exportCaCert()
+            true
+        }.getOrDefault(false)
+
+        val isInstalled = if (caAvailable) {
+            runCatching {
+                CertificateAuthority.isCaInstalled()
+            }.getOrDefault(false)
+        } else {
+            false
+        }
 
         if (isInstalled) {
             b.ivCaStatusIcon.setImageResource(R.drawable.ic_check_circle)
             b.ivCaStatusIcon.setColorFilter(requireContext().getColor(R.color.accentGood))
-            b.tvCaStatusTitle.text = getString(R.string.plus_ca_status_installed)
-            b.tvCaStatusSubtitle.text = getString(R.string.plus_ca_status_installed_desc)
-            b.btnCaAction.text = getString(R.string.plus_ca_action_reinstall)
-            b.layoutCaActions.isVisible = true
+            b.tvCaStatusTitle.text = "CA certificate installed"
+            b.tvCaStatusSubtitle.text = "HTTPS inspection is ready"
             b.switchHttpsInspection.isEnabled = true
+            b.btnGenerate.isEnabled = false
+            b.btnInstall.isEnabled = true
+            b.btnSaveCert.isEnabled = !isCaExportInProgress.get()
+            b.tvGenerateHint.isVisible = false
+        } else if (caAvailable) {
+            b.ivCaStatusIcon.setImageResource(R.drawable.ic_warning)
+            b.ivCaStatusIcon.setColorFilter(requireContext().getColor(R.color.accentWarning))
+            b.tvCaStatusTitle.text = "Current CA ready"
+            b.tvCaStatusSubtitle.text = "Install the current CA certificate to enable HTTPS inspection"
+            b.switchHttpsInspection.isEnabled = false
+            b.btnGenerate.isEnabled = false
+            b.btnInstall.isEnabled = true
+            b.btnSaveCert.isEnabled = !isCaExportInProgress.get()
+            b.tvGenerateHint.isVisible = false
         } else {
             b.ivCaStatusIcon.setImageResource(R.drawable.ic_warning)
             b.ivCaStatusIcon.setColorFilter(requireContext().getColor(R.color.accentWarning))
-            b.tvCaStatusTitle.text = getString(R.string.plus_ca_status_not_installed)
-            b.tvCaStatusSubtitle.text = getString(R.string.plus_ca_status_not_installed_desc)
-            b.btnCaAction.text = getString(R.string.plus_ca_action_install)
-            b.layoutCaActions.isVisible = false
+            b.tvCaStatusTitle.text = "CA certificate not generated"
+            b.tvCaStatusSubtitle.text = "Generate a CA certificate to continue"
             b.switchHttpsInspection.isEnabled = false
+            b.btnGenerate.isEnabled = true
+            b.btnInstall.isEnabled = false
+            b.btnSaveCert.isEnabled = false
+            b.tvGenerateHint.isVisible = true
         }
     }
 
     private fun showCaActionDialog() {
-        val isInstalled = CertificateAuthority.isCaInstalled()
-        val builder = com.google.android.material.dialog.MaterialAlertDialogBuilder(
-            requireContext(),
-            R.style.App_Dialog_NoDim
-        )
-
-        if (!isInstalled) {
-            builder.setTitle(R.string.plus_ca_install_dialog_title)
-                .setMessage(R.string.plus_ca_install_dialog_message)
-                .setPositiveButton(R.string.plus_ca_install_dialog_open) { _, _ ->
-                    launchCaInstall()
-                }
-                .setNegativeButton(R.string.lbl_cancel, null)
-        } else {
-            builder.setTitle(R.string.plus_ca_action_dialog_title)
-                .setItems(
-                    arrayOf(
-                        getString(R.string.plus_ca_action_reinstall),
-                        getString(R.string.plus_ca_action_export)
-                    )
-                ) { _, which ->
-                    when (which) {
-                        0 -> launchCaInstall()
-                        1 -> exportCaCertificate()
-                    }
-                }
-                .setNegativeButton(R.string.lbl_cancel, null)
-        }
-        builder.show()
+        // Unused dialog removed; actions are directly on the Plus tab UI.
     }
 
-    private fun launchCaInstall() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            CertificateAuthority.initializeCA(requireContext())
-            val caBytes = CertificateAuthority.exportCaCert()
+    // ========== ADVANCED FILTERING SECTION (read-only aggregate) ==========
 
-            val file = File(requireContext().getExternalFilesDir(null), "rethinkdns_root_ca.crt")
-            file.writeBytes(caBytes)
-
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                requireContext(),
-                "${requireContext().packageName}.fileprovider",
-                file
-            )
-
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                setDataAndType(uri, "application/x-x509-ca-cert")
-            }
-
-            if (intent.resolveActivity(requireContext().packageManager) != null) {
-                withContext(Dispatchers.Main) {
-                    try {
-                        startActivityForResult(intent, CA_INSTALL_REQUEST_CODE)
-                    } catch (e: Exception) {
-                        Logger.e(LOG_TAG_UI, "Failed to launch CA installer", e)
-                        showToast(getString(R.string.plus_ca_install_error))
-                    }
-                }
-            } else {
-                // Fallback: open Settings security page
-                withContext(Dispatchers.Main) {
-                    val settingsIntent = Intent(Settings.ACTION_SECURITY_SETTINGS)
-                    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    try {
-                        startActivity(settingsIntent)
-                    } catch (e: Exception) {
-                        showToast(getString(R.string.plus_ca_install_error))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun exportCaCertificate() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                CertificateAuthority.initializeCA(requireContext())
-                val caBytes = CertificateAuthority.exportCaCert()
-
-                val downloadsDir = File(requireContext().getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), "RethinkDNS")
-                downloadsDir.mkdirs()
-                val file = File(downloadsDir, "rethinkdns_root_ca.crt")
-                file.writeBytes(caBytes)
-
-                withContext(Dispatchers.Main) {
-                    showToast(getString(R.string.plus_ca_export_dialog_message).replace("%s", file.absolutePath))
-                }
-            } catch (e: Exception) {
-                Logger.e(LOG_TAG_UI, "Failed to export CA certificate", e)
-                withContext(Dispatchers.Main) {
-                    showToast(getString(R.string.plus_ca_export_error, e.message ?: "Unknown error"))
-                }
-            }
-        }
-    }
-
-    // ========== DNS BLOCKLIST → MITM BRIDGE SECTION ==========
-
-    private fun initBlocklistBridgeSection() {
-        // Bridge toggle
-        b.switchBlocklistBridge.setOnCheckedChangeListener { _, isChecked ->
-            persistentState.blocklistEnabled = isChecked
-            updateBlocklistBridgeUi(isChecked)
-            if (isChecked) {
-                syncBlocklists()
-            }
-        }
-
-        // Observe blocklist bridge enabled state
-        persistentState.blocklistEnabledLiveData.observe(viewLifecycleOwner) { enabled ->
-            updateBlocklistBridgeUi(enabled)
-        }
-
-        // Open blocklist manager
-        b.btnOpenBlocklistManager.setOnClickListener {
-            openBlocklistManager()
-        }
-
-        // Sync button
-        b.btnSyncBlocklists.setOnClickListener { syncBlocklists() }
-    }
-
-    private fun updateBlocklistBridgeUi(enabled: Boolean) {
-        b.switchBlocklistBridge.isChecked = enabled
-        b.layoutBlocklistSelector.isVisible = enabled
-        b.layoutSyncButton.isVisible = enabled
-        b.cardSyncResult.isVisible = enabled
-
-        if (enabled) {
-            b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-            b.btnSyncBlocklists.isEnabled = true
-        } else {
-            b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-            b.btnSyncBlocklists.isEnabled = false
-        }
-    }
-
-    private fun observeBlocklistBridgeState() {
-        // Observe local blocklist stamp for changes from DNS settings
-        persistentState.localBlocklistStampLiveData.observe(viewLifecycleOwner) { stamp ->
-            if (persistentState.blocklistEnabled) {
-                // Auto-sync when stamp changes from DNS settings
-                syncBlocklists()
-            }
-        }
-
-        // Observe blocklist timestamp for updates
-        persistentState.localBlocklistTimestampLiveData.observe(viewLifecycleOwner) { _ ->
-            if (persistentState.blocklistEnabled) {
-                updateSyncStatusDisplay()
-            }
-        }
-    }
-
-    private fun syncBlocklists() {
-        b.btnSyncBlocklists.isEnabled = false
-        b.progressSync.isVisible = true
-        b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_syncing)
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val stats = RethinkBlocklistManager.syncBlocklistToAdblockRules(requireContext())
-
-                withContext(Dispatchers.Main) {
-                    b.progressSync.isVisible = false
-                    b.btnSyncBlocklists.isEnabled = true
-                    b.tvSyncStatus.text = getString(
-                        R.string.plus_blocklist_bridge_synced,
-                        stats.total,
-                        stats.cosmetic,
-                        stats.scriptlet
-                    )
-                    b.cardSyncResult.isVisible = true
-                    b.tvSyncResult.text = getString(
-                        R.string.plus_blocklist_bridge_synced,
-                        stats.total,
-                        stats.cosmetic,
-                        stats.scriptlet
-                    )
-                    showToast(getString(R.string.plus_sync_complete_toast, stats.total))
-                }
-            } catch (e: Exception) {
-                Logger.e(LOG_TAG_UI, "Sync blocklists failed", e)
-                withContext(Dispatchers.Main) {
-                    b.progressSync.isVisible = false
-                    b.btnSyncBlocklists.isEnabled = true
-                    b.tvSyncStatus.text = getString(R.string.plus_blocklist_bridge_ready)
-                    showToast(getString(R.string.plus_sync_error_toast, e.message ?: "Unknown error"))
-                }
-            }
-        }
-    }
-
-    private fun updateSyncStatusDisplay() {
-        val localCount = persistentState.numberOfLocalBlocklists
-        val remoteCount = persistentState.getRemoteBlocklistCount()
-        if (localCount > 0 || remoteCount > 0) {
-            b.tvSyncStatus.text = getString(
-                R.string.plus_blocklist_bridge_status,
-                localCount + remoteCount
-            )
-        }
-    }
-
-    private fun openBlocklistManager() {
-        // Navigate to DNS blocklist configuration
-        val intent = Intent(requireContext(), com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity::class.java)
-        intent.putExtra(com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.INTENT, com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.FragmentLoader.LOCAL.ordinal)
-        startActivity(intent)
-    }
-
-    // ========== ADVANCED FILTERING SECTION (placeholder) ==========
 
     private fun initAdvancedFilteringSection() {
-        // Currently hidden - will be shown when FilterEngine supports these features
-        b.cardAdvancedFiltering.isVisible = false
+        // Advanced Filtering card is visible. The obsolete rule-subtype toggles
+        // (cosmetic/scriptlet/procedural/CSP/HTML) are retired in B5 Slice-1 —
+        // FilterEngine auto-detects subtypes (DECISION-009).
+        b.cardAdvancedFiltering.isVisible = true
+        b.btnManageFilterSources.isEnabled = true
 
-        // Switches are disabled by default in layout
-        b.switchCosmeticFiltering.isEnabled = false
-        b.switchScriptletFiltering.isEnabled = false
-        b.switchProceduralFiltering.isEnabled = false
+        // Manage Filters opens the read-only Manage Filters shell (B5 Slice-1).
+        // Target activity is defined under full/ source set, so we launch via
+        // component intent to avoid compile-time coupling from the fdroid source set.
+        b.btnManageFilterSources.setOnClickListener {
+            try {
+                val intent = Intent().setClassName(
+                    requireContext().packageName,
+                    "com.celzero.bravedns.ui.activity.ManageFilterSourcesActivity"
+                )
+                startActivity(intent)
+            } catch (e: Exception) {
+                Logger.e(LOG_TAG_UI, "Failed to launch ManageFilterSourcesActivity", e)
+            }
+        }
+    }
+
+    private fun observeFilterSourcesState() {
+        filterSourceRepo.getAllSourcesLiveData().observe(viewLifecycleOwner) { sources ->
+            updateFilterSourcesSummary(sources)
+        }
+    }
+
+    private fun updateFilterSourcesSummary(sources: List<FilterSource>) {
+        val summary = FilterSourceSummaryFormatter.compute(sources)
+        b.tvFilterSourcesCount.text = FilterSourceSummaryFormatter.format(requireContext(), summary)
     }
 
     // ========== EXCLUSIONS SECTION ==========
 
     private fun initExclusionsSection() {
-        b.btnDomainExclusions.setOnClickListener {
-            openDomainExclusions()
-        }
-
         b.btnAppExclusions.setOnClickListener {
             openAppExclusions()
         }
-    }
-
-    private fun openDomainExclusions() {
-        // Navigate to domain exclusions - reuse existing pattern
-        val intent = Intent(requireContext(), com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity::class.java)
-        intent.putExtra(com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.INTENT, com.celzero.bravedns.ui.activity.ConfigureRethinkBasicActivity.FragmentLoader.LOCAL.ordinal)
-        // Could add a flag to open directly to exclusions
-        startActivity(intent)
     }
 
     private fun openAppExclusions() {
@@ -414,35 +344,6 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     private fun showToast(message: String) {
         if (isAdded) {
             Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == CA_INSTALL_REQUEST_CODE) {
-            // Poll for CA installation
-            pollCaInstallation()
-        }
-    }
-
-    private fun pollCaInstallation() {
-        lifecycleScope.launch {
-            var attempts = 0
-            while (attempts < CA_INSTALL_POLL_MAX_ATTEMPTS) {
-                kotlinx.coroutines.delay(CA_INSTALL_POLL_INTERVAL_MS)
-                if (CertificateAuthority.isCaInstalled()) {
-                    withContext(Dispatchers.Main) {
-                        updateCaStatusUi()
-                        showToast(getString(R.string.plus_ca_install_success))
-                    }
-                    return@launch
-                }
-                attempts++
-            }
-            // Timeout - user may still be in Settings
-            withContext(Dispatchers.Main) {
-                updateCaStatusUi()
-            }
         }
     }
 

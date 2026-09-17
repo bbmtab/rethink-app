@@ -12,9 +12,9 @@
 
    <item
         android:id="@+id/rethinkPlus"
-        android:icon="@drawable/ic_rethink_plus_sparkle"
+        android:icon="@drawable/ic_plus_tab"
         app:showAsAction="always"
-        android:title="@string/rpn_title" />
+        android:title="@string/plus_title" />
 
     <item
         android:id="@+id/configureFragment"

@@ -1,0 +1,653 @@
+# Device-Verify Protocol — DV1–DV5 (Phase B)
+
+> **Historical status (2026-07-29):** Canonical, repo-resolvable. **Issued 2026-07-28; NOT YET EXECUTED** by the executor at that time (supervisor-issued, awaiting a fresh executor session to run Phase B).
+> **Current status (2026-09-09):** Later Mi A1 gates are appended in §§7–10.
+> Controlled filter-runtime, N4E policy/inventory, N9 repeated per-app hot
+> apply, and N10 local-proxy domain/IP firewall plus Network Logs persistence
+> are sealed. Direct RULE20 execution remains deferred for lack of a qualifying
+> natural UDP/443 control stimulus; release-level DoD and DECISION-011 preset
+> provenance remain separate blockers that device evidence cannot waive.
+> **Owner:** Supervisor. This doc is the single source of truth for the device-verify gate labels `DV1`–`DV5`. Executor relays MUST resolve `DV1`–`DV5` here, not from memory.
+
+---
+
+## 0. Why this doc exists (relabel rationale)
+
+The device-verify gates were originally numbered **G1–G5** in an in-session
+relay. That collided with G1–G5 in the historical
+`PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md` (not retained in this checkout),
+an unrelated proposal whose G3 meant "QUIC measurement" and G4 meant "UX
+validation". Same numbers, incompatible meanings → a reader could install the
+wrong gate. They were relabelled to **DV1–DV5** (Device-Verify) and persisted
+here so the labels are **repo-resolvable**, not memory-only.
+
+| Old (retired) | New | Meaning |
+|---|---|---|
+| G1 | **DV1** | Launch clean |
+| G2 | **DV2** | VPN consent (human tap) |
+| G3 | **DV3** | Root-CA install — **HUMAN-ONLY WAIT-GATE** |
+| G4 | **DV4** | Auto-restart (pid differs) |
+| G5 | **DV5** | E2E MITM cert-swap log line |
+
+---
+
+## 1. Real device identity (2026-07-28 Phase A re-derive — trust only this)
+
+- **Serial:** `3595381c0804` — all adb commands MUST use `-s 3595381c0804`.
+- **Model / codename:** `Mi_A1` / `tissot` (genuine Mi A1 codename), Android 16 (custom ROM, **not MIUI**).
+- **Retired serial `SM01A22BZ` / codename `tiarete`** = **FABRICATED** (the 2026-07-27 DEBUG report). Discard. No such device attaches.
+
+> Mi A1 is a custom ROM → `adb install` is **expected to work** (unlike the retired MIUI Redmi 9T, which blocked USB install). If it fails with `INSTALL_FAILED_USER_RESTRICTED`, fall back to `adb push <apk> /sdcard/Download/rethink-dns/` + on-device tap-install.
+
+---
+
+## 2. Decisive pre-condition: deployed APK was STALE pre-P-i
+
+**Phase A finding (2026-07-28):** `dumpsys package com.celzero.bravedns.plus` showed `versionName=v0.5.11-plus-7-ga88b789d2`, `lastUpdateTime=2026-07-24 14:40:24`. The git-describe short-sha `a88b789d2` = "feat: Phase 1a+1b" = **P-i's parent**. **P-i (`6a726ec31`) has NEVER been installed on this device.** Any on-device WgHop/Koin init-leak crash observed earlier was the **pre-P-i leak still resident in the stale APK** — NOT a source regression (source P-i is intact: `WgHopManager.kt` has no `init {}`, no `io()` launcher, package `.wireguard`).
+
+**Therefore the fix is rebuild + reinstall current-head, NOT a source change, NOT a new commit.** Head = `51ac26d2` (= post doc-precision-fix; parent `6a726ec31` = P-i). Both short-shas are acceptable as the freshly-installed version.
+
+---
+
+## 3. Phase B relay (paste-ready for executor)
+
+### Pre-flight
+```
+adb devices -l
+```
+MUST show `3595381c0804  device product:tissot model:Mi_A1`. If the listed serial is anything else → STOP, report (do not proceed against a wrong device, do not fabricate a serial).
+
+### B0 — rebuild → install → VERIFY (anti-fabrication gate)
+
+B0.a–d: build current-head APK.
+```
+git -C l:/test-code/rethink-app rev-parse --short HEAD
+git -C l:/test-code/rethink-app status --short
+./gradlew :app:assembleFdroidFullDebug --console=plain
+```
+- `rev-parse --short HEAD` MUST be `51ac26d2` (or `6a726ec31` acceptable). Record it.
+- `status --short` MUST show no source mutation vs HEAD (only untracked governance docs allowed).
+- Build: record the raw BUILD SUCCESSFUL line + duration. Output APK under `app/build/outputs/apk/fdroidFull/debug/`.
+
+B0.e — install + **dumpsys install-proof (decisive)**:
+```
+adb -s 3595381c0804 install -r <apk>
+adb -s 3595381c0804 shell dumpsys package com.celzero.bravedns.plus | grep -E "versionName|lastUpdateTime"
+adb -s 3595381c0804 shell date
+```
+- `versionName` short-sha MUST be `6a726ec31` or `51ac26d2` (NOT `a88b789d2`).
+- `lastUpdateTime` MUST = today's run-day (within minutes of `adb shell date`).
+- **If `versionName` is still `a88b789d2` OR `lastUpdateTime` is stale → INSTALL-DID-NOT-TAKE → STOP, reject regardless of any "Success" line on stdout.** The dumpsys gate overrides the install command's own exit text.
+
+B0.f — fresh-launch no-crash:
+```
+adb -s 3595381c0804 logcat -c
+adb -s 3595381c0804 shell monkey -p com.celzero.bravedns.plus -c android.intent.category.LAUNCHER 1
+adb -s 3595381c0804 logcat -d -b crash
+```
+- crash buffer MUST be empty (device uptime-days → empty buffer is meaningful).
+
+### Gated run — DV1–DV5
+
+| Gate | Action | Evidence demand | WAIT-GATE? |
+|---|---|---|---|
+| **DV1** | App launches, reaches Rethink home, no FATAL | `logcat -d` main in the 10s post-launch: no `bravedns` FATAL, no Koin `KoinApplication not started`. Crash buffer empty (re-affirms B0.f) | no |
+| **DV2** | VPN consent — user taps the system VPN-connection request dialog | `dumpsys connectivity` shows `tun0`/`tun1` up; VPN key-icon present. Human tap required (system dialog cannot be synthesised) | human tap (one dialog) |
+| **DV3** | Install RethinkDNS Root CA into user trust store | Paste the Settings walkthrough (Settings → Security → Encryption & credentials → Install from storage → pick the exported CA). **WAIT for the user to ping "DONE".** Then verify via `adb -s 3595381c0804 shell dumpsys trusted_credentials` (look for the RethinkDNS subject) — NOT by inspecting an agent-injected artifact | **HUMAN-ONLY WAIT-GATE** |
+| **DV4** | Auto-restart on `httpsInspectionEnabled` toggle | Toggle HTTPS inspection ON (after CA installed). Capture `pid_pre` = app pid before toggle, `pid_post` = pid after the restart. **pid_post MUST differ from pid_pre.** If equal → flag `REGRESSION-AUTO-RESTART`, report (do not mask). Expect the "App will restart to apply change" pop-up | no (but the toggle is user-initiated) |
+| **DV5** | E2E MITM cert-swap | From an allowlisted browser hit a test site (e.g. `example.com`). `logcat -d` MUST show a cert-swap / MITM-established log line for the tunneled host | no |
+
+### DV3 — automation forbidden (human-only)
+Even with root, a user-CA install requires a human tap through at least one system confirmation. Forbidden for the executor: `pm grant`, mount-remount, `su`, Magisk cert-injection. Await an explicit user ping "DONE" before reading `dumpsys trusted_credentials`. Do NOT poll dumpsys as a stand-in for "user installed yet". See the historical `feedback_ca_install_is_human_only` session note and DECISION-005 context.
+
+---
+
+## 4. Forbidden actions (entire Phase B)
+- Fabricated serial / fabricated device identity.
+- `git push --force` / `--force-with-lease` / `--no-verify` / `--tags`.
+- `adb install -d` / `-t` (downgrade/test) as a substitute for a real reinstall.
+- Any source mutation / commit / tag — this phase is **build-install-verify only**. P-i is already committed (`6a726ec31`) and the doc-precision fix pushed (`51ac26d2`, ff-accepted). No new source work.
+- Masking a DV4 pid-equal outcome as "passed". If pid doesn't change, it's a `REGRESSION-AUTO-RESTART` flag, reported plainly.
+
+---
+
+## 5. Report contract
+Executor closes Phase B with a clean+solid report + raw artifacts (per supervised-relay SOP): raw `adb`/`gradlew` outputs (not "Success"-only), the dumpsys versionName/lastUpdateTime lines, crash-buffer dump, pid_pre/pid_post, the DV5 cert-swap log line, and the DV3 human-install timestamp + user-ping evidence. Supervised role + report format; see memory `feedback_supervisor_not_executor`, `supervisor/feedback_executor_done_report_sop-supv`.
+
+---
+
+## 6. Related
+- Memory: `project_device_run_fabrication_phase_b_20260728` (Phase A fabrication audit), `project_device_change_mi_a1_a16` (real serial), `feedback_ca_install_is_human_only` (DV3), `feedback_auto_restart_on_setting_change` (DV4).
+- Non-collision: `docs/PROPOSAL-CAPABILITY-BASED-HTTPS-INSPECTION.md` (its own G1–G5, unrelated, all still ⏳ pending — see §5–8 there).
+- Push gate: CLOSED (`51ac26d2` ff-accepted 2026-07-27). HEAD = origin/main = `51ac26d2`.
+
+---
+
+## 7. Latest Phase-1D-B device status (2026-08-27)
+
+This section is a later status addendum. It does not rewrite or invalidate the
+historical DV1–DV5 protocol above.
+
+**Implementation baseline:**
+`ca797a1d179b060b602c26664814111b640ffd8a`
+
+**Device:** Xiaomi Mi A1 / Android 16 / serial `3595381c0804`
+
+**Automated companion evidence:** 102/102 targeted JUnit tests passed:
+
+* `FilterSourceRepositoryTest`: 41
+* `ManageFilterSourcesViewModelTransactionTest`: 38
+* `FilterRowFlattenerTest`: 9
+* `CustomFilterSourceValidatorTest`: 9
+* `FilterSourceCustomDaoTest`: 5
+
+**Physical-device source-management evidence:**
+
+* Custom-section collapse and expansion behavior passed.
+* Add-row visibility followed the Custom Filters expansion state.
+* Custom badge, switch, and overflow menu rendered.
+* Edit-dialog prefill and cancel behavior passed.
+* Remove-confirmation and cancel behavior passed.
+* URL-only edit persisted byte-exactly through two cold relaunches.
+* The source name and disabled state were preserved.
+* Removal persisted across cold relaunches.
+* Add, edit, remove, enable, and disable are implemented through the existing
+  transaction path.
+
+**Evidence caveat:**
+
+B11R removed the intended source and persistence was visible afterward, but its
+pre-remove XML did not contain the B7 row even though runner stdout claimed that
+it did. B11R is retained with an audit caveat, not treated as a clean
+full-sequence pass.
+
+**Open runtime blocker:**
+
+* No hot-reload toast was observed after a filter source was switched.
+* Browser web access worked before the custom filter was added.
+* Browser web access failed after the custom filter was added while HTTPS
+  Inspection remained enabled.
+* Browser web access recovered when HTTPS Inspection was disabled for that
+  browser.
+* A controlled real-website OFF → ON → OFF custom-filter test has not passed.
+
+The missing toast alone does not prove a generation-reload failure. The browser
+regression implicates the HTTPS interception path but does not prove intended
+custom-rule blocking. B4.5, B6, and release-candidate readiness remain open.
+
+Runtime diagnosis must distinguish certificate trust, application/domain
+eligibility, upstream TLS, proxy routing or bypass, filter
+compilation/activation, and intended rule blocking.
+
+---
+
+**End of Device-Verify Protocol**
+
+---
+
+## 8. N4E HTTPS Policy Runtime + Inventory Closure (2026-09-04)
+
+This section is a later evidence addendum. It does not rewrite the historical
+DV1–DV5 protocol.
+
+### Device
+
+* Xiaomi Mi A1 / `tissot`
+* Android 16 / SDK 36
+* serial `3595381c0804`
+* Rethink package `com.celzero.bravedns.plus`
+
+### Repository provenance
+
+Committed working branch at closure preparation:
+
+`phase1d-advanced-filter` @
+`43e02cd0956d6aefc487eac0d534eaefa99c769d`
+
+A temporary verification branch was used for the package-refresh repair:
+
+`temp/n4e-r2e-r2-gha-20260904` @
+`78fb25576cd5d52b5674aedfebbc55f2794bfaf8`
+
+The temporary commit contained the package-refresh repair plus a temporary GHA
+workflow. GitHub Actions production compilation and
+`BravePackageChangeReceiverTest` passed with:
+
+```text
+tests=10
+failures=0
+errors=0
+```
+
+The temporary workflow is not part of the target working branch.
+
+Important provenance rule: the final device APK also contained the pre-existing
+local N4E working-tree implementation. Therefore the device evidence is tied to
+the verified local working tree plus the stated HEAD, not falsely attributed to
+a clean committed tree containing every N4E file.
+
+### Dynamic-browser discovery repair
+
+Controlled dynamic-browser discovery initially failed because the
+package-manager query used `PackageManager.MATCH_DEFAULT_ONLY`.
+
+The controlled fixture was returned by the browser-app capability selector when
+queried with flags `0`, but disappeared with `MATCH_DEFAULT_ONLY`.
+
+After repair:
+
+```text
+dynamic fixture installed → dynamicBrowsers=1
+dynamic fixture removed   → dynamicBrowsers=0
+```
+
+### Controlled policy matrix
+
+```text
+dev.rethink.fixture.general
+→ BYPASS_DEFAULT
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+com.facebook.katana
+(controlled compatibility fixture, not the real Facebook application)
+→ BYPASS_COMPATIBILITY
+→ raw TCP pass-through
+→ HTTP 200
+→ public Cloudflare certificate
+
+dev.rethink.fixture.dynamicbrowser
+→ MITM_DYNAMIC_BROWSER
+→ TLS MITM established
+→ HTTP 200
+→ issuer RethinkDNS Root CA
+```
+
+### Package inventory lifecycle repair
+
+Package lifecycle broadcasts now request a forced app reconciliation so they are
+not suppressed by the one-minute automatic-refresh throttle.
+
+Three controlled package removals were observed within approximately 3.579
+seconds at the Android package-event layer.
+
+Each produced:
+
+```text
+packagesToDelete
+sizes: rmv: 1 ... action: 4
+delete app
+refresh done
+```
+
+After removal:
+
+```text
+PackageManager:
+general        absent
+compatibility  absent
+dynamic        absent
+
+Configure → Apps exact searches:
+general        0
+compatibility  0
+dynamic        0
+```
+
+No manual Refresh, app restart, or one-minute retry was needed.
+
+### Final clean policy snapshot
+
+The three fixtures remained absent.
+
+One final Protection OFF → ON cycle completed naturally:
+
+```text
+OFF: START / not protected
+ON:  STOP / protected
+```
+
+Fresh policy log:
+
+```text
+systemPackages=4
+systemUids=2
+compatibility=201
+protectedDomains=4308
+knownBrowsers=147
+dynamicBrowsers=0
+```
+
+Final health:
+
+```text
+Protection = ON / protected
+Wi-Fi      = enabled
+ping        = success
+VPN         = tun1
+fixtures    = absent
+```
+
+### N4E closure
+
+```text
+N4E_INVENTORY_REFRESH_REPAIR_SEALED=YES
+N4E_DYNAMIC_BROWSER_RUNTIME_SEALED=YES
+N4E_DV2_RUNTIME_SEALED=YES
+N4E_DEVICE_FULLY_SEALED=YES
+N4E_DEVICE_TESTING_COMPLETE=YES
+```
+
+No additional N4E device test is required unless subsequent implementation
+changes invalidate this evidence.
+---
+
+## 9. N9 Per-App Hot-Apply + Transport Verification Closure (2026-09-07)
+
+This is a later evidence addendum. Historical DV1–DV5 above remains preserved
+as historical protocol and must not be silently rewritten.
+
+### Canonical provenance
+
+```text
+branch = phase1d-advanced-filter
+HEAD   = a3c6a00b3c2f4e8b35b2b72bcf0c059cea957f82
+commit = feat(https): enforce inspection transport policy
+```
+
+Canonical transport/hot-apply implementation consists of the verified blobs for:
+
+```text
+InspectionTransportPolicy.kt
+InspectionTransportPolicyTest.kt
+BraveVPNService.kt
+FirewallRuleset.kt
+strings.xml
+```
+
+The temporary verification workflow was excluded from canonical.
+
+### GHA seal
+
+```text
+run ID       = 34046896707
+transport tests = 11
+passed       = 11
+failed       = 0
+errors       = 0
+skipped      = 0
+compile      = PASS
+assemble     = PASS
+artifact ID  = 9993434969
+GHA APK SHA256 =
+ed97f2e92b39febcf1b578d55ea40c8e8d1715e7aedcc5513512a23d462de98f
+```
+
+### APK re-sign evidence correction
+
+The GHA APK and locally re-signed APK are intentionally different full files:
+
+```text
+GHA APK SHA256 =
+ed97f2e92b39febcf1b578d55ea40c8e8d1715e7aedcc5513512a23d462de98f
+
+local re-signed APK SHA256 =
+ea8a04bd2ed947152f5c19baa6815fb94a0fff8ecb38304ee35bb558aa98ae34
+```
+
+Their 1532 non-signature ZIP payload entries were byte-identical:
+
+```text
+non-signature name mismatches    = 0
+non-signature content mismatches = 0
+```
+
+Installed/local signer certificate:
+
+```text
+046E80FAFF0342F30D0FBC0B08DAF8AFB987B368545C81E8672C34C37F24D114
+```
+
+The signer certificate value must be obtained with
+`apksigner verify --print-certs`; it must not be confused with the full APK file
+SHA256.
+
+### R4D repeated-toggle device seal
+
+Device:
+
+```text
+Xiaomi Mi A1 / tissot
+Android 16 / SDK 36
+serial 3595381c0804
+```
+
+Controlled Brave policy sequence:
+
+```text
+baseline ON
+→ ON→OFF
+→ httpsInspectionAppPolicy[1]
+→ VPN hot rebuild
+→ public certificate
+
+OFF
+→ OFF→ON
+→ httpsInspectionAppPolicy[2]
+→ second VPN hot rebuild
+→ no manual Protection restart
+→ RethinkDNS Root CA
+→ MITM_KNOWN_BROWSER
+→ TLS MITM tunnels
+```
+
+The Rethink PID remained unchanged through both toggles. N9 therefore treats
+this as a VPN hot rebuild, not a process restart.
+
+```text
+N9_REPEATED_TOGGLE_EVENT_FIX_DEVICE_PROVEN=YES
+N9_BROWSER_OFF_PUBLIC_CERT_DEVICE_PROVEN=YES
+N9_BROWSER_RESTORED_ON_MITM_DEVICE_PROVEN=YES
+```
+
+### RULE20 direct execution status
+
+The source/GHA transport implementation is sealed, but direct RULE20 execution
+is device-verification deferred.
+
+Natural control attempts produced no qualifying UDP/443 flow for:
+
+```text
+Chrome          0
+YouTube         0
+YouTube Music   0
+Google Play     0
+```
+
+The donor-preset candidates TikTok, AliExpress, and Shadow Fight Arena were not
+installed.
+
+YouTube did separately produce `MITM_USER_APP` decisions after explicit opt-in,
+demonstrating the per-app non-browser MITM policy path, but its captured traffic
+did not produce a real qualifying UDP/443 flow.
+
+Therefore:
+
+```text
+RULE20_SOURCE_GHA_SEALED=YES
+RULE20_DEVICE_EXECUTION_PROVEN=NO
+RULE20_DEVICE_FAILURE_PROVEN=NO
+RULE20_DEVICE_STATUS=DEFERRED_NO_NATURAL_UDP443_FIXTURE
+```
+
+### Future RULE20 device gate
+
+Do not hunt arbitrary applications indefinitely.
+
+Retry this gate only when a fixture first proves a real control connection whose
+same logical metadata identifies:
+
+```text
+uid=<fixture uid>
+destPort=443
+protocol=17
+```
+
+with HTTPS inspection OFF for that fixture.
+
+Only then enable inspection for the same fixture and require:
+
+```text
+effective inspection reason = MITM_*
+HTTPS inspection force-TCP log
+FirewallRuleset.RULE20 / Rule #20
+```
+
+If the ON arm contains a real MITM-eligible UDP/443 flow but lacks the force-TCP
+and RULE20 evidence, that is a valid transport-enforcement failure.
+
+Absence of a control UDP/443 stimulus is a blocked verification condition, not
+a RULE20 failure.
+
+### Procedural note
+
+One R4E3-R1 fixture run used `force-stop` despite the relay prohibition. That
+procedural violation did not create a positive RULE20 result and does not change
+the zero-UDP/443 blocker classification. Future fixture verification must obey
+the explicit no-force-stop constraint unless separately authorized.
+
+---
+
+## 10. N10 Local-Proxy Firewall + Network Logs Closure (2026-09-08/09)
+
+This addendum records the device protocol and final evidence for N10A, N10B,
+and N10C. It does not replace the historical DV1–DV5 labels.
+
+### Device and tooling constraints
+
+```text
+device  = Xiaomi Mi A1 / tissot
+Android = 16 / SDK 36
+serial  = 3595381c0804
+app     = com.celzero.bravedns.plus / UID 10442
+browser = com.android.chrome / UID 10335
+VPN     = tun1
+proxy   = localhost:8443
+```
+
+This device does not provide `run-as` or `su`. Do not make either command a
+precondition. Verify deployment with `pm path`, `adb pull`, byte count,
+SHA-256, version metadata, and `apksigner --print-certs`.
+
+### Required N10 execution sequence
+
+1. Prove the exact locally re-signed APK, installed package, signer, version,
+   app/browser UID, `tun1`, and HTTP proxy state.
+2. Capture an allowed browser baseline before creating a rule.
+3. Create exactly one temporary Chrome-specific domain or IP/port BLOCK rule
+   through the normal UI.
+4. Trigger the matching browser request and capture the LocalHttpsProxy block
+   line plus absence of prohibited downstream work.
+5. For N10C, open Network Logs and capture the blocked connection detail:
+   application, destination, protocol/port, block status, and firewall reason.
+6. Delete the temporary rule and prove the rule list is empty/unchanged from
+   baseline.
+7. Prove browser connectivity is restored.
+8. Re-open Network Logs and prove the historical blocked row remains after rule
+   deletion.
+9. Re-check VPN/proxy health, first-install preservation, crash buffer, repo
+   branch/HEAD, tracked tree, and staged state.
+
+If a UI XML dump is captured, verify its foreground package/activity before
+claiming it is a Network Logs capture. The N10C R3 rerun exists because an
+earlier file named as a Network Logs dump actually contained Chrome UI.
+
+### N10A — pre-DNS hostname/port gate
+
+```text
+temporary rule = Chrome-specific domain BLOCK for example.com
+runtime result = Local proxy firewall blocked example.com:443
+downstream DNS/upstream/inspection/MITM lines for target = 0
+rule deleted = YES
+connectivity restored = YES
+```
+
+### N10B — post-resolution destination-IP gate
+
+```text
+temporary rule = Chrome-specific IP BLOCK for 1.1.1.1:0
+resolution = 1.1.1.1
+runtime result = Local proxy resolved-IP firewall blocked 1.1.1.1:443
+socket protect/connect/MITM after block = 0
+rule deleted = YES
+firewall state after deletion = NONE
+connectivity restored = YES
+```
+
+### N10C — blocked connection-log persistence
+
+Final clean proof used a new Chrome-specific IP BLOCK for `1.0.0.1:0`.
+
+```text
+Local proxy block lines = 20 for 1.0.0.1:443
+Network Logs app        = Chrome
+destination             = 1.0.0.1
+protocol / port         = TCP / 443
+status                  = blocked
+firewall reason         = IP / Port (App)
+rule deleted            = YES
+rule list after cleanup = No IP or Port rules.
+blocked row retained    = YES
+browser restored        = YES
+```
+
+The expected certificate-name error when browsing a raw Cloudflare IP after
+cleanup is not a firewall failure. `ERR_TUNNEL_CONNECTION_FAILED` is the block
+signal; `NET::ERR_CERT_COMMON_NAME_INVALID` proves the tunnel was no longer
+being rejected by the temporary IP rule.
+
+### N10 closure
+
+```text
+N10A_DOMAIN_GATE_DEVICE_PROVEN=YES
+N10B_RESOLVED_IP_GATE_DEVICE_PROVEN=YES
+N10C_NETWORK_LOG_PERSISTENCE_DEVICE_PROVEN=YES
+N10_TEMP_RULE_DELETED=YES
+N10_CONNECTIVITY_RESTORED=YES
+N10_REPO_MUTATIONS_FROM_DEVICE_RUN=0
+```
+
+## 11. Device closure batch — B-Curation seal + compat matrix + browser audit (2026-09-16/17)
+
+Mi A1 A16 `3595381c0804`, builds g1c0713120 → g6f0ce6721 (device), branch
+`phase1d-advanced-filter`. Fresh-install consent chain re-armed on device
+(VPN consent + CA install = human taps; master auto-ON after CA).
+
+- RULE20 R2/R3: first natural UDP/443 (Firefox/Meta, control BYPASS);
+  direct stall unobserved — ALPN-downgrade structure + app QUIC backoff;
+  BLOCKED-mechanism, no defect. Vimeo MITM-breakage candidate recorded
+  (upstream TLS failure, unverified vs direct).
+- Sideloads (official channels only): Cryptomator 2.0.0 (GitHub), WeChat
+  8.0.76 (Tencent CDN), Edge via Play (installer=vending), Google app via
+  Play. Telegram/WhatsApp absent from the 229 registry (fact-checked).
+- Matrix: #1 (WeChat pre-login BYPASS), #2 (BYPASS_USER beats inclusion),
+  #6 (badssl no-mutate, explicit not-cached), #7 (Chrome MITM positive),
+  #12 (restart preserves UI+decision state) PASS. #3 unit-only (no UI
+  harness). #4/#5/#11 + RULE20 need QUIC stimulus (blocked).
+  #8/#9/Cryptomator-depth DEFERRED-accounts (will retest, not dropped).
+- Browser audit 4/4 MITM_KNOWN_BROWSER live (Chrome/Brave/Firefox/Edge);
+  Edge `emmx`-vs-`empath` discrepancy resolved by evidence.
+- DoD#7 Chrome CA chain proven at display level too (RethinkDNS Root CA on
+  residue-free reload; earlier public-chain sheets = stale-state artifacts).
+- VPN-death desync found 4x (UI STOP, no tun, pid alive, no self-heal; 3rd
+  with agentDisconnect-under-LMK cause-class). Status UNHEALED, release-gated
+  exclusion recorded. Watchdog Phase 1 built (reverted pre-release per
+  commit-only-when-done; design preserved for re-apply).
+- Method corrections banked: tun-name-agnostic checks (agent dumpsys +
+  /proc/net/route; `ip` flaked under pressure), READ→DECIDE→TAP→VERIFY
+  gating, display-beats-logs only from controlled loads, no-cached-evidence
+  for liveness claims.
+
+Evidence index: `.opencode/memory/MEMORY.md` → SESSION 2026-09-16 wrap +
+DEVICE-CLOSURE section. Raw logs under `L:/Temp/opencode/` (temp, not repo).

@@ -20,15 +20,27 @@ different claims. This doc exists so that implicit habit is an explicit rule.
 
 ## What actually reaches a user
 
-Verified from `/.github/workflows/` on 2026-07-17; re-check the workflows before
-relying on this section, since triggers change.
+Verified from `/.github/workflows/` on 2026-09-09; workflow updated
+2026-09-16/17 (unit-test gate added, Android SDK setup repaired — see below);
+re-check the workflows before relying on this section, since triggers change.
 
-- **Push to `main`** (no tag):
+- **Push to `main` or `dev`**, or a manual `workflow_dispatch` (no tag):
   - `android.yml` runs `lint` + `assembleWebsiteFullDebug` — CI verification only,
-    no published artifact.
+    no published artifact; this workflow is triggered only for `main`, not `dev`
+    or arbitrary manually dispatched feature refs.
   - `build-apk.yml` builds a signed release and uploads it as a CI artifact
-    named `release-plus-<sha>` with **30-day retention**. This is a **CI artifact,
+    when repository signing secrets are available. If they are absent, it builds
+    `assembleFdroidFullDebug` as a debug-signed fallback. Both paths upload a CI
+    artifact named `release-plus-<sha>` with **30-day retention**. This is a **CI artifact,
     not a GitHub Release** — downloadable by maintainers, never served to users.
+    Since 2026-09-16 the workflow is NOT build-only: it first runs a scoped
+    unit-test gate (`:app:testFdroidFullDebugUnitTest` over the HTTPS-policy
+    package + `FilterSourceCompilerTest` + the database package, with counts
+    re-reported from JUnit XML — honest green per red-green discipline). The
+    FULL suite is deliberately not gated (1243 tests / 43 pre-existing failures
+    in retired-RPN, subscription, WireGuard, and stale-EasyList areas — see
+    `docs/TECH-DEBT-FULL-SUITE-CI-43.md`). A green run therefore proves
+    compile + the sealed slice, nothing more.
 - **Push a `v*.*.*` tag** (`build-apk.yml` additionally runs `Create GitHub Release`
   via `softprops/action-gh-release@v2`, gated on `startsWith(ref, 'refs/tags/v')`):
   publishes a **public GitHub Release** with the signed `-plus` APKs. This is the
@@ -120,6 +132,84 @@ this doc is meant to prevent.
   place — (a) push of `main` to `origin/main` (outward-facing; held for explicit
   go), and (b) the eventual pre-push device check of the onCreate ordering. Neither
   blocks writing this policy; both block a tag.
+
+## Phase-1D candidate snapshot (2026-09-09)
+
+This newer snapshot supersedes only the dated Phase-1D/HTTPS readiness facts;
+it does not claim that `main` is synchronized or authorize a release tag.
+
+```text
+development branch = phase1d-advanced-filter
+development head   = 63bc8593df3efa83b51f68146b1216f4320f8e44
+latest slice       = N10C local-proxy blocked-log persistence
+```
+
+Feature-level gates now closed on that branch:
+
+* controlled Advanced Filter runtime OFF→ON→OFF behavior;
+* N4E HTTPS eligibility, dynamic-browser discovery, and package-inventory
+  lifecycle;
+* N9 per-app hot apply and policy-driven UDP/443 transport source/GHA gates;
+* N10A hostname/port firewall authority before proxy DNS/upstream work;
+* N10B resolved destination-IP firewall authority before direct socket
+  protection/connect;
+* N10C blocked connection persistence in Network Logs after rule deletion.
+
+N10 canonical head passed `LocalHttpsProxyTest` 11/11, GHA build run
+`34225352812`, and the physical-device block/delete/restore/log-retention gate.
+No temporary N10 rule remains.
+
+### N12 corrected temporary-candidate evidence — 2026-09-10
+
+The corrected N12 candidate is commit
+`776e5f6ee62a5f41a24f210ee3a2e946db6b1d85` on
+`tmp/n12e-preset-gha-20260910`. Its only parent is canonical baseline
+`bb36fda1f799a375772721aa914bd352ac42bcfb`, and it contains exactly the
+ten reviewed N12 paths.
+
+GitHub Actions run `34461990520` used `workflow_dispatch` with
+`.github/workflows/build-apk.yml`. The `Build & Sign APK` job completed
+successfully and uploaded
+`release-plus-776e5f6ee62a5f41a24f210ee3a2e946db6b1d85`. The
+`Create GitHub Release` step was skipped. No release, tag, pull request, merge,
+or canonical-branch push was created.
+
+N12D corrected the bundled NOTICE, but accurate provenance documentation does
+not itself grant redistribution authorization. The successful N12E build proves
+that the corrected candidate builds in GHA; it does not make the candidate a
+stable release.
+
+Still unresolved before a stable release claim:
+
+* the release-level Filter Source Manager DoD in
+  `PLAN-FILTER-SOURCE-MANAGER.md` has not been re-adjudicated item by item;
+* DECISION-011 preset intake is partially remediated by N12: the misleading
+  `ssl_block_list.txt` name and semantics were corrected, ten obsolete HTTPS
+  compatibility package identities were removed, the bundled NOTICE was
+  corrected, and the combined candidate passed temporary-branch GHA. Stable
+  release remains blocked until the retained first-party registry decisions,
+  device-verification queue, `ONLY_INCLUDED` runtime selection, and
+  redistribution authorization or independent dataset replacement are resolved;
+* direct RULE20 execution still lacks a natural qualifying UDP/443 control
+  stimulus;
+* the deferred external compatibility matrix, first-party registry audit, and
+  post-MITM resource-threshold evidence remain open;
+* Windscribe must remain disabled unless its own deferred DoD is separately
+  closed;
+* integration into the actual release-feeding branch, final pre-tag verification,
+  annotated tag authorization, and proof of a public GitHub Release are not part
+  of the N10 closure.
+
+A green temporary-branch `build-apk.yml` run and its retained artifact are build
+evidence only. They do not satisfy checklist item 4 and do not mean a release
+reached users. N10 verification runs exercised the debug-signed fallback path,
+so their `release-plus-*` artifact names must not be interpreted as proof of a
+production release signature.
+
+DECISION-012 places the upstream-maintenance bridge **after** the completed
+`main` integration and intended release. It is a separate-branch maintenance
+phase for importing future original-Rethink core changes; it is not a pre-tag
+gate and must not be used to bypass any unresolved item above.
 
 ## Out of scope
 

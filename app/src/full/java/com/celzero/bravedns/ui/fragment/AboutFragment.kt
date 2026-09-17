@@ -284,25 +284,11 @@ class AboutFragment : Fragment(R.layout.fragment_about), View.OnClickListener, K
     }
 
     private fun updateSponsorInfo() {
-        if (RpnProxyManager.isRpnEnabled()) {
-            b.aboutSponsor.visibility = View.GONE
-            b.aboutManageRpn.visibility = View.VISIBLE
-            b.sponsorInfoUsage.visibility = View.GONE
-        } else {
-            b.aboutSponsor.visibility = View.VISIBLE
-            b.aboutManageRpn.visibility = View.GONE
-            b.sponsorInfoUsage.text = getSponsorInfo()
-        }
-    }
-
-    private fun openRpnDashboardScreen() {
-        startActivity(
-            FragmentHostActivity.createIntent(
-                context = requireContext(),
-                fragmentClass = RethinkPlusDashboardFragment::class.java,
-                args = Bundle()
-            )
-        )
+        // Phase-1c pivot, O8: RPN user-facing destination retired. The manage-RPN card
+        // stays hidden; always present the RethinkDNS sponsor path.
+        b.aboutSponsor.visibility = View.VISIBLE
+        b.aboutManageRpn.visibility = View.GONE
+        b.sponsorInfoUsage.text = getSponsorInfo()
     }
 
     private fun getVersionName(): String {
@@ -378,7 +364,9 @@ class AboutFragment : Fragment(R.layout.fragment_about), View.OnClickListener, K
                 openUrl(requireContext(), RETHINKDNS_SPONSOR_LINK)
             }
             b.aboutManageRpn -> {
-                openRpnDashboardScreen()
+                // Phase-1c pivot, O8: RPN dashboard retired. Route through the RethinkDNS
+                // sponsor link (same as the primary sponsor card above).
+                openUrl(requireContext(), RETHINKDNS_SPONSOR_LINK)
             }
             b.mozillaImg -> {
                 // no-link, no action

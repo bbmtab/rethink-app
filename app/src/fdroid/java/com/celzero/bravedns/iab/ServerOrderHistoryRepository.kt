@@ -19,8 +19,8 @@ package com.celzero.bravedns.iab
  * Stub: purchase / order history is not available on the F-Droid build.
  *
  * The class is registered in Koin via [DatabaseModule] so that injection points
- * in `full` source-set code ([ServerOrderHistoryViewModel]) resolve without
- * errors at compile time. [fetchOrders] always returns [Result.NoCredentials].
+ * in `full` source-set code resolve without errors at compile time.
+ * [fetchOrders] always returns [Result.NoCredentials].
  */
 class ServerOrderHistoryRepository(
     @Suppress("UNUSED_PARAMETER") private val billingBackendClient: BillingBackendClient,

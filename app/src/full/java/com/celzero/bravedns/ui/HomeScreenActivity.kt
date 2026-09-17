@@ -32,6 +32,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
@@ -847,6 +848,23 @@ class HomeScreenActivity : BaseActivity(R.layout.activity_home_screen) {
         val btmNavView = findViewById<BottomNavigationView>(R.id.nav_view) ?: run {
             Logger.w(LOG_TAG_UI, "setupNavigationItemSelectedListener: BottomNavigationView not found")
             return
+        }
+
+        btmNavView.post {
+            val plusItemView = btmNavView.findViewById<View>(R.id.rethinkPlus)
+            val plusIconView =
+                plusItemView?.findViewById<ImageView>(
+                    com.google.android.material.R.id.navigation_bar_item_icon_view
+                )
+            if (plusIconView == null) {
+                Logger.w(
+                    LOG_TAG_UI,
+                    "setupNavigationItemSelectedListener: Plus icon view not found"
+                )
+            } else {
+                plusIconView.imageTintList =
+                    ContextCompat.getColorStateList(this, R.color.plus_tab_icon_color)
+            }
         }
 
         val navHostFragment =

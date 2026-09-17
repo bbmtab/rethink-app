@@ -47,6 +47,100 @@ class FilterEngineTest {
     }
 
     @Test
+    fun testUnsupportedWhitelistModifiersRejectEntireRule() {
+        val parsed =
+            FilterEngine.parseRule(
+                "@@*${'$'}app=com.kakao.talk,stealth=dpi"
+            )
+
+        assertNull(
+            "A whitelist with unsupported app/stealth modifiers must be rejected",
+            parsed
+        )
+    }
+
+    @Test
+    fun testUnsupportedBlockModifierRejectsEntireRule() {
+        val parsed =
+            FilterEngine.parseRule(
+                "||a.com^${'$'}app=com.example.app"
+            )
+
+        assertNull(
+            "A block rule with an unsupported app modifier must be rejected",
+            parsed
+        )
+    }
+
+    @Test
+    fun testKnownAndUnknownModifierCombinationRejectsEntireRule() {
+        val parsed =
+            FilterEngine.parseRule(
+                "||a.com^${'$'}script,app=com.example.app"
+            )
+
+        assertNull(
+            "A rule must be rejected when any modifier is unsupported",
+            parsed
+        )
+    }
+
+    @Test
+    fun testUnsupportedUniversalWhitelistCannotOverrideExactBlock() {
+        FilterEngine.loadRules(
+            """
+            @@*${'$'}app=com.kakao.talk,stealth=dpi
+            ||neverssl.com^
+            """.trimIndent()
+        )
+
+        val result =
+            FilterEngine.match(
+                url = "http://neverssl.com/?rethink_filter_phase=d11a_red",
+                host = "neverssl.com",
+                isThirdParty = false,
+                resourceType = FilterEngine.ResourceType.OTHER
+            )
+
+        assertEquals(
+            FilterEngine.MatchResult.Block("||neverssl.com^"),
+            result
+        )
+    }
+
+    @Test
+    fun testCurrentlySupportedModifiersRemainAccepted() {
+        val supportedRules =
+            listOf(
+                "||supported.test^${'$'}important",
+                "||supported.test^${'$'}third-party",
+                "||supported.test^${'$'}~third-party",
+                "||supported.test^${'$'}domain=example.com|~excluded.example",
+                "||supported.test^${'$'}csp=script-src 'self'",
+                "||supported.test^${'$'}document",
+                "||supported.test^${'$'}stylesheet",
+                "||supported.test^${'$'}css",
+                "||supported.test^${'$'}script",
+                "||supported.test^${'$'}image",
+                "||supported.test^${'$'}font",
+                "||supported.test^${'$'}subdocument",
+                "||supported.test^${'$'}xmlhttprequest",
+                "||supported.test^${'$'}xhr",
+                "||supported.test^${'$'}media",
+                "||supported.test^${'$'}other",
+                "||supported.test^${'$'}~image",
+                "||supported.test^${'$'}~xhr"
+            )
+
+        supportedRules.forEach { rule ->
+            assertNotNull(
+                "Currently supported modifier must remain accepted: $rule",
+                FilterEngine.parseRule(rule)
+            )
+        }
+    }
+
+    @Test
     fun testParseAndMatchThirdParty() {
         val rulesText = """
             ||ads.com^${'$'}third-party
@@ -164,6 +258,39 @@ class FilterEngineTest {
         // Regex block
         assertTrue(FilterEngine.match("https://other-cdn.com/banner123.jpg", "other-cdn.com", false, FilterEngine.ResourceType.IMAGE) is FilterEngine.MatchResult.Block)
         assertTrue(FilterEngine.match("https://other-cdn.com/banner.jpg", "other-cdn.com", false, FilterEngine.ResourceType.IMAGE) is FilterEngine.MatchResult.Allow)
+    }
+
+    @Test
+    fun malformedRegexRule_isSkippedWithoutAbortingRequestEvaluation() {
+        val rulesText = """
+            /[a-/
+            ||blocked-after-invalid.example^
+        """.trimIndent()
+
+        FilterEngine.loadRules(rulesText)
+
+        // The malformed generic regex must be treated as a non-match. Repeating
+        // the request also exercises the memoized compilation-failure path.
+        repeat(2) {
+            val neutral =
+                FilterEngine.match(
+                    "https://neutral.example/page",
+                    "neutral.example",
+                    false,
+                    FilterEngine.ResourceType.DOCUMENT
+                )
+            assertTrue(neutral is FilterEngine.MatchResult.Allow)
+        }
+
+        // Evaluation must continue to a valid rule after the malformed rule.
+        val blocked =
+            FilterEngine.match(
+                "https://blocked-after-invalid.example/resource.js",
+                "blocked-after-invalid.example",
+                false,
+                FilterEngine.ResourceType.SCRIPT
+            )
+        assertTrue(blocked is FilterEngine.MatchResult.Block)
     }
 
     @Test

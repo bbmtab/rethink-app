@@ -1,0 +1,512 @@
+# RethinkDNS — Unified UI Architecture
+
+> **Purpose:** Complete map of RethinkDNS UI surface, organized by feature modules and user flows. This is our own architecture — no external references. Use as the single source of truth for Phase 1+ UI work (Plus tab redesign, MITM/adblock integration, auto-restart UX, etc.).
+> **Current state (2026-09-09):** Plus-tab consolidation, filter-source
+> management, HTTPS master persistence, per-app HTTPS policy management,
+> system-hard-bypass rendering, and repeated-toggle VPN hot apply are canonical.
+> The per-app HTTPS surface reuses Rethink's existing installed-app inventory;
+> no second app database exists. Known and dynamically detected browsers are ON
+> unless explicitly excluded, ordinary applications are OFF unless explicitly
+> included, and system-hard-bypass rows are immutable OFF. Canonical code is
+> N10 also routes LocalHttpsProxy blocks through the existing firewall authority
+> and connection-log UI; blocked rows remain historical records after a
+> temporary rule is deleted. Canonical code is `phase1d-advanced-filter` @
+> `63bc8593df3efa83b51f68146b1216f4320f8e44`.
+
+---
+
+## 🎛️ MAIN ENTRY POINTS
+
+### Bottom Navigation (all flavors)
+| Tab | Primary Fragment | Flavors | Notes |
+|-----|------------------|---------|-------|
+| **Home** | `HomeScreenFragment` → `HomeScreenActivity` | All | VPN on/off, live stats, active profile |
+| **Stats** | `SummaryStatisticsFragment` | All | Per-app data, events, network logs |
+| **Plus** | `RethinkPlusFragment` (full flavor — hoisted from fdroid 1b) | All flavors | **Filters (MITM/adblock)** — HTTPS Inspection / Advanced Filtering / Exclusions (unified, flavor-agnostic) |
+| **Configure** | `ConfigureFragment` → 8 cards → activities | All | DNS, Firewall, Proxy, VPN, Logs, Anti-Censorship, Apps, Advanced |
+| **About** | `AboutFragment` | All | Version, legal, support |
+
+---
+
+## 🏠 HOME — VPN CONTROL CENTER
+
+**Files:** `HomeScreenFragment.kt`, `HomeScreenActivity.kt`, `fragment_home_screen.xml`
+
+| Control | Behavior |
+|---------|----------|
+| Big VPN toggle | Starts/stops `BraveVPNService` via `VpnController` |
+| Connection status card | Shows active profile (DNS, WireGuard, RPN) — RPN profile remains in backend / VPN settings; not exposed in Plus UI (DECISION-007) |
+| Data usage | Live TX/RX from `TrafficStats` |
+| Bottom sheet (gear icon) | `HomeScreenSettingBottomSheet` — quick toggles |
+
+---
+
+## 📊 STATS — USAGE INSIGHTS
+
+**Files:** `SummaryStatisticsFragment.kt`, `activity_detailed_statistics.xml`, `DetailedStatisticsActivity.kt`
+
+| Screen | Purpose |
+|--------|---------|
+| Summary tab | Per-app data, total TX/RX, time-series charts |
+| Events tab | `EventLogger` records — DNS blocks, firewall hits, connection open/close |
+| Network logs | Connection history, including LocalHttpsProxy firewall blocks; N10C proved app/destination/TCP-port/status/reason detail persists after rule deletion |
+| App-wise logs | `AppWiseDomainLogsActivity`, `AppWiseIpLogsActivity` |
+
+---
+
+## ➕ PLUS — "RETHINK PLUS" HUB (KEY REDESIGN TARGET)
+
+### Current state at `63bc8593df3efa83b51f68146b1216f4320f8e44` (2026-09-09)
+| Flavor | Fragment | Status |
+|--------|----------|--------|
+| **all (fdroid / full / play / website)** | `RethinkPlusFragment.kt` (full flavor — hoisted from fdroid 1b; R100) | **Filters (MITM/adblock)** — HTTPS Inspection / Advanced Filtering / Exclusions |
+
+Custom filter-source management supports add, edit, remove, enable, and disable
+through the existing transaction path. The targeted closure passed 102/102 JUnit
+tests, and add/edit/remove/persistence behavior was exercised on the Mi A1.
+
+The HTTPS eligibility/runtime and per-app management stack is canonical.
+Controlled N4E tests proved general-app default bypass, compatibility bypass,
+and dynamic-browser MITM. N9 added the production per-app UI and state
+transactions using the existing installed-app inventory.
+
+The dedicated HTTPS application list reuses `AppListActivity`,
+`AppInfoViewModel`, Room paging, and the existing package inventory. HTTPS
+policy is layered through `HttpsInspectionAppListAdapter` and
+`InspectionAppPolicyController`; it does not create a second application
+database.
+
+Known and dynamic browsers render ON unless explicitly excluded. Ordinary
+applications render OFF unless explicitly included. System-hard-bypass rows
+render immutable OFF.
+
+Repeated OFF→ON device testing proved that policy changes hot-rebuild the VPN
+without killing the process and restore the RethinkDNS MITM certificate when
+browser inspection returns ON.
+
+N10 device testing also proved that Chrome-specific domain and IP/port firewall
+rules apply to traffic handled by `LocalHttpsProxy`. A blocked connection is
+shown in the existing Network Logs detail surface with application,
+destination, protocol/port, block status, and firewall reason; deleting the
+rule does not erase the historical row.
+
+```
+Note: `RethinkPlusDashboardFragment.kt` (RPN subscription UI) and `ServerSelectionFragment.kt` (RPN server picker) are deleted from the working tree (executed pivot 2026-08-09; supervisor-audited 2026-08-10). The fdroid `RethinkPlusFragment.kt` was hoisted to `full/` (R100). Play/website `RethinkPlusFragment.kt` (billing UI) is also deleted; the Plus surface is MITM/adblock-only for all flavors.
+```
+
+### Target architecture — unified Filters surface (all flavors; DECISION-007)
+
+```
+Plus (bottom nav tab) → RethinkPlusFragment (full flavor, hoisted fdroid→full)
+│
+├── 1. HTTPS Inspection
+│   ├── Master toggle (persist: httpsInspectionEnabled)
+│   ├── CA status badge (✅ INSTALLED / ⚠️ NOT INSTALLED)
+│   ├── CA actions: Install / Re-install / Export to Downloads
+│   └── Apps (three-tier eligibility — DECISION-010)
+        ├── Known browsers      default ON  unless explicitly excluded
+        ├── Detected browsers   default ON  unless explicitly excluded
+        └── Other apps          default OFF (explicit user opt-in required)
+
+    App inventory source: reuse existing Rethink installed-app inventory.
+    Browser OFF = app exclusion escape hatch; browser ON = exclusion removed.
+    No separate dynamic-browser enabled registry is required.
+│
+├── 2. Advanced Filtering
+│   ├── Enabled filter source summary — e.g. `2 lists enabled • 48,210 rules • updated 1h ago`
+│   └── Manage Filters
+│       ├── Ads
+│       ├── Privacy
+│       ├── Social
+│       ├── Annoyances
+│       ├── Security
+│       ├── Language-specific
+│       ├── Other Filters
+│       └── Custom Filters
+│
+│   Network/Cosmetic/Scriptlet/Procedural/CSP/HTML rule handling is **automatic**
+│   inside FilterEngine — it inspects compiled rule subtypes and applies each
+│   supported injection path automatically. Subtype support and per-source rule-type
+│   counts are exposed only in diagnostics / technical capability reporting, **not** as
+│   separate user-facing feature toggles. See DECISION-009.
+│
+└── 3. Exclusions
+    ├── Domain exclusions (skip MITM for these)
+    └── App exclusions (skip routing these through MITM)
+```
+
+**Key principle (DECISION-007 + DECISION-008):** Plus is the universal MITM/adblock Filters surface — identical for fdroid / full / play / website. No RPN subscription/management UI lives in Plus. No DNS blocklist management or DNS→HTTPS synchronization belongs in Plus.
+
+**DNS Policy Ownership (DECISION-008):** Original Rethink DNS blocklist selection and DNS blocking policy remain exclusively under Configure → DNS → Rethink Blocklists. HTTPS Inspection inherits tested sinkhole/blocklist enforcement automatically via `activeNetwork.getAllByName()` → Rethink DNS resolver → `0.0.0.0` sinkhole — no manual bridge required. Advanced Filter Sources (EasyList / AdGuard / Custom URL) are a separate independent subsystem supplying FilterEngine with cosmetic / scriptlet / procedural / CSP / HTML rules. Rethink DNS blocklists are NOT FilterEngine source material. Network/Cosmetic/Scriptlet/Procedural/CSP/HTML rule execution remains an **automatic** FilterEngine capability (DECISION-009) — surfaced via per-source diagnostics only, never as normal Plus-tab feature toggles.
+
+---
+
+## ⚙️ CONFIGURE — MODULE CARDS
+
+**Files:** `ConfigureFragment.kt`, `fragment_configure.xml` → 8 cards → Activities:
+
+| Card | Activity | Sub-screens / Bottom Sheets |
+|------|----------|-----------------------------|
+| **Apps** | `AppListActivity` | Per-app DNS/firewall/proxy rules → `AppDomainRulesBottomSheet`, `AppIpRulesBottomSheet` |
+| **DNS** | `DnsDetailActivity` | DoH/DoT/DoQ servers, custom DNS, blocklists (`RethinkBlocklistFragment`), provider list |
+| **Firewall** | `FirewallActivity` | Per-app allow/block, global rules, Wi-Fi/Mobile/Roaming conditions |
+| **Proxy** | `ProxySettingsActivity` | Upstream proxy (SOCKS/HTTP), per-app routing |
+| **VPN** | `TunnelSettingsActivity` | WireGuard, RPN, MTU, routing mode |
+| **Logs** | `NetworkLogsActivity` | Live logcat, PCAP, DNS log, connection tracker |
+| **Anti-Censorship** | `AntiCensorshipActivity` | Domain fronting, SNI, bootstrap DNS |
+| **Advanced** | `AdvancedSettingActivity` | Theme, language, auto-update, backup/restore, developer tools |
+
+---
+
+## 🔒 HTTPS INSPECTION — DETAILED FLOW (relocated from CertificateSetupActivity)
+
+### Screens (new locations in Plus tab)
+| Screen | Source Logic | Purpose |
+|--------|--------------|---------|
+| Plus tab section | **NEW** (was `CertificateSetupActivity`) | Master entry for all HTTPS inspection |
+| CA status card | `CertificateAuthority.isCaInstalled()` polling | Live badge + actions |
+| CA install flow | `CertificateAuthority` + `KeyChain`/`ACTION_VIEW` | System CA installer |
+| HTTPS toggle | `persistentState.httpsInspectionEnabled` | Master on/off (disabled until CA installed) |
+| Per-app HTTPS policy | `AppListActivity` mode `https_exclusions` + `HttpsInspectionAppListAdapter` + existing `AppInfoViewModel`/Room inventory | Known/dynamic browsers ON unless excluded; other apps OFF unless explicitly included; system-hard-bypass rows immutable OFF |
+| Exclusions | **NEW** | Domains/apps to skip MITM |
+
+### CA Install Mechanics (preserve, just relocate)
+```kotlin
+// 1. Generate CA in AndroidKeyStore
+CertificateAuthority.generateAndStoreRootCA(context)
+
+// 2. Export DER bytes → FileProvider → ACTION_VIEW with application/x-x509-ca-cert
+val intent = Intent(Intent.ACTION_VIEW).apply {
+    setDataAndType(uri, "application/x-x509-ca-cert")
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+}
+installCertLauncher.launch(intent)
+
+// 3. System Settings opens → user taps "Install" → names it "RethinkDNS Root CA"
+
+// 4. Poll isCaInstalled() every 1s → update badge ✅ INSTALLED → enable HTTPS toggle
+```
+
+### HTTPS policy hot-apply UX
+
+HTTPS policy changes use a VPN configuration rebuild, not an Android process
+restart.
+
+* Master HTTPS state and per-app inclusion/exclusion state are persisted before
+  runtime activation.
+* `BraveVPNService` observes the relevant preference changes and publishes a
+  `vpnRestartTrigger` event.
+* The existing restart flow is debounced by 3000 ms and rebuilds the VPN using
+  the latest persisted configuration.
+* Per-app events use
+  `httpsInspectionAppPolicy[<sequence>]: <key>` so two consecutive changes to
+  the same preference key cannot be lost to equal-value
+  `MutableStateFlow` conflation.
+* The Rethink process PID is expected to remain alive during this hot rebuild.
+* Browser OFF stores the exclusion and results in public TLS.
+* Browser ON clears the exclusion and restores browser-default MITM eligibility.
+* Real-device R4D verification proved OFF→ON restoration to
+  `RethinkDNS Root CA` without a manual Protection restart.
+
+Historical documentation that expected `pid_post != pid_pre` applies to an older
+restart design and is not the N9 hot-apply contract.
+
+---
+
+## 🌐 DNS BLOCKLIST — EXISTING + MITM BRIDGE
+
+### Current DNS blocklist UI (working)
+| Screen | Fragment/Activity | Layout |
+|--------|-------------------|--------|
+| Blocklist main | `RethinkBlocklistFragment` | `fragment_rethink_blocklist.xml` |
+| Simple / Advanced tabs | TabLayout | `list_item_rethink_blocklist_simple.xml` / `adv` |
+| Local blocklists | `LocalBlocklistsBottomSheet` | `bottom_sheet_local_blocklists.xml` |
+| Remote blocklists | `RemoteBlocklistPacksMapViewModel` | — |
+
+> ## 🌐 DNS BLOCKLIST — EXISTING + MITM BRIDGE (HISTORICAL / RETIRED)
+>
+> ### Historical / retired design (pre-Phase-1D-A3)
+>
+> ```
+> User selects list in DNS blocklist UI
+>        │
+>        ▼
+> RethinkBlocklistManager downloads list (existing)
+>        │
+>        ▼
+> SYNCBLOCKLISTTOADBLOCKRULES BRIDGE — OBSOLETE (A2 STOP-P2)
+>        │
+>        ▼
+> Write to adblock_rules.txt (app filesDir)
+>        │
+>        ▼
+> FilterEngine.loadRulesFromFile(adblock_rules.txt)
+>        │
+>        ▼
+> LocalHttpsProxy.proxyListener.match() now has URL-path & cosmetic rules
+>        │
+>        ▼
+> Plus tab shows: "Synced ✓ | 82,096 rules | Cosmetic: 23,749 | Scriptlet: 0 | CSP: 0 | HTML: 0 | Procedural: 0"
+>
+> ## ⚠️ OBSOLETED BY DECISION-008 (2026-08-15):
+>
+> syncBlocklistToAdblockRules is OBSOLETE pending source cleanup.
+> Rethink DNS blocklists are NOT FilterEngine source material.
+> Advanced Filter Sources are a separate independent subsystem.
+> No documented source-flow: Rethink DNS blocklists → FilterEngine.
+> ```
+>
+> **Status: OBSOLETE — Phase-1D-A3 (2026-08-15) + A2 STOP-P2.**
+>
+> The original Phase-1a architecture proposed a manual DNS→MITM bridge (`syncBlocklistToAdblockRules` → `adblock_rules.txt` → `FilterEngine`). This was **empirically invalidated**:
+>
+> 1. **A2 STOP-P2**: `syncBlocklistToAdblockRules()` failed — selected tag 54 existed, but implementation expected raw text not available from Rethink's compiled DNS artifacts. Bridge implementation was stopped pending redesign.
+> 2. **Phase-1D-A3**: Live device audit (Xiaomi Mi A1 A16) proved domain-level blocking propagates automatically via DNS sinkhole inheritance (`activeNetwork.getAllByName()` → Rethink DNS → `0.0.0.0` → `502 Bad Gateway`). No manual bridge needed for domain blocking.
+>
+> **Current status**: The bridge concept is **obsolete pending source cleanup**. Rethink DNS blocklists are NOT FilterEngine source material. Advanced Filter Sources (EasyList / AdGuard / Custom URL) are a separate independent subsystem.
+
+---
+
+## 🛡️ FIREWALL — PER-APP RULES
+
+**Files:** `FirewallActivity.kt`, `FirewallSettingsFragment.kt`, bottom sheets
+
+| Feature | Implementation |
+|---------|----------------|
+| Per-app allow/block | `AppDomainRulesBottomSheet`, `AppIpRulesBottomSheet` |
+| Global rules | `FirewallGlobalRulesFragment` |
+| Quick actions | `FirewallAppFilterBottomSheet` |
+| Wi-Fi / Mobile / Roaming | Condition on rule |
+| Rule-based (not boolean) | `FirewallRuleDetailsFragment` — Allow/Block, target, condition |
+
+---
+
+## 🧭 NAVIGATION MAP (complete)
+
+```
+HomeScreenActivity (hosts NavHostFragment)
+│
+├─ HomeFragment (HomeScreenFragment)
+│
+├─ StatsFragment (SummaryStatisticsFragment)
+│   └─ DetailedStatisticsActivity
+│
+├─ PlusFragment (RethinkPlusFragment — full flavor; hoisted fdroid→full)
+│   └─ Filters UX — MITM / adblock (all flavors: fdroid / full / play / website) — HTTPS Inspection, Advanced Filtering (source/category-oriented), Exclusions
+│
+├─ ConfigureFragment
+│   ├─ Apps → AppListActivity
+│   ├─ DNS → DnsDetailActivity
+│   │    ├─ RethinkBlocklistFragment
+│   │    └─ LocalBlocklistsBottomSheet
+│   ├─ Firewall → FirewallActivity
+│   │    ├─ AppDomainRulesBottomSheet
+│   │    ├─ AppIpRulesBottomSheet
+│   │    ├─ FirewallGlobalRulesFragment
+│   │    └─ FirewallRuleDetailsFragment
+│   ├─ Proxy → ProxySettingsActivity
+│   ├─ VPN → TunnelSettingsActivity
+│   ├─ Logs → NetworkLogsActivity
+│   │    ├─ ActivityEventsActivity
+│   │    ├─ ActivityAppWiseDomainLogsActivity
+│   │    └─ ActivityAppWiseIpLogsActivity
+│   ├─ Anti-Censorship → AntiCensorshipActivity
+│   └─ Advanced → AdvancedSettingActivity
+│
+└─ AboutFragment
+```
+
+---
+
+## 📂 FLAVOR DIFFERENCES (critical for Plus tab)
+
+| Feature | fdroid | full | play | website |
+|---------|--------|------|------|---------|
+| Filters (Plus tab) — MITM/adblock | ✅ | ✅ | ✅ | ✅ |
+| RPN subscription UI (Plus tab) | — (retired / deferred — DECISION-007) | — (retired) | — (retired) | — (retired) |
+| Billing / Play IAB (Plus tab) | — | — | — (retired from Plus; deferred to future billing flow) | — (retired from Plus; deferred) |
+| RPN backend (proxy/protocol engine) | — (engine unchanged) | ✅ (engine) | ✅ (engine) | ✅ (engine) |
+| CA install / HTTPS toggle | ✅ | ✅ | ✅ | ✅ |
+| Advanced Filter Sources (EasyList/AdGuard/Custom) | ✅ Managed in shared full-flavor UI | ✅ | ✅ | ✅ |
+| Advanced Filtering (source/category-managed; all rule types) | ✅ | ✅ | ✅ | ✅ |
+| Auto-restart on setting change | ✅ | ✅ | ✅ | ✅ |
+
+**Build task mapping:**
+- fdroid → `:app:assembleFdroidFullDebug`
+- full → `:app:assembleFullDebug` (or `FullRelease`)
+- play → `:app:assemblePlayRelease`
+- website → `:app:assembleWebsiteRelease`
+
+---
+
+## 🗂️ KEY FILE INVENTORY (UI layer)
+
+### Activities (full flavor)
+```
+app/src/full/java/com/celzero/bravedns/ui/activity/
+├── HomeScreenActivity.kt                    ← Host
+├── CertificateSetupActivity.kt              ← CA install (relocating to Plus)
+├── ProxySettingsActivity.kt                 ← Proxy config
+├── TunnelSettingsActivity.kt                ← VPN tunnels
+├── FirewallActivity.kt                      ← Firewall main
+├── DnsDetailActivity.kt                     ← DNS main
+├── NetworkLogsActivity.kt                   ← Logs main
+├── AntiCensorshipActivity.kt                ← Anti-censorship
+├── AdvancedSettingActivity.kt               ← Advanced
+├── MiscSettingsActivity.kt                  ← Others
+├── AppListActivity.kt                       ← Apps list
+├── RpnConfigDetailActivity.kt               ← RPN server detail (engine-level; retained — not Plus UI)
+├── WindscribeLoginActivity.kt               ← Windscribe auth
+├── CheckoutActivity.kt                      ← Billing
+├── PurchaseHistoryActivity.kt               ← History
+├── CustomerSupportActivity.kt               ← Support
+├── AlertsActivity.kt                        ← Alerts
+├── ConsoleLogActivity.kt                    ← Console
+├── CustomRulesActivity.kt                   ← Custom rules
+├── DetailedStatisticsActivity.kt            ← Detailed stats
+├── DnsListActivity.kt                       ← DNS server list
+├── DomainConnectionsActivity.kt             ← Domain connections
+├── EventsActivity.kt                        ← Events
+├── FragmentHostActivity.kt                  ← Generic host
+├── NotificationHandlerActivity.kt           ← Notifications
+├── PauseActivity.kt                         ← Pause VPN
+├── PingTestActivity.kt                      ← Ping test
+├── RpnWinProxyDetailsActivity.kt            ← Win proxy
+├── ServerOrderHistoryActivity.kt            ← Server history
+├── TcpProxyMainActivity.kt                  ← TCP proxy
+├── UniversalFirewallSettingsActivity.kt     ← Universal firewall
+├── WgConfigDetailActivity.kt                ← WG config
+├── WgConfigEditorActivity.kt                ← WG editor
+├── WgMainActivity.kt                        ← WG main
+├── WireguardMainActivity.kt                 ← WireGuard
+└── WindscribeLoginActivity.kt               ← Windscribe
+```
+
+### Fragments (full flavor)
+```
+app/src/full/java/com/celzero/bravedns/ui/fragment/
+├── HomeScreenFragment.kt                    ← Home
+├── ConfigureFragment.kt                     ← 8 cards
+├── AboutFragment.kt                         ← About
+├── RethinkBlocklistFragment.kt              ← DNS blocklist
+├── RethinkPlusDashboardFragment.kt          ← DELETED (RPN subscription UI retired — DECISION-007; not restored)
+├── ServerSelectionFragment.kt               ← DELETED (RPN server picker retired — DECISION-007; not restored)
+├── SummaryStatisticsFragment.kt             ← Stats summary
+├── WgNwStatsFragment.kt                     ← WG network stats
+├── ConnectionTrackerFragment.kt             ← Connection tracker
+├── DnsSettingsFragment.kt                   ← DNS settings
+├── DnsLogFragment.kt                        ← DNS log
+├── DnsProxyListFragment.kt                  ← DNS proxy list
+├── DohListFragment.kt                       ← DoH list
+├── DoTListFragment.kt                       ← DoT list
+├── DnsCryptListFragment.kt                  ← DNSCrypt list
+├── ODoHListFragment.kt                      ← ODoH list
+├── FirewallSettingsFragment.kt              ← Firewall settings
+├── CustomDomainFragment.kt                  ← Custom domains
+├── CustomIpFragment.kt                      ← Custom IPs
+├── RethinkListFragment.kt                   ← Rethink list
+├── RethinkLogFragment.kt                    ← Rethink log
+└── RethinkPlusFragment.kt                   ← Plus / Filters (MITM/adblock) — full flavor (hoisted fdroid→full; R100); all flavors use this
+```
+
+### Bottom Sheets (full flavor)
+```
+app/src/full/java/com/celzero/bravedns/ui/bottomsheet/
+├── LocalBlocklistsBottomSheet.kt            ← Local blocklists
+├── DnsBlocklistBottomSheet.kt               ← DNS blocklist picker
+├── RethinkPlusFilterBottomSheet.kt          ← Plus filter
+├── ServerSettingsBottomSheet.kt             ← Server settings
+├── WireguardListBtmSheet.kt                 ← WG list
+├── ProxyCountriesBtmSheet.kt                ← Proxy countries
+├── AppDomainRulesBottomSheet.kt             ← App domain rules
+├── AppIpRulesBottomSheet.kt                 ← App IP rules
+├── FirewallAppFilterBottomSheet.kt          ← Firewall filter
+├── HomeScreenSettingBottomSheet.kt          ← Home quick settings
+├── CustomDomainRulesBtmSheet.kt             ← Custom domain rules
+├── CustomIpRulesBtmSheet.kt                 ← Custom IP rules
+├── BlockFreeDnsModeBottomSheet.kt           ← Block-free DNS
+├── BackupRestoreBottomSheet.kt              ← Backup/restore
+├── AutoExcludeCountriesBottomSheet.kt       ← Auto-exclude countries
+├── ConnTrackerBottomSheet.kt                ← Connection tracker
+├── RethinkListBottomSheet.kt                ← Rethink list
+├── RethinkLogBottomSheet.kt                 ← Rethink log
+├── EntitlementDetailBottomSheet.kt          ← Deprecated (subscription UI retired — DECISION-007)
+├── ManageRpnPurchaseBtmSht.kt               ← DELETED (RPN purchase bottom sheet retired — DECISION-007)
+├── PurchaseConflictBottomSheet.kt           ← Purchase conflict
+├── PurchaseProcessingBottomSheet.kt         ← Purchase processing
+├── RethinkInRethinkWarningBottomSheet.kt    ← Warning
+├── BugReportFilesBottomSheet.kt             ← Bug report
+├── DeviceAuthErrorBottomSheet.kt            ← Auth error
+├── DeviceNotRegisteredBottomSheet.kt        ← Not registered
+├── OrbotBottomSheet.kt                      ← Orbot
+└── DnsRecordTypesBottomSheet.kt             ← DNS record types
+```
+
+### Dialogs (full flavor)
+```
+app/src/full/java/com/celzero/bravedns/ui/dialog/
+├── WgAddPeerDialog.kt
+├── WgHopDialog.kt
+├── WgSsidDialog.kt
+├── WgIncludeAppsDialog.kt
+├── RpnProxyHopDialog.kt
+├── NetworkReachabilityDialog.kt
+├── GenericHopDialog.kt
+├── DnsCryptRelaysDialog.kt
+├── CustomLanIpDialog.kt
+├── CountrySsidDialog.kt
+└── SubscriptionAnimDialog.kt
+```
+
+---
+
+## 🔑 MASTER SETTINGS KEYS (PersistentState)
+
+| Feature | Key | Type | Default |
+|---------|-----|------|---------|
+| HTTPS Inspection | `httpsInspectionEnabled` | Boolean | `false` |
+| CA installed | (derived via `isCaInstalled()`) | — | — |
+| DNS blocklist sync | `localBlocklistStamp` | Long | 0 |
+| Theme | `theme` | Int | System |
+| Language | `language` | String | System |
+| Auto-update | `autoUpdateEnabled` | Boolean | `true` |
+| Firebase reporting | `firebaseErrorReportingEnabled` | Boolean | `true` |
+| VPN always-on | (system) | — | — |
+
+---
+
+## 📋 PHASE 1 IMPLEMENTATION STATUS
+
+| Phase  | Deliverable                              | Current status                                                                                                                                                                                                           |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1a** | Blocklist → MITM bridge                  | **SUPERSEDED (DECISION-008).** DNS sinkhole inheritance removed the need for a manual bridge.                                                                                                                            |
+| **1b** | Plus-tab MITM UI                         | **COMPLETED.** HTTPS Inspection, Advanced Filtering, and Exclusions are exposed through the unified Plus surface.                                                                                                        |
+| **1c** | Plus-tab canonicalization across flavors | **SEALED.** The shared full-flavor `RethinkPlusFragment` is the canonical Filters surface.                                                                                                                               |
+| **1d** | Auto-restart framework                   | **IMPLEMENTED AND DEVICE-VERIFIED** for settings that require restart. Filter-source changes use their separate compile/generation transaction path.                                                                     |
+| **1e** | Advanced Filter Source Foundation        | **SEALED FOR CURRENT PHASE-1D ACCEPTANCE.** Storage, downloader, compiler diagnostics, atomic activation/rollback, custom-source management, controlled filter-runtime E2E, N4E policy, N9 per-app/transport, and N10 proxy-firewall/logging gates are complete. Release-level DoD remains separate. |
+
+Custom-source management was implemented at
+`ca797a1d179b060b602c26664814111b640ffd8a`, with 102/102 targeted JUnit tests.
+The later controlled filter-runtime cycle closed OFF→ON→OFF behavior; N4E and
+N9 closed HTTPS eligibility/per-app transport behavior; N10 closed
+LocalHttpsProxy firewall parity and blocked-row persistence. Remaining work is
+the explicit release-level DoD and deferred compatibility/hardening list, not
+the superseded B4.5/B6 browser-regression claim.
+
+---
+
+## 🚫 OUT OF SCOPE (Phase 0 confirmed working)
+
+| Component | Status |
+|-----------|--------|
+| CA persistence (R1) | ✅ Verified — AndroidKeyStore `setKeyEntry` works on device |
+| CA install flow (R2) | ✅ Verified — system installer, human-only, `isCaInstalled()` correct |
+| Proxy coverage (R3) | ✅ Verified — 6 categories, 19+ hosts, 55 MITM tunnel lines |
+| E2E MITM (R4) | ✅ Verified — 4 sites / 2 sessions, browser accepts leaf |
+| FilterEngine parse (R5a) | ✅ Verified — 97/98 pass, isolation pass, 1 BindException = harness flake |
+| FilterEngine parse ratio (R5b) | ✅ Verified — EasyList 100% (82,096/82,096), zero silent drops |
+
+---
+
+**End of Architecture — current through N10C at `63bc8593df3efa83b51f68146b1216f4320f8e44`; current Phase-1D feature acceptance is sealed, with release-level and deferred compatibility gates tracked separately.**

@@ -90,8 +90,12 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
         const val FIREWALL_BUBBLE = "pref_firewall_bubble_enabled"
 
-        // HTTPS Inspection (MITM) toggle
+        // HTTPS Inspection (MITM)
         const val HTTPS_INSPECTION_ENABLED = "https_inspection_enabled"
+        const val HTTPS_INSPECTION_EXCLUDED_PACKAGES =
+            "https_inspection_excluded_packages"
+        const val HTTPS_INSPECTION_INCLUDED_PACKAGES =
+            "https_inspection_included_packages"
 
         // RPN server-side DNS mode (0=Default, 1=AntiAd, 2=Parental, 3=Security)
         const val RPN_DNS_URL = "rpn_dns_mode"
@@ -114,6 +118,8 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         const val INCLUDE_FILE_TRACE = "include_file_trace"
 
         const val GO_MAX_MEMORY = "go_max_memory"
+        const val ADVANCED_FILTER_GENERATION = "advanced_filter_generation"
+        const val LAST_COMPILED_ENABLED_SET_HASH = "last_compiled_enabled_set_hash"
     }
 
     // when vpn is started by the user, this is set to true; set to false when user stops
@@ -206,6 +212,15 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
             _httpsInspectionEnabled = value
             httpsInspectionEnabledLiveData.postValue(value)
         }
+
+    // serialized package-name sets used by InspectionUserAppPolicyRepository
+    var httpsInspectionExcludedPackagesRaw by
+        stringPref(HTTPS_INSPECTION_EXCLUDED_PACKAGES)
+            .withDefault<String>("")
+
+    var httpsInspectionIncludedPackagesRaw by
+        stringPref(HTTPS_INSPECTION_INCLUDED_PACKAGES)
+            .withDefault<String>("")
 
     // comma-separated list of hosts to bypass HTTPS inspection
     var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
@@ -804,4 +819,30 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     var goMaxMemory by longPref(GO_MAX_MEMORY).withDefault<Long>(1024 * 1024 * 1024L)
 
     var blockDnsForUnknownApp by booleanPref("block_dns_for_unknown_app").withDefault<Boolean>(false)
+
+    /**
+     * Monotonic generation counter for Advanced Filter compiler outputs.
+     * Bumped by FilterUpdateWorker upon successful compilation (Slice 2/3).
+     * Observed by BraveVPNService to trigger FilterEngine transactional reload.
+     */
+    var advancedFilterGeneration by longPref(ADVANCED_FILTER_GENERATION).withDefault<Long>(0L)
+
+    /**
+     * Deterministic hash/watermark of the set of enabled Advanced Filter source IDs that were
+     * successfully compiled into the current adblock_rules.txt.
+     * Written only after successful compile in Slice 2/3.
+     */
+    var lastCompiledEnabledSetHash by stringPref(LAST_COMPILED_ENABLED_SET_HASH).withDefault<String>("")
+    /**
+     * Atomically persists the successful compilation watermark hash and increments the
+     * generation counter in a single SharedPreferences.Editor transaction to prevent
+     * crash windows where one value persists without the other.
+     */
+    fun commitAdvancedFilterCompilation(enabledSetHash: String, nextGeneration: Long) {
+        sharedPreferences.edit().apply {
+            putString(LAST_COMPILED_ENABLED_SET_HASH, enabledSetHash)
+            putLong(ADVANCED_FILTER_GENERATION, nextGeneration)
+            apply()
+        }
+    }
 }
