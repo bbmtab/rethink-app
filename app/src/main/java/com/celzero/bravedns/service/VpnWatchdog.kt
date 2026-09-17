@@ -15,6 +15,12 @@
  */
 package com.celzero.bravedns.service
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Process
+import com.celzero.bravedns.util.Utilities.isAtleastQ
+
 /**
  * Watchdog for silent VPN-dataplane death with UI desync.
  *
@@ -111,6 +117,31 @@ object VpnWatchdog {
         val failedHeals: Int = 0,
         val gaveUp: Boolean = false,
     )
+
+    /**
+     * Shared live sensor: the single implementation used by BOTH the ticker
+     * and the DEBUG hook (fidelity: the hook exercises the real scan, not a
+     * copy). Never an interface name (tun0/tun1 vary across restarts): at most
+     * one VPN can be active system-wide, so any TRANSPORT_VPN network owned by
+     * our own uid IS ours; one owned by another uid is FOREIGN (that path
+     * belongs to onRevoke — never fight it here). Pre-Q (no ownerUid API)
+     * any VPN network counts as present; documented fallback.
+     */
+    fun scanPresence(context: Context): Presence {
+        val cm =
+            context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        var foreign = false
+        for (network in cm.allNetworks) {
+            val cap = cm.getNetworkCapabilities(network) ?: continue
+            if (!cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (isAtleastQ() && cap.ownerUid != Process.myUid()) {
+                foreign = true
+                continue
+            }
+            return Presence.PRESENT
+        }
+        return if (foreign) Presence.FOREIGN_ACTIVE else Presence.ABSENT
+    }
 
     fun decide(
         state: State,

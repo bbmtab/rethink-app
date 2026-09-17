@@ -1979,7 +1979,10 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         val shouldRun = persistentState.vpnEnabledLiveData.value == true
         // Mirror the Home fragment's own guard: paused topology differs.
         val paused = VpnController.isAppPaused()
-        val presence = checkOwnVpnPresence()
+        val presence = VpnWatchdog.scanPresence(this)
+        // Per-check sensor line (Phase 1 forensics: proves the ticker is alive
+        // and what the sensor saw; revisit verbosity at HEAL promotion).
+        Logger.i(LOG_TAG_VPN, "watchdog: check present=$presence misses=${watchdogState.missCount} failed=${watchdogState.failedHeals}")
         val nowMs = elapsedRealtime()
         val (ns, action) =
             VpnWatchdog.decide(watchdogState, nowMs, shouldRun, presence, paused, VpnWatchdog.Phase.LOG_ONLY, cfg)
@@ -2002,25 +2005,9 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Bridge,
         }
     }
 
-    // Own-VPN-network presence via TRANSPORT_VPN scan. Never an interface name
-    // (tun0/tun1 vary across restarts). At most one VPN is active system-wide;
-    // a VPN network owned by another uid is FOREIGN (that path belongs to
-    // onRevoke, never fight it here).
-    private fun checkOwnVpnPresence(): VpnWatchdog.Presence {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        var foreign = false
-        for (network in cm.allNetworks) {
-            val cap = cm.getNetworkCapabilities(network) ?: continue
-            if (!cap.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
-            // getOwnerUid is Q+; pre-Q any VPN network counts as present.
-            if (isAtleastQ() && cap.ownerUid != Process.myUid()) {
-                foreign = true
-                continue
-            }
-            return VpnWatchdog.Presence.PRESENT
-        }
-        return if (foreign) VpnWatchdog.Presence.FOREIGN_ACTIVE else VpnWatchdog.Presence.ABSENT
-    }
+    // Presence scan lives in VpnWatchdog.scanPresence (shared with the DEBUG
+    // hook for fidelity). Deleted the local copy 2026-09-17: two copies would
+    // drift and invalidate hook evidence.
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         rethinkUid = getRethinkUid()

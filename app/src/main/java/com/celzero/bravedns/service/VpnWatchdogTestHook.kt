@@ -56,6 +56,12 @@ class VpnWatchdogTestHook : BroadcastReceiver() {
         val base = SystemClock.elapsedRealtime()
         var s = VpnWatchdog.State()
 
+        // Live sensor proof: runs the REAL shared scan against current device
+        // state (reads only, writes nothing). This is the one hook step that
+        // touches reality instead of injected values.
+        val live = VpnWatchdog.scanPresence(context)
+        Logger.i(LOG_TAG_VPN, "watchdog TEST-HOOK: live presence -> $live (sensor reads reality; no state touched)")
+
         // Negative controls: healthy/disabled inputs must stay silent.
         val (_, n1) = VpnWatchdog.decide(s, base, true, VpnWatchdog.Presence.PRESENT, false, VpnWatchdog.Phase.LOG_ONLY, cfg)
         val (_, n2) = VpnWatchdog.decide(s, base, false, VpnWatchdog.Presence.ABSENT, false, VpnWatchdog.Phase.LOG_ONLY, cfg)
@@ -72,5 +78,20 @@ class VpnWatchdogTestHook : BroadcastReceiver() {
         // observed, never executed — no trigger call exists in this file).
         val (_, h) = VpnWatchdog.decide(s, base + 50_000L, true, VpnWatchdog.Presence.ABSENT, false, VpnWatchdog.Phase.HEAL, cfg)
         Logger.i(LOG_TAG_VPN, "watchdog TEST-HOOK: step3 HEAL-phase value -> $h (observed only, not executed)")
+
+        // Give-up simulation: three failed heal cycles via injected timestamps
+        // (proves the latch VALUES on-device; the real side effects —
+        // setVpnEnabled(false) + notify — live only in the service caller and
+        // are NOT executed here).
+        var g = VpnWatchdog.State()
+        var t = base
+        repeat(3) { i ->
+            val (g1, _) = VpnWatchdog.decide(g, t, true, VpnWatchdog.Presence.ABSENT, false, VpnWatchdog.Phase.HEAL, cfg)
+            val (g2, ah) = VpnWatchdog.decide(g1, t + cfg.desyncSpanMs, true, VpnWatchdog.Presence.ABSENT, false, VpnWatchdog.Phase.HEAL, cfg)
+            val (g3, ae) = VpnWatchdog.decide(g2, t + cfg.desyncSpanMs + cfg.healAwaitMs, true, VpnWatchdog.Presence.ABSENT, false, VpnWatchdog.Phase.HEAL, cfg)
+            Logger.i(LOG_TAG_VPN, "watchdog TEST-HOOK: giveup sim cycle ${i + 1} -> heal=$ah expire=$ae failed=${g3.failedHeals} gaveUp=${g3.gaveUp} (cycles 1-2: HEAL_RESTART then LOG_SUSPECT; cycle 3 expire: GIVE_UP_NOTIFY + gaveUp=true)")
+            g = g3
+            t += 1_000_000L
+        }
     }
 }
