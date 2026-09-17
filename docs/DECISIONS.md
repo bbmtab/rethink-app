@@ -2268,12 +2268,11 @@ HTTPS-inspection bug require temporary scope restriction.
 
 ## DECISION-014: RELEASE EXCLUSIONS FOR KNOWN-OPEN ITEMS (2026-09-17)
 
-**Status:** PROPOSED — takes effect only on explicit user-as-decider sign-off.
-Until signed, every item below remains OPEN, not excluded. Refines
-RELEASE-POLICY.md pre-tag checklist item 3 (explicit, recorded exclusion —
-not a silent pass).
+**Status:** SIGNED 2026-09-17 — user-as-decider sign-off given; exclusions
+below take effect for the upcoming release. Refines RELEASE-POLICY.md pre-tag
+checklist item 3 (explicit, recorded exclusion — not a silent pass).
 
-### Decision (proposed)
+### Decision
 
 The following known-open items do NOT block the upcoming release. Rationale
 and evidence live in their home docs (referenced, not duplicated here); none
@@ -2294,7 +2293,7 @@ is closed or downgraded by this entry:
 
 This entry grants no redistribution authorization, changes no code, and
 closes nothing. Items stay tracked in their home docs; this entry is the
-consolidated release pointer. Sealed only by user sign-off + commit.
+consolidated release pointer. Signed 2026-09-17 by user-as-decider.
 
 ---
 
