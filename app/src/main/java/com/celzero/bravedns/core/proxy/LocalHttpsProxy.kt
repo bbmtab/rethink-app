@@ -13,6 +13,7 @@ import com.celzero.bravedns.core.proxy.policy.InspectionReason
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallDecision
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallEvaluator
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallResult
+import android.os.SystemClock
 import kotlinx.coroutines.*
 import java.io.*
 import java.net.InetSocketAddress
@@ -45,6 +46,12 @@ object LocalHttpsProxy : KoinComponent {
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
     private var serverJob: Job? = null
+    // Bridge instrument (diagnostic, no behavior change): instance
+    // ownership tracking for the stop/start lifecycle race.
+    @Volatile
+    private var proxyInstanceSeq: Long = 0L
+    @Volatile
+    private var activeInstanceId: Long = -1L
 
     private var appContext: android.content.Context? = null
     private var persistentState: com.celzero.bravedns.service.PersistentState? = null
@@ -365,18 +372,23 @@ object LocalHttpsProxy : KoinComponent {
      * Start the proxy server in a background Coroutine on Dispatchers.IO.
      */
     @Synchronized
-    fun start(port: Int = DEFAULT_PORT) {
+    fun start(port: Int = DEFAULT_PORT, caller: String = "establish") {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
         if (isRunning) {
-            logWarn("Proxy is already running")
+            logWarn("proxy lifecycle: START-IGNORED caller=$caller activeId=$activeInstanceId tNs=$nowNs")
             return
         }
 
+        proxyInstanceSeq += 1
+        val myId = proxyInstanceSeq
         isRunning = true
-        logInfo("Starting local HTTPS proxy server on port $port...")
+        logInfo("proxy lifecycle: START caller=$caller id=$myId port=$port tNs=$nowNs")
 
         serverJob = CoroutineScope(Dispatchers.IO).launch {
             try {
                 serverSocket = ServerSocket(port)
+                activeInstanceId = myId
+                logInfo("proxy lifecycle: LISTEN id=$myId port=$port tNs=${SystemClock.elapsedRealtimeNanos()}")
                 while (isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     launch {
@@ -384,11 +396,9 @@ object LocalHttpsProxy : KoinComponent {
                     }
                 }
             } catch (e: Exception) {
-                if (isRunning) {
-                    logError("Exception in server accept loop: ${e.message}", e)
-                }
+                logError("proxy lifecycle: ACCEPT-EXCEPTION id=$myId activeId=$activeInstanceId class=${e.javaClass.name} msg=${e.message} tNs=${SystemClock.elapsedRealtimeNanos()}", e)
             } finally {
-                stop()
+                stop("finally:$myId")
             }
         }
     }
@@ -397,13 +407,17 @@ object LocalHttpsProxy : KoinComponent {
      * Stops the proxy server and frees up socket resources.
      */
     @Synchronized
-    fun stop() {
+    fun stop(caller: String = "external") {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
         inspectionPolicyEvaluator = null
         firewallEvaluator = null
-        if (!isRunning) return
+        if (!isRunning) {
+            logInfo("proxy lifecycle: STOP-IGNORED caller=$caller activeId=$activeInstanceId tNs=$nowNs")
+            return
+        }
+        logInfo("proxy lifecycle: STOP caller=$caller activeId=$activeInstanceId tNs=$nowNs")
         isRunning = false
-        logInfo("Stopping local HTTPS proxy server...")
-
+        activeInstanceId = -1
         try {
             serverSocket?.close()
         } catch (e: Exception) {

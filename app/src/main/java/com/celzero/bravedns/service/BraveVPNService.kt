@@ -3171,7 +3171,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
         // Bridge (Plus): stop MITM proxy + clear runtime snapshot first.
         inspectionRuntimePolicySnapshot = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
-        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop("onDestroy")
         // Dismiss the firewall bubble and tear down its observer.
         //
         // Lifecycle note: onDestroy() is called ONLY when the VPN is truly stopping
@@ -3680,7 +3680,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
             } else {
                 // If disabled, ensure proxy and its listener are stopped/cleared
                 com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
-                com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
+                com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop("disabled-branch")
             }
 
             // Bridge: establish() must run on Main (upstream v057 rule).
@@ -4793,7 +4793,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
     override fun onRevoke() {
         inspectionRuntimePolicySnapshot = null
         com.celzero.bravedns.core.proxy.LocalHttpsProxy.proxyListener = null
-        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop()
+        com.celzero.bravedns.core.proxy.LocalHttpsProxy.stop("onRevoke")
         // System invokes onRevoke when the user takes an explicit action that
         // disables this VPN: (a) toggles RethinkDNS off in Android Settings →
         // Network & internet → VPN, (b) selects a different VPN app, or
