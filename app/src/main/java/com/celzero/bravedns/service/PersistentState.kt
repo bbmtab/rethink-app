@@ -261,6 +261,14 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // comma-separated list of hosts to bypass HTTPS inspection
     var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
 
+    // comma-separated list of EXACT hosts auto-bypassed from HTTPS inspection
+    // after WAF-challenge/tarpit detection (WAF auto-bypass). Exact-match only,
+    // never suffix-matched; user-clearable from the Plus tab. Deliberately
+    // persisted across restarts (unlike httpsBypassHosts): a WAF verdict for a
+    // host+exit pair is stable, re-probing it on every restart just burns
+    // another 30s tarpit wait. See LocalHttpsProxy anti-cascade rule.
+    var httpsWafBypassHosts by stringPref("https_waf_bypass_hosts").withDefault<String>("")
+
     // user set among AppConfig.DnsType enum; RETHINK_REMOTE is default which is Rethink-DoH
     var dnsType by
         intPref("dns_type")

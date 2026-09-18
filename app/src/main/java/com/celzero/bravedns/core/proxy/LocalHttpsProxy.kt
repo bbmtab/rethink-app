@@ -60,6 +60,26 @@ object LocalHttpsProxy : KoinComponent {
 
     private val dynamicBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    // WAF auto-bypass: EXACT-host set with deliberate persistence.
+    //
+    // Anti-cascade rule (ipleak.net lesson): handshake/timeout failures must
+    // NEVER widen scope. dynamicBypassSet is suffix-matched and its persist is
+    // a deliberate no-op; this set is the opposite bargain, made explicitly:
+    //  - EXACT match only (sub.example.com never bypasses example.com),
+    //  - recorded ONLY on explicit WAF signals, never on generic failures:
+    //      * upstream response carrying `x-amzn-waf-action` (deterministic
+    //        challenge verdict), recorded immediately, or
+    //      * 2nd CONSECUTIVE upstream read-timeout for the same host (tarpit
+    //        signature: TLS completes, then 0 bytes for soTimeout),
+    //  - persisted across restarts (a WAF verdict for a host+exit pair is
+    //    stable; re-probing it each restart just burns another 30s wait),
+    //  - user-visible and user-clearable (Plus tab "Auto-bypassed sites").
+    // Bypassed hosts still traverse the VPN tunnel and remain subject to DNS
+    // and firewall verdicts; only TLS decryption (content filtering) is
+    // skipped via opaque TCP pass-through.
+    private val wafBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val wafTimeoutStrikes = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     @Volatile
     private var inspectionPolicyEvaluator:
         InspectionConnectionPolicyEvaluator? = null
@@ -82,6 +102,11 @@ object LocalHttpsProxy : KoinComponent {
             logError("Failed to clear httpsBypassHosts: ${e.message}")
         }
         loadBypassCacheFromPreferences()
+        // NOTE: httpsWafBypassHosts is deliberately NOT cleared here. Unlike the
+        // suffix-matched dynamic set, WAF verdicts are exact-host and stable per
+        // host+exit pair; clearing them each restart would re-inflict a 30s
+        // tarpit wait on every launch for already-known hosts.
+        loadWafBypassCacheFromPreferences()
     }
 
     /**
@@ -100,6 +125,8 @@ object LocalHttpsProxy : KoinComponent {
             logError("Failed to clear httpsBypassHosts: ${e.message}")
         }
         loadBypassCacheFromPreferences()
+        // See the no-clear note in initialize(state): WAF verdicts persist.
+        loadWafBypassCacheFromPreferences()
     }
 
     /**
@@ -189,6 +216,115 @@ object LocalHttpsProxy : KoinComponent {
 
     private fun persistBypassCache() {
         // No-op to prevent persisting bypasses to preferences
+    }
+
+    private fun loadWafBypassCacheFromPreferences() {
+        val saved = persistentState?.httpsWafBypassHosts ?: return
+        if (saved.isNotEmpty()) {
+            val hosts = saved.split(",")
+            for (h in hosts) {
+                val trimmed = h.trim().lowercase(Locale.US)
+                if (trimmed.isNotEmpty()) {
+                    wafBypassSet.add(trimmed)
+                }
+            }
+        }
+        if (wafBypassSet.isNotEmpty()) {
+            logInfo("WAF auto-bypass: restored ${wafBypassSet.size} exact host(s) from preferences")
+        }
+    }
+
+    private fun persistWafBypassCache() {
+        // Deliberate persist (unlike persistBypassCache): entries are exact-host
+        // and gated on explicit WAF signals, so restoring them cannot cascade.
+        try {
+            persistentState?.httpsWafBypassHosts = wafBypassSet.joinToString(",")
+        } catch (e: Exception) {
+            logError("Failed to persist httpsWafBypassHosts: ${e.message}")
+        }
+    }
+
+    internal fun isWafBypassed(host: String): Boolean {
+        // EXACT match only. No suffix matching, ever (anti-cascade rule).
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        return wafBypassSet.contains(cleaned)
+    }
+
+    internal fun isWafChallengeResponse(responseHeaders: List<String>): Boolean {
+        // Deterministic WAF-challenge verdict markers. Only headers the edge
+        // sends when it subjects THIS request to bot-management count. A plain
+        // 403 without such markers is NOT a signal (it may be a legitimate
+        // site verdict and must still reach the client decrypted).
+        return responseHeaders.any {
+            it.lowercase(Locale.US).startsWith("x-amzn-waf-action:")
+        }
+    }
+
+    internal fun recordWafChallenge(host: String) {
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
+        wafBypassSet.add(cleaned)
+        wafTimeoutStrikes.remove(cleaned)
+        persistWafBypassCache()
+        logWarn(
+            "WAF auto-bypass: upstream challenged '$cleaned' " +
+                "(x-amzn-waf-action) — future connections go opaque " +
+                "pass-through (exact host only, DNS/firewall still apply)"
+        )
+    }
+
+    internal fun recordUpstreamTimeout(host: String) {
+        // Tarpit signature: TLS completed, then silence until soTimeout. Count
+        // CONSECUTIVE timeouts; bypass on the 2nd so a single flap or one slow
+        // origin cannot fail a host open. Any fully-forwarded response resets
+        // the counter via recordUpstreamSuccess.
+        //
+        // Caveat: soTimeout is set on both legs, so a downstream (client-side)
+        // stall is misattributed here. That failure mode is rare (clients
+        // disconnect rather than stall) and its cost is bounded: the host goes
+        // opaque but remains DNS/firewall-filtered, and the user can clear it.
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
+        val strikes = (wafTimeoutStrikes[cleaned] ?: 0) + 1
+        if (strikes >= 2) {
+            wafTimeoutStrikes.remove(cleaned)
+            wafBypassSet.add(cleaned)
+            persistWafBypassCache()
+            logWarn(
+                "WAF auto-bypass: '$cleaned' timed out $strikes consecutive " +
+                    "MITM transaction(s) (tarpit signature) — future " +
+                    "connections go opaque pass-through (exact host only)"
+            )
+        } else {
+            wafTimeoutStrikes[cleaned] = strikes
+            logInfo(
+                "WAF auto-bypass: first MITM timeout for '$cleaned' " +
+                    "(strike $strikes/2, not bypassed yet)"
+            )
+        }
+    }
+
+    internal fun recordUpstreamSuccess(host: String) {
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        wafTimeoutStrikes.remove(cleaned)
+    }
+
+    /**
+     * Snapshot of exact hosts currently auto-bypassed from inspection.
+     * Surfaced on the Plus tab ("Auto-bypassed sites").
+     */
+    fun getWafBypassedHosts(): Set<String> = wafBypassSet.toSet()
+
+    /**
+     * Clears all WAF auto-bypass verdicts (memory + preferences + counters).
+     * Wired to the Plus tab "Clear" action.
+     */
+    fun clearWafBypass() {
+        val n = wafBypassSet.size
+        wafBypassSet.clear()
+        wafTimeoutStrikes.clear()
+        persistWafBypassCache()
+        logInfo("WAF auto-bypass: cleared $n host verdict(s) on user request")
     }
 
     private fun addToBypassCache(host: String) {
@@ -554,8 +690,21 @@ object LocalHttpsProxy : KoinComponent {
                 clientOut.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
                 clientOut.flush()
 
+                val wafBypassed = isWafBypassed(host)
                 val policyResult =
-                    if (shouldInspectDomain(host)) {
+                    if (wafBypassed) {
+                        // WAF auto-bypass verdict (exact host): skip decryption,
+                        // forward opaquely. Logged at warn per connection so
+                        // bypassed traffic stays visible in logcat.
+                        logWarn(
+                            "HTTPS inspection bypassed for $host:$port " +
+                                "(WAF auto-bypass verdict, opaque pass-through)"
+                        )
+                        InspectionPolicyResult(
+                            decision = InspectionDecision.BYPASS,
+                            reason = InspectionReason.BYPASS_WAF_AUTO
+                        )
+                    } else if (shouldInspectDomain(host)) {
                         evaluateInspectionPolicy(
                             clientSocket = clientSocket,
                             host = host,
@@ -803,6 +952,16 @@ object LocalHttpsProxy : KoinComponent {
                     }
                 }
 
+                // WAF challenge sniff: an edge that subjects this request to
+                // bot-management answers fast (unlike a tarpit). Recording the
+                // verdict now means the client's inevitable retry goes opaque
+                // immediately instead of burning another full transaction.
+                // The current stream still completes normally so the client
+                // receives the edge's actual verdict bytes.
+                if (isWafChallengeResponse(responseHeaders)) {
+                    recordWafChallenge(host)
+                }
+
                 // 7. Process and forward response
                 val hasBody = respIsChunked || respContentLength > 0 || respContentLength == -1L
                 if (!hasBody) {
@@ -830,7 +989,17 @@ object LocalHttpsProxy : KoinComponent {
                         isHtml
                     )
                 }
+
+                // A fully-forwarded response breaks any consecutive-timeout
+                // streak for this host (see recordUpstreamTimeout).
+                recordUpstreamSuccess(host)
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            // Tarpit signature candidate: TLS completed earlier, then silence.
+            // recordUpstreamTimeout counts consecutive strikes and bypasses on
+            // the 2nd so one flap or slow origin cannot fail a host open.
+            recordUpstreamTimeout(host)
+            logError("Error in MITM transaction stream: ${e.message}")
         } catch (e: Exception) {
             logError("Error in MITM transaction stream: ${e.message}")
         } finally {

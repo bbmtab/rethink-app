@@ -29,6 +29,7 @@ import by.kirich1409.viewbindingdelegate.viewBinding
 import com.celzero.bravedns.R
 import com.celzero.bravedns.core.ca.CaCertificateExporter
 import com.celzero.bravedns.core.ca.CertificateAuthority
+import com.celzero.bravedns.core.proxy.LocalHttpsProxy
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.viewmodel.FilterSourceSummaryFormatter
@@ -76,6 +77,7 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         initHttpsInspectionSection()
         initAdvancedFilteringSection()
         initExclusionsSection()
+        initWafBypassRow()
 
         // Immediate refresh of CA status on view creation
         updateCaStatusUi()
@@ -90,6 +92,34 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         super.onResume()
         // Refresh CA status when returning to fragment (e.g. from system certificate installer)
         updateCaStatusUi()
+        // WAF verdicts can accrue while the tab is in the background
+        updateWafBypassUi()
+    }
+
+    // ========== WAF AUTO-BYPASS ROW ==========
+
+    private fun initWafBypassRow() {
+        b.btnWafBypassClear.setOnClickListener {
+            LocalHttpsProxy.clearWafBypass()
+            updateWafBypassUi()
+            showToast(getString(R.string.plus_waf_bypass_cleared))
+        }
+        updateWafBypassUi()
+    }
+
+    private fun updateWafBypassUi() {
+        val hosts = try {
+            LocalHttpsProxy.getWafBypassedHosts()
+        } catch (e: Exception) {
+            Logger.w(LOG_TAG_UI, "WAF bypass row: cannot read verdicts: ${e.message}")
+            emptySet()
+        }
+        b.tvWafBypassSubtitle.text = if (hosts.isEmpty()) {
+            getString(R.string.plus_waf_bypass_desc_none)
+        } else {
+            getString(R.string.plus_waf_bypass_desc_some, hosts.size)
+        }
+        b.btnWafBypassClear.isEnabled = hosts.isNotEmpty()
     }
 
     // ========== HTTPS INSPECTION SECTION ==========

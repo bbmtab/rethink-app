@@ -3103,6 +3103,13 @@
     <string name="plus_ca_export_error">Failed to export CA certificate: %s</string>
     <string name="plus_blocklist_bridge_status">Last sync: %s</string>
 
+    <!-- WAF auto-bypass row (HTTPS Inspection section) -->
+    <string name="plus_waf_bypass_title">Auto-bypassed sites</string>
+    <string name="plus_waf_bypass_desc_none">No sites bypassed — inspection applies everywhere</string>
+    <string name="plus_waf_bypass_desc_some">%1$d site(s) load without decryption (WAF-challenged)</string>
+    <string name="plus_waf_bypass_clear">Clear</string>
+    <string name="plus_waf_bypass_cleared">Auto-bypassed sites cleared</string>
+
     <!-- CUSTOM-FILTER-B5: add-dialog resources -->
     <string name="custom_filter_add">Add custom filter</string>
     <string name="custom_filter_more_actions">More actions for this custom filter</string>

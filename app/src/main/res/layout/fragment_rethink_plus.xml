@@ -141,6 +141,49 @@
                             android:enabled="false"/>
                     </LinearLayout>
 
+                    <!-- WAF auto-bypass row: exact hosts the edge challenged/
+                         tarpitted, now loading opaque (no decryption).
+                         User-visible + user-clearable per anti-cascade rule. -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="12dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvWafBypassTitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_waf_bypass_title"
+                                style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                            <TextView
+                                android:id="@+id/tvWafBypassSubtitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_waf_bypass_desc_none"
+                                style="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp"/>
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnWafBypassClear"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/plus_waf_bypass_clear"
+                            android:enabled="false"
+                            app:cornerRadius="8dp"
+                            style="@style/Widget.Material3.Button.OutlinedButton"/>
+                    </LinearLayout>
+
                     <!-- CA Status Card -->
                     <androidx.cardview.widget.CardView
                         android:id="@+id/cardCaStatus"

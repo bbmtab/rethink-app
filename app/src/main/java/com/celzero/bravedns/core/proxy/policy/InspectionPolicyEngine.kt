@@ -19,6 +19,10 @@ enum class InspectionReason {
     BYPASS_DOMAIN,
     BYPASS_DOMAIN_MODE,
     BYPASS_APP_PORT,
+    // WAF auto-bypass verdict (exact host): edge challenged/tarpitted the
+    // MITM upstream leg, so inspection is skipped via opaque pass-through.
+    // Recorded only on explicit WAF signals, never on generic failures.
+    BYPASS_WAF_AUTO,
     MITM_KNOWN_BROWSER,
     MITM_USER_APP,
     MITM_DYNAMIC_BROWSER,
