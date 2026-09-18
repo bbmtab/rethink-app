@@ -1442,6 +1442,61 @@ abstract class AppDatabase : RoomDatabase() {
         internal val MIGRATION_31_32: Migration =
             object : Migration(31, 32) {
                 override fun migrate(db: SupportSQLiteDatabase) {
+                    // Bridge: ensure FilterSource exists. Fresh installs copy
+                    // the upstream prepackaged DB (rethink_v31.db), which never
+                    // ran fork's 30-31 and therefore lacks the table; without
+                    // this, the seed preflight below crashes with
+                    // "no such table: FilterSource". Idempotent everywhere
+                    // (IF NOT EXISTS / OR REPLACE); 32-33 still owns the
+                    // referenceId column via its own guard.
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS FilterSource (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            name TEXT NOT NULL,
+                            url TEXT NOT NULL,
+                            category TEXT NOT NULL,
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            isPreset INTEGER NOT NULL DEFAULT 0,
+                            lastUpdated INTEGER NOT NULL DEFAULT 0,
+                            lastUpdateStatus TEXT NOT NULL DEFAULT 'IDLE',
+                            errorMessage TEXT,
+                            etag TEXT,
+                            lastModified TEXT,
+                            checksum TEXT,
+                            totalLineCount INTEGER NOT NULL DEFAULT 0,
+                            parsedRuleCount INTEGER NOT NULL DEFAULT 0,
+                            unsupportedRuleCount INTEGER NOT NULL DEFAULT 0,
+                            invalidRuleCount INTEGER NOT NULL DEFAULT 0,
+                            networkRuleCount INTEGER NOT NULL DEFAULT 0,
+                            cosmeticRuleCount INTEGER NOT NULL DEFAULT 0,
+                            proceduralRuleCount INTEGER NOT NULL DEFAULT 0,
+                            scriptletRuleCount INTEGER NOT NULL DEFAULT 0,
+                            cspRuleCount INTEGER NOT NULL DEFAULT 0,
+                            htmlFilterRuleCount INTEGER NOT NULL DEFAULT 0,
+                            relativeFilePath TEXT NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_category ON FilterSource(category)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_enabled ON FilterSource(enabled)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_FilterSource_url ON FilterSource(url)")
+                    // Seed ids 1-7 for lineages that skipped fork's 30-31
+                    // (OR REPLACE = harmless no-op where already seeded).
+                    db.execSQL(
+                        """
+                        INSERT OR REPLACE INTO FilterSource
+                            (id, name, url, category, enabled, isPreset, relativeFilePath)
+                        VALUES
+                            (1, 'AdGuard Base Filter', 'https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt', '${FilterSourceCategory.ADS}', 1, 1, '${FilterSourceFileStore.relativeFilePathFor(1)}'),
+                            (2, 'Peter Lowe''s Blocklist', 'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext', '${FilterSourceCategory.ADS}', 1, 1, '${FilterSourceFileStore.relativeFilePathFor(2)}'),
+                            (3, 'EasyList', 'https://easylist.to/easylist/easylist.txt', '${FilterSourceCategory.ADS}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(3)}'),
+                            (4, 'AdGuard Tracking Protection', 'https://filters.adtidy.org/extension/ublock/filters/3.txt', '${FilterSourceCategory.PRIVACY}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(4)}'),
+                            (5, 'EasyPrivacy', 'https://easylist.to/easylist/easyprivacy.txt', '${FilterSourceCategory.PRIVACY}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(5)}'),
+                            (6, 'AdGuard Annoyances Filter', 'https://filters.adtidy.org/extension/ublock/filters/14.txt', '${FilterSourceCategory.ANNOYANCES}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(6)}'),
+                            (7, 'Fanboy''s Annoyance List', 'https://easylist.to/easylist/fanboy-annoyance.txt', '${FilterSourceCategory.ANNOYANCES}', 0, 1, '${FilterSourceFileStore.relativeFilePathFor(7)}')
+                        """.trimIndent()
+                    )
                     try {
                         db.execSQL(
                             "ALTER TABLE AppInfo ADD COLUMN notes TEXT NOT NULL DEFAULT ''"
