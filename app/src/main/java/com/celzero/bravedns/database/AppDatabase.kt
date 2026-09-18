@@ -1485,7 +1485,7 @@ abstract class AppDatabase : RoomDatabase() {
                     // (OR REPLACE = harmless no-op where already seeded).
                     db.execSQL(
                         """
-                        INSERT OR REPLACE INTO FilterSource
+                        INSERT OR IGNORE INTO FilterSource
                             (id, name, url, category, enabled, isPreset, relativeFilePath)
                         VALUES
                             (1, 'AdGuard Base Filter', 'https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt', '${FilterSourceCategory.ADS}', 1, 1, '${FilterSourceFileStore.relativeFilePathFor(1)}'),
