@@ -3109,6 +3109,16 @@
     <string name="plus_waf_bypass_desc_some">%1$d site(s) load without decryption (WAF-challenged)</string>
     <string name="plus_waf_bypass_clear">Clear</string>
     <string name="plus_waf_bypass_cleared">Auto-bypassed sites cleared</string>
+    <string name="plus_waf_bypass_desc_off">Auto-bypass off — challenged sites load decrypted (may stall)</string>
+
+    <!-- Watchdog card (Plus tab) -->
+    <string name="plus_watchdog_title">Watchdog</string>
+    <string name="plus_watchdog_desc">Restarts protection if battery optimization kills it. Checks run on a system timer, so they survive process death; short intervals cost more battery.</string>
+    <string name="plus_watchdog_interval_label">Check every (seconds)</string>
+    <string name="plus_watchdog_status_off">Off</string>
+    <string name="plus_watchdog_status_on">On · every %1$d s · last: %2$s</string>
+    <string name="plus_watchdog_status_inexact">On · every %1$d s (inexact: exact alarms denied, checks may be deferred) · last: %2$s</string>
+    <string name="plus_watchdog_status_never">never checked</string>
 
     <!-- CUSTOM-FILTER-B5: add-dialog resources -->
     <string name="custom_filter_add">Add custom filter</string>

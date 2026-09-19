@@ -268,6 +268,29 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // host+exit pair is stable, re-probing it on every restart just burns
     // another 30s tarpit wait. See LocalHttpsProxy anti-cascade rule.
     var httpsWafBypassHosts by stringPref("https_waf_bypass_hosts").withDefault<String>("")
+    // Master switch for WAF auto-bypass (Plus tab). OFF = fail closed: every
+    // connection goes through normal MITM evaluation even on challenged
+    // hosts (blank/timeout may return there). Default ON: matches the tested
+    // behavior (challenged news sites load opaque).
+    var wafBypassMasterEnabled by booleanPref("https_waf_bypass_master").withDefault<Boolean>(true)
+
+    // Watchdog (Plus tab): restart protection killed by battery optimization.
+    // The alarm trigger is system-owned so checks survive process death; the
+    // receiver respawns the process and re-arms the chain. Interval is user
+    // seconds (default 15). State persists so a kill mid-span does not reset
+    // detection (worst case one extra span). See VpnWatchdog + scheduler.
+    var watchdogEnabled by booleanPref("watchdog_enabled").withDefault<Boolean>(false)
+    var watchdogIntervalSecs by intPref("watchdog_interval_secs").withDefault<Int>(15)
+    var watchdogStateRaw by stringPref("watchdog_state").withDefault<String>("")
+    var watchdogLastCheckMs by longPref("watchdog_last_check").withDefault<Long>(0)
+    var watchdogLastAction by stringPref("watchdog_last_action").withDefault<String>("")
+    // Explicit user-STOP marker: distinguishes "user turned protection off"
+    // (never resurrect) from "system killed it" (heal). Set ONLY on
+    // user-initiated stops, cleared ONLY on user-initiated starts; system
+    // paths (backup, go-crash monitor, heal, boot-auto) never touch it, and
+    // a graceful system kill (onDestroy runs, flag flips false) leaves it
+    // false — which is exactly how the watchdog tells the two apart.
+    var watchdogUserStopped by booleanPref("watchdog_user_stopped").withDefault<Boolean>(false)
 
     // user set among AppConfig.DnsType enum; RETHINK_REMOTE is default which is Rethink-DoH
     var dnsType by

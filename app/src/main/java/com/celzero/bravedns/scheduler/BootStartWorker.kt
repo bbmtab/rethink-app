@@ -93,7 +93,7 @@ class BootStartWorker(context: Context, params: WorkerParameters) :
         }
 
         Logger.i(LOG_TAG_VPN, "attempting to auto-start VPN, event $eventType")
-        VpnController.start(applicationContext, autoAttempt = true)
+        VpnController.start(applicationContext, autoAttempt = true, userInitiated = false)
         return Result.success()
     }
 

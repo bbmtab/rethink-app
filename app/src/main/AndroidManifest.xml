@@ -35,6 +35,9 @@
 
     <!-- Required for in-app APK update installation (Plus) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Watchdog exact alarms (API 31+ needs user grant; we degrade gracefully) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <!-- https://github.com/celzero/rethink-app/issues/786 set memtagMode to off -->
@@ -87,6 +90,19 @@
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="true" />
         </service>
+
+        <!-- VPN watchdog trigger: system-owned alarm chain + boot reschedule.
+             Exported=false: only the system (AlarmManager/BOOT) reaches it. -->
+        <receiver
+            android:name=".receiver.VpnWatchdogReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.celzero.bravedns.service.VPN_WATCHDOG_CHECK" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

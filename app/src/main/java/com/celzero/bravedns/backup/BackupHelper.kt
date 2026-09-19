@@ -105,12 +105,14 @@ class BackupHelper {
 
         fun stopVpn(context: Context) {
             Logger.i(Logger.LOG_TAG_BACKUP_RESTORE, "calling vpn stop from backup helper")
-            VpnController.stop("bkup", context)
+            // System maintenance, not user intent: must not record/clear the
+            // watchdog user-STOP marker in either direction.
+            VpnController.stop("bkup", context, userInitiated = false)
         }
 
         fun startVpn(context: Context) {
             Logger.i(Logger.LOG_TAG_BACKUP_RESTORE, "calling vpn start from backup helper")
-            VpnController.start(context)
+            VpnController.start(context, userInitiated = false)
         }
 
         fun deleteResidue(backupFile: File) {

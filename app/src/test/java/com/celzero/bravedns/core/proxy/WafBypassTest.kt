@@ -7,7 +7,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-
 /**
  * Unit tests for the WAF auto-bypass verdicts (LocalHttpsProxy).
  *
@@ -23,11 +22,15 @@ class WafBypassTest {
     fun setUp() {
         // LocalHttpsProxy is a singleton: reset verdict state per test.
         // persistentState is null here, so persist calls are safe no-ops.
+        // The master override is always null outside the two master tests
+        // (they reset it themselves), belt-and-braces here too.
+        LocalHttpsProxy.wafMasterOverride = null
         LocalHttpsProxy.clearWafBypass()
     }
 
     @After
     fun tearDown() {
+        LocalHttpsProxy.wafMasterOverride = null
         LocalHttpsProxy.clearWafBypass()
     }
 
@@ -93,13 +96,16 @@ class WafBypassTest {
     }
 
     @Test
-    fun timeout_successBetweenStrikes_resetsCounter() {
+    fun timeout_successBetweenStrikes_doesNotResetWindow() {
+        // Flaky-tarpit hosts alternate timeout/success (e.g. a fast 403
+        // between two 30s stalls). Interleaved successes must NOT reset the
+        // window — the 2nd timeout still trips the breaker.
         LocalHttpsProxy.recordUpstreamTimeout("www.tempo.co")
-        LocalHttpsProxy.recordUpstreamSuccess("www.tempo.co")
+        // (a fully-forwarded response here changes nothing by design)
         LocalHttpsProxy.recordUpstreamTimeout("www.tempo.co")
 
-        assertFalse(
-            "a completed response between timeouts breaks the streak",
+        assertTrue(
+            "two timeouts within the window bypass even with success between",
             LocalHttpsProxy.isWafBypassed("www.tempo.co")
         )
     }
@@ -124,16 +130,65 @@ class WafBypassTest {
         assertTrue(LocalHttpsProxy.getWafBypassedHosts().isEmpty())
         assertFalse(LocalHttpsProxy.isWafBypassed("www.kompas.com"))
     }
+    @Test
+    fun masterOff_failClosed_noRecording_noEnforcement() {
+        // The gate is driven through wafMasterOverride: SharedPreferences
+        // apply() has no read-your-writes guarantee under Robolectric, so
+        // tests must not depend on pref flush timing (that is what the
+        // production path uses; the override exists precisely for this).
+        LocalHttpsProxy.wafMasterOverride = false
+        try {
+            LocalHttpsProxy.recordWafChallenge("www.kompas.com")
+            assertFalse(
+                "master OFF must not record verdicts",
+                LocalHttpsProxy.isWafBypassed("www.kompas.com")
+            )
+            LocalHttpsProxy.recordUpstreamTimeout("www.tempo.co")
+            LocalHttpsProxy.recordUpstreamTimeout("www.tempo.co")
+            LocalHttpsProxy.recordUpstreamTimeout("www.tempo.co")
+            assertFalse(
+                "master OFF must not enforce even past the strike window",
+                LocalHttpsProxy.isWafBypassed("www.tempo.co")
+            )
+        } finally {
+            // Neutral ground for other test files sharing this singleton.
+            LocalHttpsProxy.wafMasterOverride = null
+            LocalHttpsProxy.clearWafBypass()
+        }
+    }
 
     @Test
-    fun bypassedHost_doesNotPolluteDynamicSuffixSet() {
-        // shouldInspectDomain (suffix-matched dynamic set) must stay unaware
-        // of WAF verdicts: the MITM gate consults isWafBypassed separately.
+    fun masterOn_autoWorksAfterReEnable() {
+        LocalHttpsProxy.wafMasterOverride = false
         LocalHttpsProxy.recordWafChallenge("www.kompas.com")
-
+        assertFalse(LocalHttpsProxy.isWafBypassed("www.kompas.com"))
+        LocalHttpsProxy.wafMasterOverride = true
+        LocalHttpsProxy.recordWafChallenge("www.kompas.com")
         assertTrue(
-            "dynamic set must not learn WAF hosts (no cascade vector)",
-            LocalHttpsProxy.shouldInspectDomain("www.kompas.com")
+            "re-enabling resumes auto verdicts (stored set was never polluted)",
+            LocalHttpsProxy.isWafBypassed("www.kompas.com")
         )
+        LocalHttpsProxy.wafMasterOverride = null
+        LocalHttpsProxy.clearWafBypass()
+    }
+
+    @Test
+    fun healthGate_countsWhenExitHealthy() {
+        val now = 1_000_000L
+        // Recent success (10s ago): exit healthy, count.
+        assertTrue(LocalHttpsProxy.shouldCountTimeout(now, now - 10_000L))
+        // Bootstrap (never seen success): count (favor availability).
+        assertTrue(LocalHttpsProxy.shouldCountTimeout(now, 0L))
+        assertTrue(LocalHttpsProxy.shouldCountTimeout(now, -5L))
+    }
+
+    @Test
+    fun healthGate_skipsWhenExitUnhealthy() {
+        val now = 1_000_000L
+        // Last success 5 minutes ago: exit may be flapping, skip.
+        assertFalse(LocalHttpsProxy.shouldCountTimeout(now, now - 300_000L))
+        // Boundary: exactly at the window edge still counts.
+        assertTrue(LocalHttpsProxy.shouldCountTimeout(now, now - 120_000L))
+        assertFalse(LocalHttpsProxy.shouldCountTimeout(now, now - 120_001L))
     }
 }

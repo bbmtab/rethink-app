@@ -69,8 +69,9 @@ object LocalHttpsProxy : KoinComponent {
     //  - recorded ONLY on explicit WAF signals, never on generic failures:
     //      * upstream response carrying `x-amzn-waf-action` (deterministic
     //        challenge verdict), recorded immediately, or
-    //      * 2nd CONSECUTIVE upstream read-timeout for the same host (tarpit
-    //        signature: TLS completes, then 0 bytes for soTimeout),
+    //      * 2nd upstream read-timeout for the same host within a 10-minute
+    //        window (tarpit signature: TLS completes, then 0 bytes for
+    //        soTimeout). Interleaved successes do not reset the window.
     //  - persisted across restarts (a WAF verdict for a host+exit pair is
     //    stable; re-probing it each restart just burns another 30s wait),
     //  - user-visible and user-clearable (Plus tab "Auto-bypassed sites").
@@ -78,7 +79,36 @@ object LocalHttpsProxy : KoinComponent {
     // and firewall verdicts; only TLS decryption (content filtering) is
     // skipped via opaque TCP pass-through.
     private val wafBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val wafTimeoutStrikes = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    // Per-host tarpit tracking: (timeouts, windowStartMs). A host is bypassed
+    // on 2 timeouts within WAF_STRIKE_WINDOW_MS, REGARDLESS of interleaved
+    // successes — flaky-tarpit hosts alternate timeout/success (e.g. a fast
+    // 403 between two 30s stalls) and must still trip the breaker. A lone
+    // flap expires lazily: a timeout arriving after the window restarts it.
+    private data class WafStrike(var count: Int, var windowStartMs: Long)
+    private val wafTimeoutStrikes = java.util.concurrent.ConcurrentHashMap<String, WafStrike>()
+    // (const vals live directly on the object: a companion is illegal here.)
+    private const val WAF_STRIKE_WINDOW_MS = 10 * 60 * 1000L
+    private const val WAF_STRIKES_TO_BYPASS = 2
+    // Exit-health canary: last time ANY upstream transaction completed fully.
+    // A timeout is only attributable to a host (recordable) when the exit
+    // demonstrably worked recently; otherwise it is exit-flap noise and must
+    // not pollute verdicts. See shouldCountTimeout.
+    @Volatile
+    private var wafLastSuccessMs: Long = 0L
+    private const val WAF_EXIT_HEALTHY_WINDOW_MS = 120_000L
+
+    /**
+     * Pure: may this timeout be counted against the host? No when the exit
+     * itself looks down (no fully-completed upstream transaction recently) —
+     * attributing flap noise would bypass half the internet. The bootstrap
+     * exception (never seen success) counts: without any baseline the safer
+     * bet is availability (a false bypass is cheap, bounded, clearable).
+     * Unit-tested.
+     */
+    internal fun shouldCountTimeout(nowMs: Long, lastSuccessMs: Long): Boolean {
+        if (lastSuccessMs <= 0L) return true
+        return nowMs - lastSuccessMs <= WAF_EXIT_HEALTHY_WINDOW_MS
+    }
 
     @Volatile
     private var inspectionPolicyEvaluator:
@@ -244,7 +274,22 @@ object LocalHttpsProxy : KoinComponent {
         }
     }
 
+    // Master-switch read with a test hook. Production always consults the
+    // persisted pref (null persistentState only happens in unit tests, where
+    // the switch defaults to enabled). Unit tests cannot rely on
+    // SharedPreferences apply() flush timing under Robolectric, so they drive
+    // the gate through wafMasterOverride instead; it is always null outside
+    // tests (reset in tearDown).
+    @Volatile
+    internal var wafMasterOverride: Boolean? = null
+
+    internal fun isWafMasterOn(): Boolean =
+        wafMasterOverride ?: (persistentState?.wafBypassMasterEnabled ?: true)
+
     internal fun isWafBypassed(host: String): Boolean {
+        // Master switch first: OFF means fail closed (normal MITM evaluation
+        // for every host).
+        if (!isWafMasterOn()) return false
         // EXACT match only. No suffix matching, ever (anti-cascade rule).
         val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
         return wafBypassSet.contains(cleaned)
@@ -261,6 +306,9 @@ object LocalHttpsProxy : KoinComponent {
     }
 
     internal fun recordWafChallenge(host: String) {
+        // No recording while the master switch is off: disabled means disabled
+        // (no verdict accumulation behind the user's back).
+        if (!isWafMasterOn()) return
         val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
         if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
         wafBypassSet.add(cleaned)
@@ -274,39 +322,57 @@ object LocalHttpsProxy : KoinComponent {
     }
 
     internal fun recordUpstreamTimeout(host: String) {
-        // Tarpit signature: TLS completed, then silence until soTimeout. Count
-        // CONSECUTIVE timeouts; bypass on the 2nd so a single flap or one slow
-        // origin cannot fail a host open. Any fully-forwarded response resets
-        // the counter via recordUpstreamSuccess.
+        // Tarpit signature: TLS completed, then silence until soTimeout.
+        // Bypass on WAF_STRIKES_TO_BYPASS timeouts within WAF_STRIKE_WINDOW_MS
+        // so a single flap or one slow origin cannot fail a host open, while
+        // flaky-tarpit hosts (timeout/success alternating) still trip the
+        // breaker. Interleaved successes do NOT reset the window: only a
+        // fully quiet window lets a host off.
         //
         // Caveat: soTimeout is set on both legs, so a downstream (client-side)
         // stall is misattributed here. That failure mode is rare (clients
         // disconnect rather than stall) and its cost is bounded: the host goes
         // opaque but remains DNS/firewall-filtered, and the user can clear it.
+        // Master switch: OFF disables the whole feature (no recording, no
+        // enforcement) — fail closed to normal MITM evaluation.
+        if (!isWafMasterOn()) return
         val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
         if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
-        val strikes = (wafTimeoutStrikes[cleaned] ?: 0) + 1
-        if (strikes >= 2) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        // Exit-health gate (credibility): count only while the exit provably
+        // works. During an exit-wide flap everything times out at once; those
+        // timeouts carry zero per-host information and must not mint verdicts
+        // (that is how googleapis hosts got bypassed during flaps).
+        if (!shouldCountTimeout(now, wafLastSuccessMs)) {
+            logInfo(
+                "WAF auto-bypass: timeout for '$cleaned' ignored " +
+                    "(exit unhealthy, no recent completed transaction)"
+            )
+            return
+        }
+        val strike = wafTimeoutStrikes[cleaned]
+        val count = if (strike == null || now - strike.windowStartMs > WAF_STRIKE_WINDOW_MS) {
+            wafTimeoutStrikes[cleaned] = WafStrike(1, now)
+            1
+        } else {
+            strike.count += 1
+            strike.count
+        }
+        if (count >= WAF_STRIKES_TO_BYPASS) {
             wafTimeoutStrikes.remove(cleaned)
             wafBypassSet.add(cleaned)
             persistWafBypassCache()
             logWarn(
-                "WAF auto-bypass: '$cleaned' timed out $strikes consecutive " +
-                    "MITM transaction(s) (tarpit signature) — future " +
+                "WAF auto-bypass: '$cleaned' timed out $count MITM " +
+                    "transaction(s) within window (tarpit signature) — future " +
                     "connections go opaque pass-through (exact host only)"
             )
         } else {
-            wafTimeoutStrikes[cleaned] = strikes
             logInfo(
-                "WAF auto-bypass: first MITM timeout for '$cleaned' " +
-                    "(strike $strikes/2, not bypassed yet)"
+                "WAF auto-bypass: MITM timeout for '$cleaned' " +
+                    "(strike $count/$WAF_STRIKES_TO_BYPASS in window, not bypassed yet)"
             )
         }
-    }
-
-    internal fun recordUpstreamSuccess(host: String) {
-        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
-        wafTimeoutStrikes.remove(cleaned)
     }
 
     /**
@@ -990,9 +1056,10 @@ object LocalHttpsProxy : KoinComponent {
                     )
                 }
 
-                // A fully-forwarded response breaks any consecutive-timeout
-                // streak for this host (see recordUpstreamTimeout).
-                recordUpstreamSuccess(host)
+                // Exit-health canary: any fully-forwarded response proves the
+                // exit works right now (see shouldCountTimeout). Stamp only;
+                // successes never reset tarpit windows.
+                wafLastSuccessMs = android.os.SystemClock.elapsedRealtime()
             }
         } catch (e: java.net.SocketTimeoutException) {
             // Tarpit signature candidate: TLS completed earlier, then silence.

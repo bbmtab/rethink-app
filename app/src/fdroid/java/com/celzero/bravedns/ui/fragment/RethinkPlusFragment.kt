@@ -30,6 +30,7 @@ import com.celzero.bravedns.R
 import com.celzero.bravedns.core.ca.CaCertificateExporter
 import com.celzero.bravedns.core.ca.CertificateAuthority
 import com.celzero.bravedns.core.proxy.LocalHttpsProxy
+import com.celzero.bravedns.service.VpnWatchdogScheduler
 import com.celzero.bravedns.database.FilterSource
 import com.celzero.bravedns.database.FilterSourceRepository
 import com.celzero.bravedns.viewmodel.FilterSourceSummaryFormatter
@@ -78,6 +79,7 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         initAdvancedFilteringSection()
         initExclusionsSection()
         initWafBypassRow()
+        initWatchdogSection()
 
         // Immediate refresh of CA status on view creation
         updateCaStatusUi()
@@ -94,11 +96,130 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         updateCaStatusUi()
         // WAF verdicts can accrue while the tab is in the background
         updateWafBypassUi()
+        // Watchdog checks run on a system timer; refresh status line
+        updateWatchdogUi()
+    }
+
+    // ========== WATCHDOG SECTION ==========
+
+    private fun initWatchdogSection() {
+        // Restore persisted state before installing listeners (same pattern
+        // as the HTTPS master toggle: no listener fire on init).
+        b.switchWatchdog.isChecked = persistentState.watchdogEnabled
+        b.etWatchdogInterval.setText(persistentState.watchdogIntervalSecs.toString())
+
+        b.switchWatchdog.setOnCheckedChangeListener { _, isChecked ->
+            persistentState.watchdogEnabled = isChecked
+            val ctx = requireContext()
+            if (isChecked) {
+                applyWatchdogInterval(reschedule = true)
+                VpnWatchdogScheduler.schedule(
+                    ctx,
+                    VpnWatchdogScheduler.clampIntervalSecs(persistentState.watchdogIntervalSecs)
+                )
+            } else {
+                VpnWatchdogScheduler.cancel(ctx)
+            }
+            updateWatchdogUi()
+        }
+
+        val applyFromEditor = {
+            if (b.switchWatchdog.isChecked) {
+                applyWatchdogInterval(reschedule = true)
+            } else {
+                applyWatchdogInterval(reschedule = false)
+            }
+            updateWatchdogUi()
+        }
+        b.etWatchdogInterval.setOnEditorActionListener { _, _, _ ->
+            applyFromEditor()
+            false
+        }
+        b.etWatchdogInterval.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) applyFromEditor()
+        }
+
+        // Tapping status opens the exact-alarm settings when the system
+        // denies exact alarms (the degraded/inexact path); otherwise no-op.
+        b.tvWatchdogStatus.setOnClickListener {
+            val ctx = requireContext()
+            if (persistentState.watchdogEnabled && !VpnWatchdogScheduler.isExactAlarmAvailable(ctx)) {
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
+                } catch (e: Exception) {
+                    Logger.w(LOG_TAG_UI, "Watchdog: exact-alarm settings unavailable: ${e.message}")
+                }
+            }
+        }
+        updateWatchdogUi()
+    }
+
+    private fun applyWatchdogInterval(reschedule: Boolean) {
+        val raw = b.etWatchdogInterval.text?.toString()?.toIntOrNull()
+        val clamped = VpnWatchdogScheduler.clampIntervalSecs(
+            raw ?: VpnWatchdogScheduler.DEFAULT_INTERVAL_SECS
+        )
+        persistentState.watchdogIntervalSecs = clamped
+        // Reflect the clamp back so the user sees the accepted value.
+        b.etWatchdogInterval.setText(clamped.toString())
+        if (reschedule) {
+            try {
+                VpnWatchdogScheduler.schedule(requireContext(), clamped)
+            } catch (e: Exception) {
+                Logger.w(LOG_TAG_UI, "Watchdog: reschedule failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun updateWatchdogUi() {
+        val enabled = persistentState.watchdogEnabled
+        val interval = VpnWatchdogScheduler.clampIntervalSecs(persistentState.watchdogIntervalSecs)
+        if (b.switchWatchdog.isChecked != enabled) {
+            b.switchWatchdog.isChecked = enabled
+        }
+        if ((b.etWatchdogInterval.text?.toString()?.toIntOrNull()
+                ?: -1) != persistentState.watchdogIntervalSecs
+        ) {
+            b.etWatchdogInterval.setText(persistentState.watchdogIntervalSecs.toString())
+        }
+        if (!enabled) {
+            b.tvWatchdogStatus.text = getString(R.string.plus_watchdog_status_off)
+            return
+        }
+        val last = try {
+            val ms = persistentState.watchdogLastCheckMs
+            val action = persistentState.watchdogLastAction
+            if (ms <= 0L) {
+                getString(R.string.plus_watchdog_status_never)
+            } else {
+                val ago = ((System.currentTimeMillis() - ms) / 1000).coerceAtLeast(0)
+                "${ago}s ago · $action"
+            }
+        } catch (e: Exception) {
+            getString(R.string.plus_watchdog_status_never)
+        }
+        val exact = try {
+            VpnWatchdogScheduler.isExactAlarmAvailable(requireContext())
+        } catch (e: Exception) {
+            false
+        }
+        b.tvWatchdogStatus.text = if (exact) {
+            getString(R.string.plus_watchdog_status_on, interval, last)
+        } else {
+            getString(R.string.plus_watchdog_status_inexact, interval, last)
+        }
     }
 
     // ========== WAF AUTO-BYPASS ROW ==========
 
     private fun initWafBypassRow() {
+        // Restore the persisted master state before installing the listener
+        // (same pattern as the HTTPS master toggle: no listener fire on init).
+        b.switchWafBypassMaster.isChecked = persistentState.wafBypassMasterEnabled
+        b.switchWafBypassMaster.setOnCheckedChangeListener { _, isChecked ->
+            persistentState.wafBypassMasterEnabled = isChecked
+            updateWafBypassUi()
+        }
         b.btnWafBypassClear.setOnClickListener {
             LocalHttpsProxy.clearWafBypass()
             updateWafBypassUi()
@@ -108,18 +229,28 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
     }
 
     private fun updateWafBypassUi() {
+        val masterOn = persistentState.wafBypassMasterEnabled
+        if (b.switchWafBypassMaster.isChecked != masterOn) {
+            b.switchWafBypassMaster.isChecked = masterOn
+        }
         val hosts = try {
             LocalHttpsProxy.getWafBypassedHosts()
         } catch (e: Exception) {
             Logger.w(LOG_TAG_UI, "WAF bypass row: cannot read verdicts: ${e.message}")
             emptySet()
         }
+        // Clearing stays available while off: stored verdicts persist and
+        // would resume on re-enable.
+        b.btnWafBypassClear.isEnabled = hosts.isNotEmpty()
+        if (!masterOn) {
+            b.tvWafBypassSubtitle.text = getString(R.string.plus_waf_bypass_desc_off)
+            return
+        }
         b.tvWafBypassSubtitle.text = if (hosts.isEmpty()) {
             getString(R.string.plus_waf_bypass_desc_none)
         } else {
             getString(R.string.plus_waf_bypass_desc_some, hosts.size)
         }
-        b.btnWafBypassClear.isEnabled = hosts.isNotEmpty()
     }
 
     // ========== HTTPS INSPECTION SECTION ==========

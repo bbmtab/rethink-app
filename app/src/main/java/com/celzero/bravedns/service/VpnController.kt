@@ -107,7 +107,13 @@ object VpnController : KoinComponent {
         connectionStatus.postValue(state)
     }
 
-    fun start(context: Context, autoAttempt: Boolean = false) {
+    fun start(context: Context, autoAttempt: Boolean = false, userInitiated: Boolean = true) {
+        if (userInitiated) {
+            // Explicit user start (Home/tile/Tasker): clear any recorded
+            // user-STOP so the watchdog may run again. System callers
+            // (heal, boot-auto, backup-restore) pass false and never touch it.
+            setWatchdogUserStopped(false)
+        }
         val b = rvpn
         // if the tunnel has the go-adapter then there's nothing to do
         if (b?.hasTunnel() == true) {
@@ -148,6 +154,12 @@ object VpnController : KoinComponent {
 
     fun stop(reason: String, context: Context, userInitiated: Boolean = true) {
         Logger.i(LOG_TAG_VPN, "VPN Controller stop with context: $context")
+        if (userInitiated) {
+            // Explicit user stop (Home/tile/notification/Tasker): record it
+            // so the watchdog never resurrects this intent. System callers
+            // (backup, go-crash monitor) pass false.
+            setWatchdogUserStopped(true)
+        }
         vpnState = null
         onConnectionStateChanged(null)
         val b = rvpn
@@ -165,6 +177,20 @@ object VpnController : KoinComponent {
         val cs = vpnState
         val on = b?.hasTunnel() == true
         return VpnState(requested, on, cs)
+    }
+
+    /**
+     * Records/clears an explicit user-STOP marker for the watchdog (see
+     * PersistentState.watchdogUserStopped): distinguishes "user turned
+     * protection off, never resurrect" from "system killed it, heal".
+     * Best-effort: prefs failures must never break start/stop paths.
+     */
+    private fun setWatchdogUserStopped(stopped: Boolean) {
+        try {
+            persistentState.watchdogUserStopped = stopped
+        } catch (e: Exception) {
+            Logger.w(LOG_TAG_VPN, "watchdog user-stopped marker write failed: ${e.message}")
+        }
     }
 
     @Deprecated(message = "use hasTunnel() instead", replaceWith = ReplaceWith("hasTunnel()"))
