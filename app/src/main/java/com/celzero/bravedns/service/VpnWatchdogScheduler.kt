@@ -56,16 +56,22 @@ object VpnWatchdogScheduler {
 
     /**
      * Pure: run checks only when the feature is on AND (protection is
-     * expected OR no explicit user-STOP is recorded). The second disjunct is
-     * the system-vs-user discriminator the feature exists for:
+     * expected OR no explicit user-STOP is recorded) AND the global Plus
+     * kill-switch is on. The second disjunct is the system-vs-user
+     * discriminator the feature exists for:
      * - user STOP (expected=false, stopped=true) → never run/resurrect;
      * - graceful system kill (onDestroy flipped expected=false, marker
-     *   untouched=false) → run and heal;
-     * - abrupt kill (expected still true) → run and heal.
-     * Unit-tested (all 8 combinations).
+     *   untouched=false) → run and heal.
+     * The kill-switch conjunct keeps the promise that Plus-off means
+     * stock Rethink behavior (no Plus alarms ticking either).
+     * Unit-tested.
      */
-    internal fun shouldRunWatchdog(watchdogEnabled: Boolean, vpnExpected: Boolean, userStopped: Boolean): Boolean =
-        watchdogEnabled && (vpnExpected || !userStopped)
+    internal fun shouldRunWatchdog(
+        watchdogEnabled: Boolean,
+        vpnExpected: Boolean,
+        userStopped: Boolean,
+        plusMasterEnabled: Boolean,
+    ): Boolean = watchdogEnabled && (vpnExpected || !userStopped) && plusMasterEnabled
 
     /** Pure: serialize decide() state for prefs (survives kills). Unit-tested. */
     internal fun serializeState(s: VpnWatchdog.State): String =
@@ -168,6 +174,11 @@ object VpnWatchdogScheduler {
         } catch (e: Exception) {
             false
         }
+        val plusMaster = try {
+            ps.plusMasterEnabled
+        } catch (e: Exception) {
+            true
+        }
         val nowRealtime = SystemClock.elapsedRealtime()
         val state = parseState(ps.watchdogStateRaw)
         val presence = try {
@@ -185,7 +196,7 @@ object VpnWatchdogScheduler {
         val (next, action) = VpnWatchdog.decide(
             state = state,
             nowMs = nowRealtime,
-            shouldRun = shouldRunWatchdog(enabled, vpnExpected, userStopped),
+            shouldRun = shouldRunWatchdog(enabled, vpnExpected, userStopped, plusMaster),
             presence = presence,
             paused = paused,
             phase = VpnWatchdog.Phase.HEAL,

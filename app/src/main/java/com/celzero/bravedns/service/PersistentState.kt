@@ -274,6 +274,14 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // behavior (challenged news sites load opaque).
     var wafBypassMasterEnabled by booleanPref("https_waf_bypass_master").withDefault<Boolean>(true)
 
+    // Global Plus kill-switch (Plus tab, top). When OFF, every Plus behavior
+    // is defeated and the app runs stock Rethink semantics: no MITM/proxy
+    // setup at establish, no WAF verdicts, no watchdog chain, no content
+    // filtering (DNS + firewall, the Rethink core, are untouched). This is
+    // the safety net for dogfood/beta: one tap returns to known-good stock
+    // behavior without uninstalling. Default ON (current tested behavior).
+    var plusMasterEnabled by booleanPref("plus_master_enabled").withDefault<Boolean>(true)
+
     // Watchdog (Plus tab): restart protection killed by battery optimization.
     // The alarm trigger is system-owned so checks survive process death; the
     // receiver respawns the process and re-arms the chain. Interval is user

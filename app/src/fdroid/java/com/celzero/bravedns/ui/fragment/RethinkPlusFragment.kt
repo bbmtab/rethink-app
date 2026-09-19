@@ -80,6 +80,7 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         initExclusionsSection()
         initWafBypassRow()
         initWatchdogSection()
+        initPlusMasterRow()
 
         // Immediate refresh of CA status on view creation
         updateCaStatusUi()
@@ -98,6 +99,55 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
         updateWafBypassUi()
         // Watchdog checks run on a system timer; refresh status line
         updateWatchdogUi()
+        // Plus kill-switch state can change only here; refresh dependent rows
+        updatePlusMasterUi()
+    }
+
+    // ========== PLUS MASTER KILL-SWITCH ==========
+
+    private fun initPlusMasterRow() {
+        b.switchPlusMaster.isChecked = persistentState.plusMasterEnabled
+        b.switchPlusMaster.setOnCheckedChangeListener { _, isChecked ->
+            persistentState.plusMasterEnabled = isChecked
+            val ctx = requireContext()
+            if (!isChecked) {
+                // Stop Plus background work immediately: cancel the watchdog
+                // chain (its ticks would NOOP anyway, but alarms cost battery)
+                // and clear any WAF verdicts? No — verdicts persist so
+                // re-enabling resumes exactly; Clear stays user-initiated.
+                try {
+                    VpnWatchdogScheduler.cancel(ctx)
+                } catch (e: Exception) {
+                    Logger.w(LOG_TAG_UI, "Plus kill: watchdog cancel failed: ${e.message}")
+                }
+            } else {
+                // Re-arm the watchdog chain if the user had it enabled.
+                if (persistentState.watchdogEnabled) {
+                    try {
+                        VpnWatchdogScheduler.schedule(
+                            ctx,
+                            VpnWatchdogScheduler.clampIntervalSecs(persistentState.watchdogIntervalSecs)
+                        )
+                    } catch (e: Exception) {
+                        Logger.w(LOG_TAG_UI, "Plus kill: watchdog reschedule failed: ${e.message}")
+                    }
+                }
+            }
+            updatePlusMasterUi()
+            updateWafBypassUi()
+            updateWatchdogUi()
+        }
+        updatePlusMasterUi()
+    }
+
+    private fun updatePlusMasterUi() {
+        val on = persistentState.plusMasterEnabled
+        if (b.switchPlusMaster.isChecked != on) {
+            b.switchPlusMaster.isChecked = on
+        }
+        b.tvPlusMasterSubtitle.text = getString(
+            if (on) R.string.plus_master_desc_on else R.string.plus_master_desc_off
+        )
     }
 
     // ========== WATCHDOG SECTION ==========
@@ -186,6 +236,11 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
             b.tvWatchdogStatus.text = getString(R.string.plus_watchdog_status_off)
             return
         }
+        if (!persistentState.plusMasterEnabled) {
+            // Global kill-switch: the chain is cancelled, show stock state.
+            b.tvWatchdogStatus.text = getString(R.string.plus_master_desc_off)
+            return
+        }
         val last = try {
             val ms = persistentState.watchdogLastCheckMs
             val action = persistentState.watchdogLastAction
@@ -250,6 +305,12 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
             getString(R.string.plus_waf_bypass_desc_none)
         } else {
             getString(R.string.plus_waf_bypass_desc_some, hosts.size)
+        }
+        // Global kill-switch overrides the row text: with Plus off there is
+        // no inspection at all, so per-host bypass state is moot (verdicts
+        // stay stored and resume on re-enable).
+        if (!persistentState.plusMasterEnabled) {
+            b.tvWafBypassSubtitle.text = getString(R.string.plus_waf_bypass_desc_plus_off)
         }
     }
 

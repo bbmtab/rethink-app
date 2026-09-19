@@ -2035,7 +2035,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
                 Logger.i(LOG_TAG_VPN, "AF hot: gen $gen already applied, dedupe skip")
                 return true
             }
-            if (!persistentState.httpsInspectionEnabled || !com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
+            if (!persistentState.httpsInspectionEnabled || !persistentState.plusMasterEnabled || !com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
                 Logger.i(LOG_TAG_VPN, "AF hot: eligibility not met (https=${persistentState.httpsInspectionEnabled}), skip")
                 return false
             }
@@ -2094,6 +2094,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
     // blocking VPN establish; the current artifact reuses the HOT path (load only).
     internal suspend fun coldActivateAdvancedFilter() {
         if (!persistentState.httpsInspectionEnabled) return
+        if (!persistentState.plusMasterEnabled) return
         if (!com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) return
         val compiled = fileStore.compiledRulesFile()
         val stale = isAdvancedFilterStale(compiled)
@@ -3449,7 +3450,7 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
             // Do not expose a stale transport policy while HTTPS runtime is being rebuilt.
             inspectionRuntimePolicySnapshot = null
 
-            if (persistentState.httpsInspectionEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
+            if (persistentState.httpsInspectionEnabled && persistentState.plusMasterEnabled && com.celzero.bravedns.core.ca.CertificateAuthority.isCaInstalled()) {
                 try {
                     // 1. Load rules into FilterEngine
                     val rulesFile = java.io.File(this.filesDir, "adblock_rules.txt")

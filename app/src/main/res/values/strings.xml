@@ -3105,6 +3105,10 @@
     <string name="plus_waf_bypass_clear">Clear</string>
     <string name="plus_waf_bypass_cleared">Auto-bypassed sites cleared</string>
     <string name="plus_waf_bypass_desc_off">Auto-bypass off — challenged sites load decrypted (may stall)</string>
+    <string name="plus_waf_bypass_desc_plus_off">Plus off — inspection inactive</string>
+    <string name="plus_master_title">Plus features</string>
+    <string name="plus_master_desc_on">All Plus additions active (inspection, bypass, watchdog, filtering)</string>
+    <string name="plus_master_desc_off">Plus off — stock Rethink behavior (DNS + firewall only)</string>
 
     <!-- Watchdog card (Plus tab) -->
     <string name="plus_watchdog_title">Watchdog</string>

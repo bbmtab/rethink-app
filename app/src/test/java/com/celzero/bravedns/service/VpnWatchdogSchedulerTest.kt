@@ -52,19 +52,23 @@ class VpnWatchdogSchedulerTest {
     @Test
     fun shouldRun_neverResurrectsUserStop() {
         // Feature on + protection expected: run.
-        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = true, userStopped = false))
-        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = true, userStopped = true))
+        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = true, userStopped = false, plusMasterEnabled = true))
+        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = true, userStopped = true, plusMasterEnabled = true))
         // Feature on + user explicitly stopped: NEVER run (even though the
         // tunnel is down) — this is the discriminator the feature exists for.
-        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = false, userStopped = true))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = false, userStopped = true, plusMasterEnabled = true))
         // Feature on + graceful system kill (flag flipped false by onDestroy,
         // marker untouched): run and heal.
-        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = false, userStopped = false))
+        assertTrue(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = false, userStopped = false, plusMasterEnabled = true))
+        // Global Plus kill-switch off: never run regardless (stock behavior).
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = true, userStopped = false, plusMasterEnabled = false))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = true, vpnExpected = false, userStopped = false, plusMasterEnabled = false))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = true, userStopped = false, plusMasterEnabled = true))
         // Feature off: never run regardless.
-        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = true, userStopped = false))
-        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = true, userStopped = true))
-        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = false, userStopped = false))
-        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = false, userStopped = true))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = true, userStopped = false, plusMasterEnabled = true))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = true, userStopped = true, plusMasterEnabled = true))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = false, userStopped = false, plusMasterEnabled = true))
+        assertFalse(VpnWatchdogScheduler.shouldRunWatchdog(watchdogEnabled = false, vpnExpected = false, userStopped = true, plusMasterEnabled = true))
     }
 
     @Test
