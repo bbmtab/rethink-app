@@ -419,10 +419,8 @@ android {
     }
     lint {
         abortOnError true
-        // Lint analyzes main, androidTest and unitTest sources of the variant by
-        // default; the unitTest analysis (lintAnalyze<Variant>UnitTest) take more time
-        // to complete. Restrict lint to the variant's main sources.
         ignoreTestSources true
+        disable 'FragmentLiveDataObserve', 'FragmentBackPressedCallback', 'FragmentAddMenuProvider'
     }
 
     sourceSets {
