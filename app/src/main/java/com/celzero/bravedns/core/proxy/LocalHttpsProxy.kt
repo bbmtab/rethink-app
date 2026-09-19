@@ -110,6 +110,97 @@ object LocalHttpsProxy : KoinComponent {
         return nowMs - lastSuccessMs <= WAF_EXIT_HEALTHY_WINDOW_MS
     }
 
+    /**
+     * Upstream-dial circuit breaker (stale-pool / total-outage class).
+     *
+     * Counts CONSECUTIVE TCP/SOCKS dial failures only — never HTTP responses
+     * or TLS handshake outcomes (those are edge behavior, owned by the WAF
+     * verdicts above). Any successful dial resets the streak, so intermittent
+     * flaps can never trip it; only a sustained outage (5 dials in 60s)
+     * requests a debounced VPN re-establish, which rebuilds the tunnel, DNS
+     * state and upstream sessions (the manual STOP→START recovery, automated).
+     * Bounded to 3 restarts/hour, then loud give-up. Never fails open to
+     * direct (privacy): a dead upstream stays dead loudly rather than
+     * silently changing exits.
+     */
+    internal enum class UpstreamBreakerAction { NONE, TRIP_RESTART, GIVE_UP }
+
+    internal data class UpstreamBreakerState(
+        val consecFails: Int = 0,
+        val windowStartMs: Long = 0L,
+        val restartsUsed: Int = 0,
+        val hourStartMs: Long = 0L,
+    )
+
+    internal data class UpstreamBreakerConfig(
+        val windowMs: Long = 60_000L,
+        val tripCount: Int = 5,
+        val maxRestartsPerHour: Int = 3,
+        val hourMs: Long = 3_600_000L,
+    )
+
+    internal fun evaluateUpstreamBreaker(
+        state: UpstreamBreakerState,
+        nowMs: Long,
+        failed: Boolean,
+        cfg: UpstreamBreakerConfig = UpstreamBreakerConfig(),
+    ): Pair<UpstreamBreakerState, UpstreamBreakerAction> {
+        if (!failed) {
+            return state.copy(consecFails = 0, windowStartMs = 0L) to UpstreamBreakerAction.NONE
+        }
+        val (count, winStart) =
+            if (state.consecFails == 0 || nowMs - state.windowStartMs > cfg.windowMs) {
+                1 to nowMs
+            } else {
+                state.consecFails + 1 to state.windowStartMs
+            }
+        if (count < cfg.tripCount) {
+            return state.copy(consecFails = count, windowStartMs = winStart) to UpstreamBreakerAction.NONE
+        }
+        val (used, hourStart) =
+            if (nowMs - state.hourStartMs > cfg.hourMs) {
+                0 to nowMs
+            } else {
+                state.restartsUsed to state.hourStartMs
+            }
+        return if (used < cfg.maxRestartsPerHour) {
+            UpstreamBreakerState(0, 0L, used + 1, hourStart) to UpstreamBreakerAction.TRIP_RESTART
+        } else {
+            UpstreamBreakerState(0, 0L, used, hourStart) to UpstreamBreakerAction.GIVE_UP
+        }
+    }
+
+    @Volatile
+    private var upstreamBreakerState = UpstreamBreakerState()
+
+    internal fun recordUpstreamDialResult(succeeded: Boolean) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val (next, action) = evaluateUpstreamBreaker(upstreamBreakerState, now, !succeeded)
+        upstreamBreakerState = next
+        when (action) {
+            UpstreamBreakerAction.TRIP_RESTART -> {
+                logWarn(
+                    "upstream-dial breaker tripped (sustained dial failures) — " +
+                        "requesting debounced VPN restart"
+                )
+                try {
+                    com.celzero.bravedns.service.VpnController.requestRestart("upstream-dial-breaker")
+                } catch (e: Exception) {
+                    logWarn("upstream-dial breaker: restart request failed: ${e.message}")
+                }
+            }
+            UpstreamBreakerAction.GIVE_UP -> {
+                logWarn(
+                    "upstream-dial breaker: hourly restart budget spent, " +
+                        "giving up loudly (no silent exit change)"
+                )
+            }
+            UpstreamBreakerAction.NONE -> {
+                // Nothing to do.
+            }
+        }
+    }
+
     @Volatile
     private var inspectionPolicyEvaluator:
         InspectionConnectionPolicyEvaluator? = null
@@ -740,8 +831,14 @@ object LocalHttpsProxy : KoinComponent {
         try {
             upstreamSocket.soTimeout = 30000
             upstreamSocket.connect(address, 10000)
+            // Dial succeeded: breaks any consecutive-failure streak (the
+            // circuit breaker only trips on sustained total outages).
+            recordUpstreamDialResult(succeeded = true)
         } catch (e: Exception) {
             logError("Failed to connect to upstream $host:$port: ${e.message}")
+            // Dial failed (TCP/SOCKS level only — HTTP/TLS outcomes are edge
+            // behavior and must not feed this breaker).
+            recordUpstreamDialResult(succeeded = false)
             try {
                 val out = clientSocket.getOutputStream()
                 out.write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray())

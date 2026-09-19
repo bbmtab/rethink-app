@@ -1177,6 +1177,17 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
         }
     }
 
+    /**
+     * External restart entry for health automation (e.g. the upstream-dial
+     * circuit breaker in LocalHttpsProxy). Feeds the same debounced
+     * [vpnRestartTrigger] flow as every in-service restart path: hot re-
+     * establish without killing the process. Safe to call from any thread.
+     */
+    fun requestRestart(reason: String) {
+        Logger.i(LOG_TAG_VPN, "external restart requested: $reason")
+        vpnRestartTrigger.value = reason
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val pid = Process.myPid()
 

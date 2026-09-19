@@ -210,6 +210,22 @@ object VpnController : KoinComponent {
         return rvpn?.hasTunnel() == true
     }
 
+    /**
+     * Health-automation restart entry (upstream-dial circuit breaker).
+     * Re-establishes the tunnel through the debounced service flow when the
+     * service is bound; when it is not bound there is nothing to restart and
+     * the watchdog (start path) owns recovery instead. Never touches the
+     * user-STOP marker: a breaker trip implies the user wants protection.
+     */
+    fun requestRestart(reason: String) {
+        val b = rvpn
+        if (b == null) {
+            Logger.w(LOG_TAG_VPN, "restart requested ($reason) with no bound service; skipping")
+            return
+        }
+        b.requestRestart(reason)
+    }
+
     fun isAppPaused(): Boolean {
         return vpnState == BraveVPNService.State.PAUSED
     }
