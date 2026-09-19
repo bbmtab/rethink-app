@@ -161,6 +161,22 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.log10
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Minimum live-tunnel age before the home screen heals a false
+ * `vpnEnabled` flag (see [HomeScreenFragment.reconcileVpnFlagWithTunnel]).
+ * Teardown after a user STOP completes well within this; a tunnel alive
+ * longer with the flag false is genuinely desynced (flag lost to a crash,
+ * kill, or a stop/write race — tunnel up, UI showing NOT PROTECTED).
+ */
+internal const val VPN_FLAG_HEAL_MIN_UPTIME_MS = 10_000L
+
+/**
+ * Whether the persisted VPN activation flag should be re-asserted from the
+ * live tunnel state. Pure predicate, unit-tested.
+ */
+internal fun shouldHealVpnFlag(tunnelUp: Boolean, activationRequested: Boolean, tunnelUptimeMs: Long): Boolean =
+    tunnelUp && !activationRequested && tunnelUptimeMs >= VPN_FLAG_HEAL_MIN_UPTIME_MS
+
 class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
     private val b by viewBinding(FragmentHomeScreenBinding::bind)
 
@@ -2730,6 +2746,11 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
 
     override fun onResume() {
         super.onResume()
+        // Self-heal first: if the tunnel is live but the persisted flag says
+        // off (flag lost to crash/kill/stop-write race), re-assert it so every
+        // read below — button, cards, DNS status, auto-start — sees the truth.
+        // The heal posts vpnEnabledLiveData, so observeVpnState converges too.
+        reconcileVpnFlagWithTunnel()
         isVpnActivated = VpnController.state().activationRequested
         updateMainButtonUi()
         handleShimmer()
@@ -2940,6 +2961,36 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
      * state. If persistence state has vpn enabled and the VPN is not connected then the start will
      * be initiated.
      */
+    /**
+     * Re-asserts the persisted VPN activation flag when the live tunnel
+     * contradicts it. Without this, a flag lost to a crash, a process kill,
+     * or a stop/write race leaves Home showing NOT PROTECTED (with a START
+     * button and no way to stop) while the system VPN is up and carrying
+     * traffic. The uptime gate keeps a user-initiated STOP (tunnel still
+     * draining) from being fought.
+     */
+    private fun reconcileVpnFlagWithTunnel() {
+        val s = try {
+            VpnController.state()
+        } catch (e: Exception) {
+            Logger.w(LOG_TAG_UI, "$TAG: vpn flag reconcile skipped: ${e.message}")
+            return
+        }
+        val uptimeMs = try {
+            VpnController.uptimeMs()
+        } catch (e: Exception) {
+            -1L
+        }
+        if (shouldHealVpnFlag(s.on, s.activationRequested, uptimeMs)) {
+            Logger.i(LOG_TAG_VPN, "$TAG: self-heal vpnEnabled flag (tunnel up ${uptimeMs}ms, flag false)")
+            try {
+                persistentState.setVpnEnabled(true)
+            } catch (e: Exception) {
+                Logger.w(LOG_TAG_UI, "$TAG: vpn flag self-heal failed: ${e.message}")
+            }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun maybeAutoStartVpn() {
         if (isVpnActivated && !VpnController.isOn()) {
