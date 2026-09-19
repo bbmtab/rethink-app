@@ -20,4 +20,14 @@
         android:layout_height="wrap_content"
         android:textAppearance="?attr/textAppearanceBodySmall"
         android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <!-- Category master switch: bisect page breakage by toggling a whole
+         category at once. SwitchMaterial + PlusMaterialSwitchFix (mandatory
+         on Android 16: bare SwitchMaterial inflates ComplexColor). -->
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switchCategoryEnabled"
+        style="@style/PlusMaterialSwitchFix"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp" />
 </LinearLayout>

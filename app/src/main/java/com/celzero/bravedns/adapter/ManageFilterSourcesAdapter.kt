@@ -87,6 +87,14 @@ class ManageFilterSourcesAdapter :
     var onCategoryToggle: ((String) -> Unit)? = null
 
     /**
+     * Optional callback invoked when the user flips a category master switch.
+     * The Activity disables/enables every source in the category (remembering
+     * the prior selection for restore). Lets users bisect page breakage to a
+     * category in one tap instead of toggling sources one by one.
+     */
+    var onCategoryEnabledToggle: ((String, Boolean) -> Unit)? = null
+
+    /**
      * Optional callback invoked when the user taps the inline Add-custom-filter action in
      * the expanded Custom Filters section. The Activity uses this to show its creation
      * dialog. The adapter never mutates any supplied state itself.
@@ -158,6 +166,8 @@ class ManageFilterSourcesAdapter :
     inner class HeaderHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val tvName: TextView = itemView.findViewById(R.id.tvCategoryName)
         private val tvCount: TextView = itemView.findViewById(R.id.tvCategoryCount)
+        private val swEnabled: com.google.android.material.switchmaterial.SwitchMaterial =
+            itemView.findViewById(R.id.switchCategoryEnabled)
 
         fun bind(row: FilterCategoryRow) {
             // Collapsed-by-default UX (2026-08-26 fix): every header always shows an
@@ -169,6 +179,15 @@ class ManageFilterSourcesAdapter :
                 "0"
             } else {
                 "${row.enabledCount} / ${row.totalCount}"
+            }
+            // Master switch reflects any-enabled; detach listener before
+            // setChecked so rebinds never fire the callback (same pattern as
+            // the HTTPS master toggle restore-before-listen).
+            swEnabled.setOnCheckedChangeListener(null)
+            swEnabled.isChecked = row.enabledCount > 0
+            swEnabled.isEnabled = row.totalCount > 0
+            swEnabled.setOnCheckedChangeListener { _, isChecked ->
+                onCategoryEnabledToggle?.invoke(row.categoryCode, isChecked)
             }
             itemView.setOnClickListener {
                 onCategoryToggle?.invoke(row.categoryCode)

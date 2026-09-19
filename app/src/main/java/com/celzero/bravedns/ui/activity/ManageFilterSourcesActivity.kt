@@ -41,6 +41,25 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
 /**
+ * Pure target resolution for the category master switch (unit-tested).
+ * OFF disables exactly the currently-enabled sources (the caller remembers
+ * them for restore). ON restores the remembered set intersected with the
+ * current catalog (sources may have been added/removed meanwhile), or all
+ * sources when nothing was remembered.
+ */
+internal fun resolveCategoryEnableTargets(
+    currentEnabledIds: Set<Int>,
+    rememberedIds: Set<Int>?,
+    allIds: Set<Int>,
+    enable: Boolean,
+): Set<Int> =
+    if (!enable) {
+        currentEnabledIds
+    } else {
+        rememberedIds?.intersect(allIds)?.takeIf { it.isNotEmpty() } ?: allIds
+    }
+
+/**
  * Read-only Manage Filters shell (B5 Slice-2R).
  *
  * Navigable from the Plus Advanced Filtering card's "Manage Filters" button. Displays:
@@ -75,6 +94,14 @@ class ManageFilterSourcesActivity : BaseActivity(R.layout.activity_manage_filter
     /** UI-local expand/collapse state for category headers — never persisted. */
     private val expandedCategories = mutableMapOf<String, Boolean>()
 
+    /**
+     * UI-local memory of per-category selections for the master switch:
+     * turning a category OFF remembers its enabled source ids so turning it
+     * back ON restores the exact prior selection instead of enabling all.
+     * Never persisted (bisect sessions are interactive).
+     */
+    private val categoryPriorEnabled = mutableMapOf<String, Set<Int>>()
+
     /** Last categories projection — used by category toggle to rebuild the flat row list. */
     private var lastCategories: List<FilterSourceCategoryUi> = emptyList()
 
@@ -88,6 +115,7 @@ class ManageFilterSourcesActivity : BaseActivity(R.layout.activity_manage_filter
         b.recyclerFilterSources.layoutManager = LinearLayoutManager(this)
         b.recyclerFilterSources.adapter = adapter
         adapter.onCategoryToggle = { code -> toggleCategory(code) }
+        adapter.onCategoryEnabledToggle = { code, enabled -> setCategoryEnabled(code, enabled) }
         adapter.onSourceToggle = { source, enabled ->
             vm.setSourceEnabled(source.id, enabled)
         }
@@ -332,6 +360,31 @@ class ManageFilterSourcesActivity : BaseActivity(R.layout.activity_manage_filter
         // FilterSource entity (R3). Default state for an unseen category is collapsed.
         expandedCategories[code] = !(expandedCategories[code] ?: false)
         rebuildRows()
+    }
+
+    /**
+     * Category master switch: bisect page breakage by enabling/disabling a
+     * whole category at once. OFF remembers the currently-enabled source ids
+     * and disables them; ON restores the remembered set (or all sources when
+     * nothing was remembered). Each source flows through the same
+     * [ManageFilterSourcesViewModel.setSourceEnabled] transaction as manual
+     * toggles, so download/compile side effects stay identical.
+     */
+    private fun setCategoryEnabled(code: String, enabled: Boolean) {
+        val cat = lastCategories.firstOrNull { it.categoryCode == code } ?: return
+        val targets = resolveCategoryEnableTargets(
+            currentEnabledIds = cat.sources.filter { it.enabled }.map { it.id }.toSet(),
+            rememberedIds = categoryPriorEnabled[code],
+            allIds = cat.sources.map { it.id }.toSet(),
+            enable = enabled,
+        )
+        if (!enabled) {
+            categoryPriorEnabled[code] = cat.sources.filter { it.enabled }.map { it.id }.toSet()
+            targets.forEach { id -> vm.setSourceEnabled(id, false) }
+        } else {
+            categoryPriorEnabled.remove(code)
+            targets.forEach { id -> vm.setSourceEnabled(id, true) }
+        }
     }
 
     private fun rebuildRows() {
