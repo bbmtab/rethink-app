@@ -317,9 +317,20 @@ class CustomerSupportActivity : BaseActivity(R.layout.activity_customer_support)
                 val bugZip = File(BugReportZipper.getZipFileName(filesDir))
                     .takeIf { it.exists() && it.length() > 0L }
                     ?.let { trimBugZipIfNeeded(it) }
+                // attach crash tombstones (Go panics, JVM crashes, ANRs):
+                // the only crash evidence on fdroid builds (Firebase upload
+                // is stubbed there). Absent when no crash was ever recorded.
+                val tombZip = try {
+                    com.celzero.bravedns.scheduler.EnhancedBugReport.getTombstoneZipFile(
+                        this@CustomerSupportActivity
+                    )?.takeIf { it.exists() && it.length() > 0L }
+                } catch (e: Exception) {
+                    Logger.w(LOG_TAG_UI, "$TAG tombstone zip unavailable: ${e.message}")
+                    null
+                }
                 val otherAttachSize = (diagFile?.length() ?: 0L) + (procInfoBytes?.size?.toLong() ?: 0L)
                 val wirelogBytes = prepareWirelogAttachment(otherAttachSize)
-                val supportZip = buildSupportZip(diagFile, wirelogBytes, procInfoBytes, bugZip)
+                val supportZip = buildSupportZip(diagFile, wirelogBytes, procInfoBytes, bugZip, tombZip)
 
                 val emailBody = buildEmailBody(description, category)
 
@@ -500,9 +511,10 @@ class CustomerSupportActivity : BaseActivity(R.layout.activity_customer_support)
         diagFile: File?,
         wirelogBytes: ByteArray?,
         procInfoBytes: ByteArray?,
-        bugZip: File?
+        bugZip: File?,
+        tombZip: File?,
     ): File? {
-        if (diagFile == null && wirelogBytes == null && procInfoBytes == null && bugZip == null) {
+        if (diagFile == null && wirelogBytes == null && procInfoBytes == null && bugZip == null && tombZip == null) {
             return null
         }
         return try {
@@ -532,6 +544,11 @@ class CustomerSupportActivity : BaseActivity(R.layout.activity_customer_support)
                 }
                 bugZip?.takeIf { it.exists() }?.let {
                     zos.putNextEntry(java.util.zip.ZipEntry("bugreport.zip"))
+                    it.inputStream().use { ins -> ins.copyTo(zos) }
+                    zos.closeEntry()
+                }
+                tombZip?.takeIf { it.exists() }?.let {
+                    zos.putNextEntry(java.util.zip.ZipEntry("tombstones.zip"))
                     it.inputStream().use { ins -> ins.copyTo(zos) }
                     zos.closeEntry()
                 }
