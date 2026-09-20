@@ -71,7 +71,13 @@ import java.util.regex.Pattern
 object UIUtils {
 
     fun getDnsStatusStringRes(status: Int?): Int {
-        if (status == null) return R.string.status_failing
+        // A null status means no transaction/data yet (resolver up, no
+        // answers sampled). It is not evidence of failure: rendering it
+        // as "Failing" stuck the Home DNS headline on a healthy tunnel
+        // (observed on Poco with SOCKS exit, exit-IP flagged by WAF,
+        // after function recovered). INTERNAL_ERROR and the other error
+        // statuses below still render as failures.
+        if (status == null) return R.string.lbl_starting
 
         return when (Transaction.Status.fromId(status)) {
             Transaction.Status.START -> {

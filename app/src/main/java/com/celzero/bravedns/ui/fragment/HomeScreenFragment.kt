@@ -2272,7 +2272,19 @@ class HomeScreenFragment : Fragment(R.layout.fragment_home_screen) {
      */
     private fun renderDnsHeadline(dnsStatus: Int? = null) {
         if (view == null || !isAdded) return
-        if (dnsStatus != null) lastDnsStatus = dnsStatus
+        // A null poll means the resolver reported no new transaction for
+        // this id (e.g. idle or not the active resolver). It is not a
+        // failure signal, so it must not extend the lifetime of an
+        // earlier error status: otherwise a transient flap left the Home
+        // headline on "Failing" long after the tunnel had recovered
+        // (observed on Poco with a SOCKS exit during a WAF-tarpit flap).
+        // A previously healthy status is kept so a lone null poll does
+        // not make the headline wobble.
+        if (dnsStatus != null) {
+            lastDnsStatus = dnsStatus
+        } else if (lastDnsStatus != null && isDnsError(lastDnsStatus)) {
+            lastDnsStatus = null
+        }
 
         val status =
             lastDnsStatus?.let {
