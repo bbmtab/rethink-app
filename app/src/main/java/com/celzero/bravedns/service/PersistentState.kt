@@ -103,6 +103,8 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
             "https_inspection_excluded_packages"
         const val HTTPS_INSPECTION_INCLUDED_PACKAGES =
             "https_inspection_included_packages"
+        // Global Plus kill-switch (Plus tab): one tap back to stock.
+        const val PLUS_MASTER_ENABLED = "plus_master_enabled"
 
         // RPN server-side DNS mode (0=Default, 1=AntiAd, 2=Parental, 3=Security)
         const val RPN_DNS_URL = "rpn_dns_mode"

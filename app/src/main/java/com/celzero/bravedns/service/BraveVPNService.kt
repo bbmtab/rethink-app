@@ -1581,6 +1581,17 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
                 vpnRestartTrigger.value = "httpsInspectionEnabled: ${persistentState.httpsInspectionEnabled}"
             }
 
+            PersistentState.PLUS_MASTER_ENABLED -> {
+                // Global Plus kill-switch: hot-plug like inspection — flipping
+                // it re-establishes the VPN so the establish gate (inspection
+                // setup skipped when killed) takes effect immediately instead
+                // of waiting for the next manual restart. Without this the
+                // switch would be a lie until restart (found by device test).
+                val ctx: Context = this@BraveVPNService
+                ui { Toast.makeText(ctx, R.string.applying_changes, Toast.LENGTH_SHORT).show() }
+                vpnRestartTrigger.value = "plusMasterEnabled: ${persistentState.plusMasterEnabled}"
+            }
+
             PersistentState.HTTPS_INSPECTION_EXCLUDED_PACKAGES,
             PersistentState.HTTPS_INSPECTION_INCLUDED_PACKAGES -> {
                 if (persistentState.httpsInspectionEnabled) {
