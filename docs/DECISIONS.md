@@ -2421,3 +2421,29 @@ behavior stands until exit decision or scheduling changes.
 ---
 
 **End of Decisions — Append Only**
+
+---
+
+## DECISION-015: REVERSE BRIDGE/MAIN WORKFLOW ORDER (amends DECISION-012)
+
+**Status:** ACTIVE 2026-09-20 — supersedes the locked sequence in DECISION-012 steps 3–6.
+
+**Perubahan**: Mulai 2026-09-20, seluruh pengerjaan update (fitur, fix, upstream-forward)
+WAJIB masuk ke branch bridge dulu, baru di-merge ke main untuk release. Ini membalik
+urutan asli DECISION-012 (main+release dulu, bridge belakangan).
+
+**Alasan**: bridge sudah memuat phase1d penuh (terverifikasi 2026-09-20: hanya 1 commit
+behind = ledger closure B-Curation) + upstream-forward s/d 4a49331b0 + Plus
+(WAF hardening, kill-switch, failing-label fix, allowBypass #3057, watchdog
+resurrection, watchdog CI gate); mempertahankan urutan lama berarti kerja ulang
+atau divergensi yang lebih mahal.
+
+**Konsekuensi yang diterima**:
+- Bridge sekarang jadi jalur kerja utama, bukan cuma evaluasi upstream
+- Item yang masih utang: keputusan watchdog (ship-active vs revert),
+  keystore/signing — tetap harus diselesaikan sebelum bridge→main dianggap
+  release-ready
+- DECISION-012 bagian "ownership boundary" dan "shared-conflict manual review"
+  tetap berlaku, hanya urutan step 3-6 yang dibalik
+
+UNCOMMITTED (menunggu otorisasi commit terpisah).
