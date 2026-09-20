@@ -2297,4 +2297,127 @@ consolidated release pointer. Signed 2026-09-17 by user-as-decider.
 
 ---
 
+## DECISION-015: PLUS-UX CONTAINMENT (2026-09-18)
+
+**Status:** SIGNED 2026-09-18 — user-as-decider sign-off given at entry
+creation.
+
+### Rule
+
+Original Rethink UX — every screen, flow, and element outside the Plus
+tab — must not be changed by Plus additions. No new Plus UI elements,
+entries, badges, or flows may be added to Home, Stats, Configure, About,
+Network Logs, or any other non-Plus surface. All Plus-related UX must be
+built inside the Plus tab surface (HTTPS Inspection, Advanced Filtering,
+Exclusions, plus explicitly approved additions such as an MITM Log card).
+
+### Rationale
+
+- Ownership doctrine (DECISION-001/012): Plus features belong in
+  fork-owned territory. UI containment is its visible enforcement.
+- Forward compatibility (bridge contract): every Plus element embedded
+  in an upstream-owned screen is future merge debt. Containment keeps
+  that debt at zero by construction.
+- Review clarity: a reviewer can verify "no Rethink UX touched" by
+  checking that the Plus tab (plus its dedicated activities) is the only
+  UI surface in the diff.
+
+### Scope notes
+
+- This governs UX surface only, not behavior behind existing surfaces
+  (firewall verdicts, proxy routing, tunnel lifecycle may still integrate
+  where the architecture requires it — recorded per case as before).
+- Bug fixes to broken Rethink UX encountered during Plus work are
+  allowed and recorded separately; they are not Plus additions.
+- Past states are grandfathered; the rule applies from this entry forward.
+
+### Standing
+
+- MITM Log (approved direction): Plus-owned storage + Plus-tab surface
+  (option A2). The Network-Logs-chip variant (A1) is rejected under this
+  entry for embedding Plus UX in an upstream-owned screen.
+- Future Plus UX is reviewed against this entry before implementation.
+
+---
+
+## DECISION-016: WAF AUTO-BYPASS (2026-09-19)
+
+**Status:** SIGNED 2026-09-19 — user-as-decider.
+
+### Rule
+
+Hosts whose upstream edge challenges (deterministic challenge header) or
+tarpits (2 timeouts in 10 min) the MITM leg are loaded opaque (no
+decryption), memoized per exact host, persisted, user-visible (Plus row
+with count) and user-clearable, behind a master toggle default ON
+(OFF = fail closed to normal MITM evaluation).
+
+### Rationale
+
+- Exit-IP WAF hostility (datacenter ASN) is environmental, not fixable in
+  the proxy; failing open per-host preserves availability (kompas/tempo/
+  tribun/anichin proven loading).
+- Anti-cascade constraints (ipleak lesson): exact-host only, explicit
+  signals only, exit-health gating (no flap verdicts), no suffix matching,
+  no persist of generic failures.
+- Known tradeoff (accepted): opaque documents skip content/cosmetic
+  filtering; DNS + firewall still apply.
+
+---
+
+## DECISION-017: VPN WATCHDOG (2026-09-19)
+
+**Status:** SIGNED 2026-09-19 — user-as-decider.
+
+### Rule
+
+A system-alarm-chained watchdog (default 15 s, user interval 5–300 s)
+restarts protection the system killed. It NEVER resurrects an explicit
+user STOP, distinguished by a user-STOP marker (graceful kills heal;
+force-stop cancels alarms and needs manual launch — documented limit).
+
+### Rationale
+
+- 7+ LOW_MEMORY kills/day on 2 GB devices with hours of unnoticed outage;
+  proven heal 46 s twice on device.
+- Trigger must be system-owned (alarms survive kills; in-process timers do
+  not). Bounded restarts, loud give-up, Plus-tab status + control.
+
+---
+
+## DECISION-018: GLOBAL PLUS KILL-SWITCH (2026-09-19)
+
+**Status:** SIGNED 2026-09-19 — user-as-decider.
+
+### Rule
+
+One Plus-tab switch returns the app to stock Rethink behavior
+(DNS + firewall only): no MITM setup, no WAF verdicts, no watchdog chain,
+no content filtering. Hot-plugged via VPN restart, no manual cycle.
+
+### Rationale
+
+- Non-negotiable safety net for dogfood/beta: escape without uninstall
+  (preserves debug data + user trust). Device-proven both directions.
+
+---
+
+## DECISION-019: DIRECT-UPSTREAM REDESIGN POSTPONED (2026-09-19)
+
+**Status:** SIGNED 2026-09-19 — user-as-decider (explicit postpone).
+
+### Rule
+
+Routing WAF-challenged hosts direct (skip SS exit) while keeping full
+inspection is APPROVED as direction but POSTPONED. Current opaque
+behavior stands until exit decision or scheduling changes.
+
+### Rationale
+
+- Correct fix for the cosmetic gap, but larger blast radius (per-host
+  routing, exit-privacy implications) than the session's committed scope.
+  Parked deliberately, not dropped.
+
+---
+
 **End of Decisions — Append Only**
