@@ -1,6 +1,6 @@
 # DECISION-011 B-Curation Ledger — Independent Plus-Nomenclature Curation
 
-**Status:** GOVERNING for release closure · **Opened:** 2026-09-15 · **Time-box:** 7 hari kalender (berakhir 2026-09-22)
+**Status:** GOVERNING for release closure · **Opened:** 2026-09-15 · **Time-box:** 7 hari kalender (berakhir 2026-09-22) — **DITUTUP AWAL 2026-09-20** (otorisasi user; bukti penutup di bawah)
 **Judge evidence:** Supervisor · **Risk/product owner:** User
 **Scope:** 5 bundled HTTPS-inspection preset assets in `app/src/main/assets/https_inspection/`
 **Authority:** DECISION-011, DECISION-010 (semantics, unchanged), DECISION-013 (ONLY_INCLUDED, closed)
@@ -238,3 +238,21 @@ Keputusan: SEAL-229 FINAL. Registry 229 entry, 52396 B, sha
 Lokal BundledAssetTest 6/6 + CI 242/0/0/0. Full-suite rot (RPN/subscription/
 wireguard/stale-EasyList) TETAP TERBUKA sebagai tech-debt di luar seal ini —
 bukan gate seal-229, bukan fake green.
+
+## TIME-BOX CLOSED 2026-09-20 (otorisasi user; 2 hari lebih awal)
+
+Registry diverifikasi ULANG hari penutupan (worktree, tanpa build ulang):
+- `https_inspection_compatibility_bypass_plus.json`: sha256
+  `ac2735cd5fc0e947b74249d4f59e10cd18e421aa4755d03a70ec8c8ddd3b95f9`
+  COCOK seal, 52396 B COCOK, CR=0 (LF-only) COCOK.
+- `InspectionPolicyBundledAssetTest`: 6/6 HIJAU hari ini
+  (`testFdroidFullDebugUnitTest`, XML 11:51Z, tests=6 failures=0 errors=0),
+  run lokal `--offline` BUILD SUCCESSFUL.
+- `git diff HEAD --name-only` = 1 file: `.gitignore` (+4 baris `/.planning/`,
+  GSD planning artifacts, uncommitted). DI LUAR scope seal (bukan aset/test/
+  loader); dicatat, tidak di-revert, tidak di-commit.
+
+Keputusan: SEAL-229 FINAL tetap berlaku; time-box DITUTUP tanpa scope-cut
+(tidak ada ekspansi tertunda yang dipotong — R5 tetap PROVISIONAL-BERALAS
+ikut rilis per catatan seal). Full-suite rot 43 tetap tech-debt terpisah.
+Perubahan ledger ini UNCOMMITTED (freeze rule: tanpa commit/push).
