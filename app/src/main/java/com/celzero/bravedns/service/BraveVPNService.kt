@@ -3705,7 +3705,9 @@ class BraveVPNService : VpnService(), ConnectionMonitor.NetworkListener, Network
                             "localhost",
                             8443
                         )
-                    builder.setHttpProxy(proxyInfo)
+                    if (VERSION.SDK_INT >= VERSION_CODES.Q) {
+                        builder.setHttpProxy(proxyInfo)
+                    }
 
                     // Publish only after the proxy was started and registered successfully.
                     inspectionRuntimePolicySnapshot = policySnapshot
