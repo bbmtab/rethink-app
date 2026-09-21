@@ -39,11 +39,15 @@ architecture_mapping.md
 *.bak
 /reference_code
 
-# Keystore files - NEVER COMMIT
+# Keystore files - NEVER COMMIT, with ONE deliberate exception below
 keystore.properties
 release.keystore
 *.jks
 *.keystore
+# Exception: shared Plus debug key (debug-grade only, NOT a release identity).
+# Committed deliberately so local + CI builds share one signature and updates
+# keep working. See docs/DECISIONS.md DECISION-016 + docs/RELEASE-POLICY.md.
+!/app/plus-debug.keystore
 
 # IDE and agent temporary files
 .kotlin/
