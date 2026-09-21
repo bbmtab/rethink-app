@@ -2447,3 +2447,25 @@ atau divergensi yang lebih mahal.
   tetap berlaku, hanya urutan step 3-6 yang dibalik
 
 UNCOMMITTED (menunggu otorisasi commit terpisah).
+
+## DECISION-016: ONE STABLE DEBUG KEY FOR LOCAL + CI (2026-09-21)
+
+**Status:** ACTIVE 2026-09-21.
+
+**Masalah**: setiap runner GHA ephemeral men-generate debug key sendiri;
+terbukti 3 kunci berbeda: v0.5.12-plus (`92:59:...`), CI merge-6a8ce82
+(`73:CF:...`), lokal (pin `046E80FA...`). Akibat: update antar-build GAGAL
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) bahkan antar-rilis, bukan cuma lokal-vs-CI.
+
+**Keputusan**: satu keystore `app/plus-debug.keystore` di-commit (pengecualian
+eksplisit di `.gitignore`; debug-grade, BUKAN identitas rilis) dan dipakai
+sebagai `signingConfigs.debug` untuk SEMUA build debug (lokal + CI fallback +
+rilis tag selama belum ada release secrets). SHA256:
+`00:73:73:AA:8A:0F:05:23:70:DD:82:E1:86:85:25:B4:91:5C:CD:C7:4E:F8:A9:D3:1D:C0:C4:E2:B8:22:DB:F4`,
+valid s/d 2108. Rotasi = file kunci baru + catatan eksplisit.
+
+**Konsekuensi yang diterima**:
+- Kunci privat v0.5.12 HILANG bersama runner ephemeral -> user v0.5.12 WAJIB
+  reinstall sekali ke v0.5.13+; mulai v0.5.13 update stabil permanen.
+- Tag v0.5.13 HANYA boleh dipotong SETELAH perubahan ini merge ke main
+  (build tag tanpa keystore = kunci acak baru lagi).

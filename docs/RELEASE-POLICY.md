@@ -45,6 +45,7 @@ re-check the workflows before relying on this section, since triggers change.
   via `softprops/action-gh-release@v2`, gated on `startsWith(ref, 'refs/tags/v')`):
   publishes a **public GitHub Release** with the signed `-plus` APKs. This is the
   artifact surface a release is defined by — **this is the step that reaches users.**
+- **Signing (stable debug key).** All debug-signed builds (local + CI fallback + tag releases while no release secrets exist) use the committed `app/plus-debug.keystore` (DECISION-016; SHA256 `00:73:73:AA:8A:0F:05:23:70:DD:82:E1:86:85:25:B4:91:5C:CD:C7:4E:F8:A9:D3:1D:C0:C4:E2:B8:22:DB:F4`). Debug-grade only, NOT a release identity. Rotation = new key file + explicit note (updates across a rotation require reinstall).
 - **Alpha** (`nightly.yml`): monthly cron (27th) or manual run →
   `assembleWebsiteFullAlpha` → artifact *plus* a Telegram-channel post. A separate
   alpha path; does **not** create a GitHub Release.
