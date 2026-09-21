@@ -33,6 +33,9 @@ jobs:
       - name: ⚡️ +x gradlew
         run: chmod +x gradlew
 
+      - name: Remove local java.home from gradle.properties
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
       - name: 🚂 Assemble TV variant
         run: |
           ./gradlew \
