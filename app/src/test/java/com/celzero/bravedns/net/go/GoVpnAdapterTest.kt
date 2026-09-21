@@ -233,23 +233,22 @@ class GoVpnAdapterTest : KoinTest {
     }
 
     @Test
-    fun `getDnsStatus returns rpn status for rpn-win id`() = runTest {
+    fun `getDnsStatus returns null for rpn-win id since it is not a resolver transport`() = runTest {
+        // getDnsStatus serves DNS transport status only; WIN proxy status is exposed
+        // via the RPN API surface (e.g. hasRpnWin / rpn().win()), not the resolver
         val tunnel = mockk<Tunnel>(relaxed = true)
         every { tunnel.isConnected } returns true
 
-        val proxies = mockk<Proxies>(relaxed = true)
-        val rpn = mockk<com.celzero.firestack.backend.Rpn>(relaxed = true)
-        val win = mockk<com.celzero.firestack.backend.RpnProxy>(relaxed = true)
-        every { tunnel.proxies } returns proxies
-        every { proxies.rpn() } returns rpn
-        every { rpn.win() } returns win
-        every { win.status() } returns 11L
+        val resolver = mockk<DNSResolver>(relaxed = true)
+        every { tunnel.resolver } returns resolver
+        // no transport registered for the rpn-win id
+        every { resolver.get(com.celzero.firestack.backend.Backend.RpnWin) } returns null
 
         val adapter = newAdapter(tunnel)
 
         val status = adapter.getDnsStatus(com.celzero.firestack.backend.Backend.RpnWin)
 
-        assertEquals(11L, status)
+        assertNull(status)
     }
 
     @Test
@@ -343,6 +342,36 @@ class GoVpnAdapterTest : KoinTest {
     }
 
     @Test
+    fun `companion replaceHostWithIp replaces host with first ipv4`() {
+        assertEquals(
+            "https://8.8.8.8/dns-query",
+            GoVpnAdapter.replaceHostWithIp("https://dns.google.com/dns-query", "8.8.8.8,3.4.2.3")
+        )
+    }
+
+    @Test
+    fun `companion replaceHostWithIp brackets ipv6`() {
+        assertEquals(
+            "https://[2606:4700:20::681a:e1e]/dns-query",
+            GoVpnAdapter.replaceHostWithIp("https://dns.google.com/dns-query", "2606:4700:20::681a:e1e,8.8.8.8")
+        )
+    }
+
+    @Test
+    fun `companion replaceHostWithIp returns url unchanged when no ip`() {
+        val url = "https://dns.google.com/dns-query"
+        assertEquals(url, GoVpnAdapter.replaceHostWithIp(url, ""))
+    }
+
+    @Test
+    fun `companion replaceHostWithIp keeps path and preserves http scheme`() {
+        assertEquals(
+            "http://172.67.70.254/",
+            GoVpnAdapter.replaceHostWithIp("http://basic.rethinkdns.com/", "172.67.70.254,104.26.14.30")
+        )
+    }
+
+    @Test
     fun `smoke disconnected guard for critical suspend methods`() = runTest {
         val tunnel = mockk<Tunnel>(relaxed = true)
         every { tunnel.isConnected } returns false
@@ -360,7 +389,7 @@ class GoVpnAdapterTest : KoinTest {
         adapter.getRpnProps(RpnProxyManager.RpnType.WIN)
         adapter.testRpnProxy()
         adapter.getEntitlementDetails(null, "dev")
-        adapter.registerAndFetchWinIfNeeded(deviceId = "dev")
+        adapter.registerAndFetchWinIfNeeded(null, null, deviceId = "dev")
         adapter.refreshRpnProxy("")
         adapter.reconnectRpnProxy("")
         adapter.isWinRegistered()
@@ -375,8 +404,6 @@ class GoVpnAdapterTest : KoinTest {
         adapter.unregisterWin()
         adapter.setRpnAutoMode()
         adapter.isRpnReachable("1.1.1.1:53")
-        adapter.registerSeProxyIfNeeded()
-        adapter.unregisterSeProxyIfNeeded()
         adapter.setExperimentalWireGuardSettings()
         adapter.setAutoDialsParallel()
         adapter.setAutoMode()

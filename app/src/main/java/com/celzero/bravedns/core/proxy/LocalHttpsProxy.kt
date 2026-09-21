@@ -13,6 +13,7 @@ import com.celzero.bravedns.core.proxy.policy.InspectionReason
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallDecision
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallEvaluator
 import com.celzero.bravedns.core.proxy.policy.LocalProxyFirewallResult
+import android.os.SystemClock
 import kotlinx.coroutines.*
 import java.io.*
 import java.net.InetSocketAddress
@@ -45,6 +46,12 @@ object LocalHttpsProxy : KoinComponent {
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
     private var serverJob: Job? = null
+    // Bridge instrument (diagnostic, no behavior change): instance
+    // ownership tracking for the stop/start lifecycle race.
+    @Volatile
+    private var proxyInstanceSeq: Long = 0L
+    @Volatile
+    private var activeInstanceId: Long = -1L
 
     private var appContext: android.content.Context? = null
     private var persistentState: com.celzero.bravedns.service.PersistentState? = null
@@ -52,6 +59,147 @@ object LocalHttpsProxy : KoinComponent {
     private val appConfig by inject<com.celzero.bravedns.data.AppConfig>()
 
     private val dynamicBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    // WAF auto-bypass: EXACT-host set with deliberate persistence.
+    //
+    // Anti-cascade rule (ipleak.net lesson): handshake/timeout failures must
+    // NEVER widen scope. dynamicBypassSet is suffix-matched and its persist is
+    // a deliberate no-op; this set is the opposite bargain, made explicitly:
+    //  - EXACT match only (sub.example.com never bypasses example.com),
+    //  - recorded ONLY on explicit WAF signals, never on generic failures:
+    //      * upstream response carrying `x-amzn-waf-action` (deterministic
+    //        challenge verdict), recorded immediately, or
+    //      * 2nd upstream read-timeout for the same host within a 10-minute
+    //        window (tarpit signature: TLS completes, then 0 bytes for
+    //        soTimeout). Interleaved successes do not reset the window.
+    //  - persisted across restarts (a WAF verdict for a host+exit pair is
+    //    stable; re-probing it each restart just burns another 30s wait),
+    //  - user-visible and user-clearable (Plus tab "Auto-bypassed sites").
+    // Bypassed hosts still traverse the VPN tunnel and remain subject to DNS
+    // and firewall verdicts; only TLS decryption (content filtering) is
+    // skipped via opaque TCP pass-through.
+    private val wafBypassSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    // Per-host tarpit tracking: (timeouts, windowStartMs). A host is bypassed
+    // on 2 timeouts within WAF_STRIKE_WINDOW_MS, REGARDLESS of interleaved
+    // successes — flaky-tarpit hosts alternate timeout/success (e.g. a fast
+    // 403 between two 30s stalls) and must still trip the breaker. A lone
+    // flap expires lazily: a timeout arriving after the window restarts it.
+    private data class WafStrike(var count: Int, var windowStartMs: Long)
+    private val wafTimeoutStrikes = java.util.concurrent.ConcurrentHashMap<String, WafStrike>()
+    // (const vals live directly on the object: a companion is illegal here.)
+    private const val WAF_STRIKE_WINDOW_MS = 10 * 60 * 1000L
+    private const val WAF_STRIKES_TO_BYPASS = 2
+    // Exit-health canary: last time ANY upstream transaction completed fully.
+    // A timeout is only attributable to a host (recordable) when the exit
+    // demonstrably worked recently; otherwise it is exit-flap noise and must
+    // not pollute verdicts. See shouldCountTimeout.
+    @Volatile
+    private var wafLastSuccessMs: Long = 0L
+    private const val WAF_EXIT_HEALTHY_WINDOW_MS = 120_000L
+
+    /**
+     * Pure: may this timeout be counted against the host? No when the exit
+     * itself looks down (no fully-completed upstream transaction recently) —
+     * attributing flap noise would bypass half the internet. The bootstrap
+     * exception (never seen success) counts: without any baseline the safer
+     * bet is availability (a false bypass is cheap, bounded, clearable).
+     * Unit-tested.
+     */
+    internal fun shouldCountTimeout(nowMs: Long, lastSuccessMs: Long): Boolean {
+        if (lastSuccessMs <= 0L) return true
+        return nowMs - lastSuccessMs <= WAF_EXIT_HEALTHY_WINDOW_MS
+    }
+
+    /**
+     * Upstream-dial circuit breaker (stale-pool / total-outage class).
+     *
+     * Counts CONSECUTIVE TCP/SOCKS dial failures only — never HTTP responses
+     * or TLS handshake outcomes (those are edge behavior, owned by the WAF
+     * verdicts above). Any successful dial resets the streak, so intermittent
+     * flaps can never trip it; only a sustained outage (5 dials in 60s)
+     * requests a debounced VPN re-establish, which rebuilds the tunnel, DNS
+     * state and upstream sessions (the manual STOP→START recovery, automated).
+     * Bounded to 3 restarts/hour, then loud give-up. Never fails open to
+     * direct (privacy): a dead upstream stays dead loudly rather than
+     * silently changing exits.
+     */
+    internal enum class UpstreamBreakerAction { NONE, TRIP_RESTART, GIVE_UP }
+
+    internal data class UpstreamBreakerState(
+        val consecFails: Int = 0,
+        val windowStartMs: Long = 0L,
+        val restartsUsed: Int = 0,
+        val hourStartMs: Long = 0L,
+    )
+
+    internal data class UpstreamBreakerConfig(
+        val windowMs: Long = 60_000L,
+        val tripCount: Int = 5,
+        val maxRestartsPerHour: Int = 3,
+        val hourMs: Long = 3_600_000L,
+    )
+
+    internal fun evaluateUpstreamBreaker(
+        state: UpstreamBreakerState,
+        nowMs: Long,
+        failed: Boolean,
+        cfg: UpstreamBreakerConfig = UpstreamBreakerConfig(),
+    ): Pair<UpstreamBreakerState, UpstreamBreakerAction> {
+        if (!failed) {
+            return state.copy(consecFails = 0, windowStartMs = 0L) to UpstreamBreakerAction.NONE
+        }
+        val (count, winStart) =
+            if (state.consecFails == 0 || nowMs - state.windowStartMs > cfg.windowMs) {
+                1 to nowMs
+            } else {
+                state.consecFails + 1 to state.windowStartMs
+            }
+        if (count < cfg.tripCount) {
+            return state.copy(consecFails = count, windowStartMs = winStart) to UpstreamBreakerAction.NONE
+        }
+        val (used, hourStart) =
+            if (nowMs - state.hourStartMs > cfg.hourMs) {
+                0 to nowMs
+            } else {
+                state.restartsUsed to state.hourStartMs
+            }
+        return if (used < cfg.maxRestartsPerHour) {
+            UpstreamBreakerState(0, 0L, used + 1, hourStart) to UpstreamBreakerAction.TRIP_RESTART
+        } else {
+            UpstreamBreakerState(0, 0L, used, hourStart) to UpstreamBreakerAction.GIVE_UP
+        }
+    }
+
+    @Volatile
+    private var upstreamBreakerState = UpstreamBreakerState()
+
+    internal fun recordUpstreamDialResult(succeeded: Boolean) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val (next, action) = evaluateUpstreamBreaker(upstreamBreakerState, now, !succeeded)
+        upstreamBreakerState = next
+        when (action) {
+            UpstreamBreakerAction.TRIP_RESTART -> {
+                logWarn(
+                    "upstream-dial breaker tripped (sustained dial failures) — " +
+                        "requesting debounced VPN restart"
+                )
+                try {
+                    com.celzero.bravedns.service.VpnController.requestRestart("upstream-dial-breaker")
+                } catch (e: Exception) {
+                    logWarn("upstream-dial breaker: restart request failed: ${e.message}")
+                }
+            }
+            UpstreamBreakerAction.GIVE_UP -> {
+                logWarn(
+                    "upstream-dial breaker: hourly restart budget spent, " +
+                        "giving up loudly (no silent exit change)"
+                )
+            }
+            UpstreamBreakerAction.NONE -> {
+                // Nothing to do.
+            }
+        }
+    }
 
     @Volatile
     private var inspectionPolicyEvaluator:
@@ -75,6 +223,11 @@ object LocalHttpsProxy : KoinComponent {
             logError("Failed to clear httpsBypassHosts: ${e.message}")
         }
         loadBypassCacheFromPreferences()
+        // NOTE: httpsWafBypassHosts is deliberately NOT cleared here. Unlike the
+        // suffix-matched dynamic set, WAF verdicts are exact-host and stable per
+        // host+exit pair; clearing them each restart would re-inflict a 30s
+        // tarpit wait on every launch for already-known hosts.
+        loadWafBypassCacheFromPreferences()
     }
 
     /**
@@ -93,6 +246,8 @@ object LocalHttpsProxy : KoinComponent {
             logError("Failed to clear httpsBypassHosts: ${e.message}")
         }
         loadBypassCacheFromPreferences()
+        // See the no-clear note in initialize(state): WAF verdicts persist.
+        loadWafBypassCacheFromPreferences()
     }
 
     /**
@@ -182,6 +337,151 @@ object LocalHttpsProxy : KoinComponent {
 
     private fun persistBypassCache() {
         // No-op to prevent persisting bypasses to preferences
+    }
+
+    private fun loadWafBypassCacheFromPreferences() {
+        val saved = persistentState?.httpsWafBypassHosts ?: return
+        if (saved.isNotEmpty()) {
+            val hosts = saved.split(",")
+            for (h in hosts) {
+                val trimmed = h.trim().lowercase(Locale.US)
+                if (trimmed.isNotEmpty()) {
+                    wafBypassSet.add(trimmed)
+                }
+            }
+        }
+        if (wafBypassSet.isNotEmpty()) {
+            logInfo("WAF auto-bypass: restored ${wafBypassSet.size} exact host(s) from preferences")
+        }
+    }
+
+    private fun persistWafBypassCache() {
+        // Deliberate persist (unlike persistBypassCache): entries are exact-host
+        // and gated on explicit WAF signals, so restoring them cannot cascade.
+        try {
+            persistentState?.httpsWafBypassHosts = wafBypassSet.joinToString(",")
+        } catch (e: Exception) {
+            logError("Failed to persist httpsWafBypassHosts: ${e.message}")
+        }
+    }
+
+    // Master-switch read with a test hook. Production always consults the
+    // persisted pref (null persistentState only happens in unit tests, where
+    // the switch defaults to enabled). Unit tests cannot rely on
+    // SharedPreferences apply() flush timing under Robolectric, so they drive
+    // the gate through wafMasterOverride instead; it is always null outside
+    // tests (reset in tearDown).
+    @Volatile
+    internal var wafMasterOverride: Boolean? = null
+
+    internal fun isWafMasterOn(): Boolean =
+        wafMasterOverride ?: (persistentState?.wafBypassMasterEnabled ?: true)
+
+    internal fun isWafBypassed(host: String): Boolean {
+        // Master switch first: OFF means fail closed (normal MITM evaluation
+        // for every host).
+        if (!isWafMasterOn()) return false
+        // EXACT match only. No suffix matching, ever (anti-cascade rule).
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        return wafBypassSet.contains(cleaned)
+    }
+
+    internal fun isWafChallengeResponse(responseHeaders: List<String>): Boolean {
+        // Deterministic WAF-challenge verdict markers. Only headers the edge
+        // sends when it subjects THIS request to bot-management count. A plain
+        // 403 without such markers is NOT a signal (it may be a legitimate
+        // site verdict and must still reach the client decrypted).
+        return responseHeaders.any {
+            it.lowercase(Locale.US).startsWith("x-amzn-waf-action:")
+        }
+    }
+
+    internal fun recordWafChallenge(host: String) {
+        // No recording while the master switch is off: disabled means disabled
+        // (no verdict accumulation behind the user's back).
+        if (!isWafMasterOn()) return
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
+        wafBypassSet.add(cleaned)
+        wafTimeoutStrikes.remove(cleaned)
+        persistWafBypassCache()
+        logWarn(
+            "WAF auto-bypass: upstream challenged '$cleaned' " +
+                "(x-amzn-waf-action) — future connections go opaque " +
+                "pass-through (exact host only, DNS/firewall still apply)"
+        )
+    }
+
+    internal fun recordUpstreamTimeout(host: String) {
+        // Tarpit signature: TLS completed, then silence until soTimeout.
+        // Bypass on WAF_STRIKES_TO_BYPASS timeouts within WAF_STRIKE_WINDOW_MS
+        // so a single flap or one slow origin cannot fail a host open, while
+        // flaky-tarpit hosts (timeout/success alternating) still trip the
+        // breaker. Interleaved successes do NOT reset the window: only a
+        // fully quiet window lets a host off.
+        //
+        // Caveat: soTimeout is set on both legs, so a downstream (client-side)
+        // stall is misattributed here. That failure mode is rare (clients
+        // disconnect rather than stall) and its cost is bounded: the host goes
+        // opaque but remains DNS/firewall-filtered, and the user can clear it.
+        // Master switch: OFF disables the whole feature (no recording, no
+        // enforcement) — fail closed to normal MITM evaluation.
+        if (!isWafMasterOn()) return
+        val cleaned = host.trim().trimEnd('.').lowercase(Locale.US)
+        if (cleaned.isEmpty() || wafBypassSet.contains(cleaned)) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        // Exit-health gate (credibility): count only while the exit provably
+        // works. During an exit-wide flap everything times out at once; those
+        // timeouts carry zero per-host information and must not mint verdicts
+        // (that is how googleapis hosts got bypassed during flaps).
+        if (!shouldCountTimeout(now, wafLastSuccessMs)) {
+            logInfo(
+                "WAF auto-bypass: timeout for '$cleaned' ignored " +
+                    "(exit unhealthy, no recent completed transaction)"
+            )
+            return
+        }
+        val strike = wafTimeoutStrikes[cleaned]
+        val count = if (strike == null || now - strike.windowStartMs > WAF_STRIKE_WINDOW_MS) {
+            wafTimeoutStrikes[cleaned] = WafStrike(1, now)
+            1
+        } else {
+            strike.count += 1
+            strike.count
+        }
+        if (count >= WAF_STRIKES_TO_BYPASS) {
+            wafTimeoutStrikes.remove(cleaned)
+            wafBypassSet.add(cleaned)
+            persistWafBypassCache()
+            logWarn(
+                "WAF auto-bypass: '$cleaned' timed out $count MITM " +
+                    "transaction(s) within window (tarpit signature) — future " +
+                    "connections go opaque pass-through (exact host only)"
+            )
+        } else {
+            logInfo(
+                "WAF auto-bypass: MITM timeout for '$cleaned' " +
+                    "(strike $count/$WAF_STRIKES_TO_BYPASS in window, not bypassed yet)"
+            )
+        }
+    }
+
+    /**
+     * Snapshot of exact hosts currently auto-bypassed from inspection.
+     * Surfaced on the Plus tab ("Auto-bypassed sites").
+     */
+    fun getWafBypassedHosts(): Set<String> = wafBypassSet.toSet()
+
+    /**
+     * Clears all WAF auto-bypass verdicts (memory + preferences + counters).
+     * Wired to the Plus tab "Clear" action.
+     */
+    fun clearWafBypass() {
+        val n = wafBypassSet.size
+        wafBypassSet.clear()
+        wafTimeoutStrikes.clear()
+        persistWafBypassCache()
+        logInfo("WAF auto-bypass: cleared $n host verdict(s) on user request")
     }
 
     private fun addToBypassCache(host: String) {
@@ -365,18 +665,23 @@ object LocalHttpsProxy : KoinComponent {
      * Start the proxy server in a background Coroutine on Dispatchers.IO.
      */
     @Synchronized
-    fun start(port: Int = DEFAULT_PORT) {
+    fun start(port: Int = DEFAULT_PORT, caller: String = "establish") {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
         if (isRunning) {
-            logWarn("Proxy is already running")
+            logWarn("proxy lifecycle: START-IGNORED caller=$caller activeId=$activeInstanceId tNs=$nowNs")
             return
         }
 
+        proxyInstanceSeq += 1
+        val myId = proxyInstanceSeq
         isRunning = true
-        logInfo("Starting local HTTPS proxy server on port $port...")
+        logInfo("proxy lifecycle: START caller=$caller id=$myId port=$port tNs=$nowNs")
 
         serverJob = CoroutineScope(Dispatchers.IO).launch {
             try {
                 serverSocket = ServerSocket(port)
+                activeInstanceId = myId
+                logInfo("proxy lifecycle: LISTEN id=$myId port=$port tNs=${SystemClock.elapsedRealtimeNanos()}")
                 while (isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     launch {
@@ -384,11 +689,9 @@ object LocalHttpsProxy : KoinComponent {
                     }
                 }
             } catch (e: Exception) {
-                if (isRunning) {
-                    logError("Exception in server accept loop: ${e.message}", e)
-                }
+                logError("proxy lifecycle: ACCEPT-EXCEPTION id=$myId activeId=$activeInstanceId class=${e.javaClass.name} msg=${e.message} tNs=${SystemClock.elapsedRealtimeNanos()}", e)
             } finally {
-                stop()
+                stop("finally:$myId")
             }
         }
     }
@@ -397,13 +700,17 @@ object LocalHttpsProxy : KoinComponent {
      * Stops the proxy server and frees up socket resources.
      */
     @Synchronized
-    fun stop() {
+    fun stop(caller: String = "external") {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
         inspectionPolicyEvaluator = null
         firewallEvaluator = null
-        if (!isRunning) return
+        if (!isRunning) {
+            logInfo("proxy lifecycle: STOP-IGNORED caller=$caller activeId=$activeInstanceId tNs=$nowNs")
+            return
+        }
+        logInfo("proxy lifecycle: STOP caller=$caller activeId=$activeInstanceId tNs=$nowNs")
         isRunning = false
-        logInfo("Stopping local HTTPS proxy server...")
-
+        activeInstanceId = -1
         try {
             serverSocket?.close()
         } catch (e: Exception) {
@@ -524,8 +831,14 @@ object LocalHttpsProxy : KoinComponent {
         try {
             upstreamSocket.soTimeout = 30000
             upstreamSocket.connect(address, 10000)
+            // Dial succeeded: breaks any consecutive-failure streak (the
+            // circuit breaker only trips on sustained total outages).
+            recordUpstreamDialResult(succeeded = true)
         } catch (e: Exception) {
             logError("Failed to connect to upstream $host:$port: ${e.message}")
+            // Dial failed (TCP/SOCKS level only — HTTP/TLS outcomes are edge
+            // behavior and must not feed this breaker).
+            recordUpstreamDialResult(succeeded = false)
             try {
                 val out = clientSocket.getOutputStream()
                 out.write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray())
@@ -540,8 +853,21 @@ object LocalHttpsProxy : KoinComponent {
                 clientOut.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
                 clientOut.flush()
 
+                val wafBypassed = isWafBypassed(host)
                 val policyResult =
-                    if (shouldInspectDomain(host)) {
+                    if (wafBypassed) {
+                        // WAF auto-bypass verdict (exact host): skip decryption,
+                        // forward opaquely. Logged at warn per connection so
+                        // bypassed traffic stays visible in logcat.
+                        logWarn(
+                            "HTTPS inspection bypassed for $host:$port " +
+                                "(WAF auto-bypass verdict, opaque pass-through)"
+                        )
+                        InspectionPolicyResult(
+                            decision = InspectionDecision.BYPASS,
+                            reason = InspectionReason.BYPASS_WAF_AUTO
+                        )
+                    } else if (shouldInspectDomain(host)) {
                         evaluateInspectionPolicy(
                             clientSocket = clientSocket,
                             host = host,
@@ -789,6 +1115,16 @@ object LocalHttpsProxy : KoinComponent {
                     }
                 }
 
+                // WAF challenge sniff: an edge that subjects this request to
+                // bot-management answers fast (unlike a tarpit). Recording the
+                // verdict now means the client's inevitable retry goes opaque
+                // immediately instead of burning another full transaction.
+                // The current stream still completes normally so the client
+                // receives the edge's actual verdict bytes.
+                if (isWafChallengeResponse(responseHeaders)) {
+                    recordWafChallenge(host)
+                }
+
                 // 7. Process and forward response
                 val hasBody = respIsChunked || respContentLength > 0 || respContentLength == -1L
                 if (!hasBody) {
@@ -816,7 +1152,18 @@ object LocalHttpsProxy : KoinComponent {
                         isHtml
                     )
                 }
+
+                // Exit-health canary: any fully-forwarded response proves the
+                // exit works right now (see shouldCountTimeout). Stamp only;
+                // successes never reset tarpit windows.
+                wafLastSuccessMs = android.os.SystemClock.elapsedRealtime()
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            // Tarpit signature candidate: TLS completed earlier, then silence.
+            // recordUpstreamTimeout counts consecutive strikes and bypasses on
+            // the 2nd so one flap or slow origin cannot fail a host open.
+            recordUpstreamTimeout(host)
+            logError("Error in MITM transaction stream: ${e.message}")
         } catch (e: Exception) {
             logError("Error in MITM transaction stream: ${e.message}")
         } finally {

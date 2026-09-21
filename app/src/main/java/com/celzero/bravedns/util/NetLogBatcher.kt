@@ -16,7 +16,7 @@
 
 package com.celzero.bravedns.util
 
-import Logger.LOG_BATCH_LOGGER
+import com.celzero.bravedns.util.Logger.LOG_BATCH_LOGGER
 import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineName
@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.milliseconds
 
 // channel buffer receives batched entries of batchsize or once every waitms from a batching
 // producer or a time-based monitor (signal) running in a single-threaded co-routine context.
@@ -117,6 +118,10 @@ class NetLogBatcher<T, V>(
     }
 
     private suspend fun txswap(reason: String) {
+        if (closed.get()) {
+            logd("txswap skip, closed; reason: $reason")
+            return
+        }
         // increment lsn before any potential suspension or delays; because add() and update()
         // only signals the current lsn when the buffer size is 1, and might end up racing
         lsn = (lsn + 1)
@@ -125,11 +130,11 @@ class NetLogBatcher<T, V>(
         val u = updates.getAndSet(mutableListOf())
 
         if (b.isNotEmpty()) {
-            buffersCh.send(b)
+            buffersCh.trySend(b)
         }
         if (u.isNotEmpty()) {
-            delay(waitms / 5)
-            updatesCh.send(u)
+            delay((waitms / 5).milliseconds)
+            updatesCh.trySend(u)
         }
 
         logd( "txswap (${lsn}) b: ${b.size}, u: ${u.size}, lsn -> $lsn, reason: $reason")
@@ -137,24 +142,32 @@ class NetLogBatcher<T, V>(
 
     suspend fun add(payload: T) =
         withContext(looper + nprod) {
+            if (closed.get()) {
+                logd("add skip, closed")
+                return@withContext
+            }
             val b = batches.get()
             b.add(payload)
             // if the batch size is met, dispatch it to the consumer
             if (b.size >= batchSize) {
                 txswap("add-full")
             } else if (b.size == 1) {
-                signal.send(lsn) // start tracking 'lsn'
+                signal.trySend(lsn) // start tracking 'lsn'; fails only if closed
             }
         }
 
     suspend fun update(payload: V) =
         withContext(looper + nprod) {
+            if (closed.get()) {
+                logd("update skip, closed")
+                return@withContext
+            }
             val u = updates.get()
             u.add(payload)
             if (u.size >= batchSize) {
                 txswap("update-full")
             } else if (u.size == 1) {
-                signal.send(lsn)
+                signal.trySend(lsn) // fails only if closed
             }
         }
 
@@ -179,7 +192,7 @@ class NetLogBatcher<T, V>(
                 }
 
                 // wait for 'batch' to dispatch
-                delay(waitms)
+                delay(waitms.milliseconds)
                 logd("signal wait over, sz(b: ${b.size}, u: ${u.size}) / cur(${lsn}), track(${tracklsn})")
 
                 // 'l' is the current buffer, that is, 'l == i',

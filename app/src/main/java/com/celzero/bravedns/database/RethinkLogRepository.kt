@@ -52,11 +52,53 @@ class RethinkLogRepository(private val logDao: RethinkLogDao) {
         logDao.clearAllData()
     }
 
+    suspend fun clearLogsByRule(rule: String) {
+        logDao.clearLogsByRule(rule)
+    }
+
     fun logsCount(): LiveData<Long> {
         return logDao.logsCount()
     }
 
     fun getDataUsage(from: Long, to: Long): DataUsage? {
         return logDao.getDataUsage(from, to)
+    }
+
+    suspend fun getActivityBuckets(
+        rangeStart: Long,
+        rangeEnd: Long,
+        bucketMs: Long
+    ): List<ActivityBucketRow> {
+        return logDao.getActivityBuckets(rangeStart, rangeEnd, bucketMs)
+    }
+
+    suspend fun getWindowCounts(start: Long, end: Long): WindowCountRow {
+        return logDao.getWindowCounts(start, end)
+    }
+
+    suspend fun getRethinkLogsInWindow(start: Long, end: Long, limit: Int): List<RethinkLog> {
+        return logDao.getRethinkLogsInWindow(start, end, limit)
+    }
+
+    suspend fun getAppActivity(start: Long, end: Long, limit: Int): List<AppActivityRow> {
+        return logDao.getAppActivity(start, end, limit)
+    }
+
+    suspend fun getRethinkLogsInWindowForUid(
+        start: Long,
+        end: Long,
+        uid: Int,
+        limit: Int
+    ): List<RethinkLog> {
+        return logDao.getRethinkLogsInWindowForUid(start, end, uid, limit)
+    }
+
+    suspend fun getDomainActivityForUid(
+        start: Long,
+        end: Long,
+        uid: Int,
+        limit: Int
+    ): List<DomainActivityRow> {
+        return logDao.getDomainActivityForUid(start, end, uid, limit)
     }
 }

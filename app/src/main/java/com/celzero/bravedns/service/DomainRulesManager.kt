@@ -15,9 +15,9 @@
  */
 package com.celzero.bravedns.service
 
-import Logger
-import Logger.LOG_TAG_DNS
-import Logger.LOG_TAG_FIREWALL
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_DNS
+import com.celzero.bravedns.util.Logger.LOG_TAG_FIREWALL
 import android.content.Context
 import android.os.SystemClock.elapsedRealtime
 import android.util.Patterns
@@ -27,6 +27,7 @@ import com.celzero.bravedns.RethinkDnsApplication.Companion.DEBUG
 import com.celzero.bravedns.database.CustomDomain
 import com.celzero.bravedns.database.CustomDomainRepository
 import com.celzero.bravedns.util.Constants
+import com.celzero.bravedns.util.Utilities.isAtleastR
 import com.celzero.firestack.backend.Backend
 import com.celzero.firestack.backend.RadixTree
 import org.koin.core.component.KoinComponent
@@ -41,12 +42,12 @@ object DomainRulesManager : KoinComponent {
 
     private val db by inject<CustomDomainRepository>()
 
-    private val trie: RadixTree = Backend.newRadixTree()
+    private val trie: RadixTree by lazy { Backend.newRadixTree() }
     // fixme: find a better way to handle trusted domains without using two data structures
     // map to store the trusted domains with set of uids
     private val trustedMap = ConcurrentHashMap<String, Set<Int>>()
     // even though we have trustedMap, we need to keep the trie for wildcard matching
-    private val trustedTrie: RadixTree = Backend.newRadixTree()
+    private val trustedTrie: RadixTree by lazy { Backend.newRadixTree() }
 
     // regex to check if url is valid wildcard domain
     // valid wildcard domain: *.eu, *.com, *.example.com, *.example.co.in, *.do-main.com
@@ -140,7 +141,7 @@ object DomainRulesManager : KoinComponent {
             // not cause any issues, but to avoid unnecessary entries in the trie, skipping these
             // entries
             if (cd.uid < 0 && cd.uid != Constants.UID_EVERYBODY) {
-                Logger.w(LOG_TAG_DNS, "skipping domain rule for uid: ${cd.uid}")
+                Logger.i(LOG_TAG_DNS, "skipping domain rule for uid: ${cd.uid}")
                 return@forEach
             }
             val key = mkTrieKey(cd.domain, cd.uid)
@@ -222,6 +223,58 @@ object DomainRulesManager : KoinComponent {
         val res = Status.getStatus(status.toIntOrNull())
         if (DEBUG) Logger.vv(LOG_TAG_DNS, "domain rule for $key, res: $res")
         return res
+    }
+
+    // evaluates domain rules for the given domain(s) and uid.
+    // on Android R and above, only the first domain is considered, as the Go backend supplies it
+    // as the accurate domain. Returns the resolved Status along with the matched domain (trust
+    // takes precedence over block); NONE otherwise. Used by the tunnel managers.
+    fun getAggregatedDomainRule(domain: String?, uid: Int): Pair<Status, String?> {
+        if (domain.isNullOrEmpty()) {
+            return Pair(Status.NONE, "")
+        }
+
+        val domains = if (isAtleastR()) {
+            // on Android R and above, go will give the first domain as the accurate domain so
+            // no need to check further domains
+            val d = domain.lowercase(Locale.ROOT).split(",").firstOrNull()
+            if (d.isNullOrEmpty()) return Pair(Status.NONE, "")
+            listOf(d)
+        } else {
+            domain.lowercase(Locale.ROOT).split(",")
+        }
+
+        if (domains.isEmpty()) {
+            return Pair(Status.NONE, "")
+        }
+
+        var hasTrustedDomain = false
+        var trustedDomain = ""
+        var hasBlockedDomain = false
+        var blockedDomain = ""
+        for (d in domains) {
+            when (status(d, uid)) {
+                Status.TRUST -> {
+                    hasTrustedDomain = true
+                    trustedDomain = d
+                }
+
+                Status.BLOCK -> {
+                    hasBlockedDomain = true
+                    blockedDomain = d
+                }
+
+                else -> {
+                    // no-op
+                }
+            }
+        }
+
+        return when {
+            hasTrustedDomain -> Pair(Status.TRUST, trustedDomain)
+            hasBlockedDomain -> Pair(Status.BLOCK, blockedDomain)
+            else -> Pair(Status.NONE, "")
+        }
     }
 
     fun getProxyForDomain(uid: Int, domain: String): Pair<String, String> {
@@ -434,8 +487,12 @@ object DomainRulesManager : KoinComponent {
         trie.del(key)
     }
 
+    // Room's DAO returns a new LiveData instance on every call; cache it so
+    // observers and value-reads share the same instance.
+    private val cachedDomainCountLiveData: LiveData<Int> by lazy { db.getUniversalCustomDomainCount() }
+
     fun getUniversalCustomDomainCount(): LiveData<Int> {
-        return db.getUniversalCustomDomainCount()
+        return cachedDomainCountLiveData
     }
 
     suspend fun getRulesCountByCC(cc: String): Int {
@@ -459,6 +516,7 @@ object DomainRulesManager : KoinComponent {
                 updateUid(uid, newUid)
             }
         }
+        Logger.i(LOG_TAG_FIREWALL, "domain rules updated")
     }
 
     suspend fun updateUid(uid: Int, newUid: Int) {

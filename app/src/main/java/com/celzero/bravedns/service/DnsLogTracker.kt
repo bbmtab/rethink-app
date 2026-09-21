@@ -16,15 +16,13 @@
 
 package com.celzero.bravedns.service
 
-import Logger
-import Logger.LOG_TAG_VPN
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_VPN
 import android.content.Context
-import android.os.SystemClock
 import com.celzero.bravedns.R
 import com.celzero.bravedns.database.DnsLog
 import com.celzero.bravedns.database.DnsLogRepository
 import com.celzero.bravedns.net.doh.Transaction
-import com.celzero.bravedns.util.AndroidUidConfig
 import com.celzero.bravedns.util.Constants.Companion.EMPTY_PACKAGE_NAME
 import com.celzero.bravedns.util.Constants.Companion.INVALID_UID
 import com.celzero.bravedns.util.Constants.Companion.UNSPECIFIED_IP_IPV4
@@ -35,6 +33,7 @@ import com.celzero.bravedns.util.Utilities.getCountryCode
 import com.celzero.bravedns.util.Utilities.getFlag
 import com.celzero.bravedns.util.Utilities.makeAddressPair
 import com.celzero.bravedns.util.Utilities.normalizeIp
+import com.celzero.bravedns.tunnel.TunDnsManager
 import com.celzero.firestack.backend.Backend
 import com.celzero.firestack.backend.DNSSummary
 import kotlinx.coroutines.CoroutineScope
@@ -59,35 +58,54 @@ internal constructor(
         val DNS_TTL_GRACE_SEC = TimeUnit.MINUTES.toSeconds(5L)
         private const val RDATA_MAX_LENGTH = 100
         private const val EMPTY_RESPONSE = "--"
+
+        /**
+         * Arrival-time blocked classification for a dns answer, derived from the
+         * raw [com.celzero.firestack.backend.DNSSummary] fields. Mirrors the
+         * isBlocked assignments made by [makeDnsLogObj] (including the
+         * COMPLETE+ip override of an earlier BlockAll marker) so callers can
+         * aggregate at log-arrival time without duplicating or re-deriving this
+         * logic. makeDnsLogObj remains the persistence-side authority.
+         */
+        fun isBlockedDnsAnswer(
+            transportId: String,
+            statusCode: Int,
+            response: String,
+            qType: Long,
+            blocklists: String,
+            upstreamBlock: Boolean
+        ): Boolean {
+            var blocked = false
+
+            // mark the query as blocked if the transport id is BlockAll/Block;
+            // no need to check for blocklist as it is already marked as blocked
+            if (transportId == Backend.BlockAll || transportId == Backend.Block) {
+                blocked = true
+            }
+
+            if (Transaction.Status.fromId(statusCode) == Transaction.Status.COMPLETE &&
+                ResourceRecordTypes.mayContainIP(qType.toInt())
+            ) {
+                val destination = normalizeIp(response.split(",").firstOrNull())
+                if (destination != null) {
+                    // overwrites any earlier BlockAll marker, matching makeDnsLogObj
+                    blocked = destination.hostAddress == UNSPECIFIED_IP_IPV4 ||
+                            destination.hostAddress == UNSPECIFIED_IP_IPV6
+                } else if (response == EMPTY_RESPONSE && (blocklists.isNotEmpty() || upstreamBlock)) {
+                    blocked = true
+                }
+            }
+
+            return blocked
+        }
     }
 
-    private val vpnStateMap = HashMap<Transaction.Status, BraveVPNService.State>()
-
-    init {
-        vpnStateMap[Transaction.Status.COMPLETE] = BraveVPNService.State.WORKING
-        vpnStateMap[Transaction.Status.SEND_FAIL] = BraveVPNService.State.NO_INTERNET
-        vpnStateMap[Transaction.Status.NO_RESPONSE] = BraveVPNService.State.DNS_SERVER_DOWN
-        vpnStateMap[Transaction.Status.TRANSPORT_ERROR] = BraveVPNService.State.DNS_SERVER_DOWN
-        vpnStateMap[Transaction.Status.BAD_QUERY] = BraveVPNService.State.DNS_ERROR
-        vpnStateMap[Transaction.Status.CLIENT_ERROR] = BraveVPNService.State.DNS_ERROR
-        vpnStateMap[Transaction.Status.BAD_RESPONSE] = BraveVPNService.State.DNS_ERROR
-        vpnStateMap[Transaction.Status.INTERNAL_ERROR] = BraveVPNService.State.APP_ERROR
-    }
-
-    fun processOnResponse(summary: DNSSummary, rethinkUid: Int): Transaction {
+    fun processOnResponse(summary: DNSSummary): Transaction {
         val latencyMs = (TimeUnit.SECONDS.toMillis(1L) * summary.latency).toLong()
-        val nowMs = SystemClock.elapsedRealtime()
-        val queryTimeMs = nowMs - latencyMs
         var uid = INVALID_UID
 
         try {
-            uid = if (summary.uid == Backend.UidSelf) {
-                rethinkUid
-            } else if (summary.uid == Backend.UidSystem) {
-                AndroidUidConfig.SYSTEM.uid // 1000
-            } else {
-                summary.uid.toInt()
-            }
+            uid = summary.uid.toInt()
         } catch (_: NumberFormatException) {
             Logger.w(LOG_TAG_VPN, "onQuery: invalid uid: ${summary.uid}, using default uid: $uid")
         }
@@ -99,7 +117,7 @@ internal constructor(
         transaction.type = summary.qType
         transaction.uid = uid
         transaction.id = summary.id
-        transaction.queryTime = queryTimeMs
+        transaction.queryTime = summary.start
         transaction.transportType = Transaction.TransportType.getType(summary.type)
         transaction.response = summary.rData ?: ""
         transaction.responseCode = summary.rCode
@@ -111,7 +129,7 @@ internal constructor(
         transaction.blocklist = summary.blocklists ?: ""
         transaction.relayName = summary.rpid ?: ""
         transaction.proxyId = summary.pid ?: ""
-        transaction.msg = summary.origin + "; " + summary.msg + "; " + summary.extra
+        transaction.msg = summary.fid + "; " +summary.origin + "; " + summary.msg + "; " + summary.extra
         transaction.upstreamBlock = summary.upstreamBlocks
         transaction.region = summary.region
         transaction.isCached = summary.cached
@@ -119,6 +137,9 @@ internal constructor(
         transaction.dnssecValid = summary.ad
         transaction.blockedTarget = summary.blockedTarget
         transaction.isEch = summary.ech
+        // consume the dns-filter decision recorded in onUpstreamAnswer for this query's
+        // flow id; consumed exactly once so a reason is never duplicated across logs
+        transaction.blockedReason = TunDnsManager.consumeDnsFilterReason(summary.fid)
         return transaction
     }
 
@@ -136,7 +157,7 @@ internal constructor(
         dnsLog.responseTime = transaction.latency
         dnsLog.serverIP = transaction.serverName
         dnsLog.status = transaction.status.name
-        dnsLog.time = transaction.responseCalendar.timeInMillis
+        dnsLog.time = transaction.queryTime
         dnsLog.ttl = transaction.ttl
         dnsLog.msg = transaction.msg
         dnsLog.upstreamBlock = transaction.upstreamBlock
@@ -146,6 +167,7 @@ internal constructor(
         dnsLog.dnssecValid = transaction.dnssecValid
         dnsLog.blockedTarget = transaction.blockedTarget
         dnsLog.isEch = transaction.isEch
+        dnsLog.blockedReason = transaction.blockedReason
         val typeName = ResourceRecordTypes.getTypeName(transaction.type.toInt())
         if (typeName == ResourceRecordTypes.UNKNOWN) {
             dnsLog.typeName = transaction.type.toString()
@@ -264,38 +286,6 @@ internal constructor(
         @Suppress("UNCHECKED_CAST")
         val dnsLogs = (logs as? List<DnsLog>) ?: return
         dnsLogRepository.insertBatch(dnsLogs)
-    }
-
-    fun updateVpnConnectionState(transaction: Transaction?) {
-        if (transaction == null) return
-
-        // Update the connection state.  If the transaction succeeded, then the connection is
-        // working.
-        // If the transaction failed, then the connection is not working.
-        // commented the code for reporting good or bad network.
-        // Connection state will be unknown if the transaction is blocked locally in that case,
-        // transaction status will be set as complete. So introduced check while
-        // setting the connection state.
-        if (transaction.status === Transaction.Status.COMPLETE) {
-            // skip updating the connection state if the transaction was resolved locally.
-            // locally resolved transaction has no server name, indicating it was blocked
-            // by a local rule either a firewall rule or the local DNS blocklist.
-
-            if (isLocallyResolved(transaction)) return
-
-            VpnController.onConnectionStateChanged(BraveVPNService.State.WORKING)
-            // only update the server name if it is not empty as its only used to show ech
-            VpnController.onEchUpdate(transaction.isEch)
-        } else {
-            val vpnState = vpnStateMap[transaction.status] ?: BraveVPNService.State.FAILING
-            VpnController.onConnectionStateChanged(vpnState)
-        }
-    }
-
-    private fun isLocallyResolved(transaction: Transaction?): Boolean {
-        if (transaction == null) return false
-
-        return transaction.serverName.isEmpty()
     }
 
     private fun io(f: suspend () -> Unit) {

@@ -65,7 +65,8 @@ jobs:
       # green. The unit-test task MUST run and pass; counts are re-reported
       # from JUnit XML, not trusted from gradle stdout alone.
       # Scope = the sealed slice ONLY (policy package + touched filter/db
-      # classes). The full app suite is NOT the gate: run 35058794641 proved
+      # classes + VpnWatchdog/VpnWatchdogScheduler pure-JVM tests). The full
+      # app suite is NOT the gate: run 35058794641 proved
       # 43 failures confined to pre-existing rot outside this diff
       # (retired-RPN RpnProxyManager/SubscriptionStateMachineV2/WireguardManager
       # per AUDIT-RESULTS, plus stale EasyListRatioTest reflecting on a
@@ -79,6 +80,8 @@ jobs:
           --tests "com.celzero.bravedns.core.proxy.policy.*"
           --tests "com.celzero.bravedns.core.filter.FilterSourceCompilerTest"
           --tests "com.celzero.bravedns.database.*"
+          --tests "com.celzero.bravedns.service.VpnWatchdogTest"
+          --tests "com.celzero.bravedns.service.VpnWatchdogSchedulerTest"
           --console=plain --stacktrace
 
       - name: Report unit-test counts from JUnit XML

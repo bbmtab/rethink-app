@@ -24,11 +24,13 @@ import com.celzero.bravedns.database.DnsCryptRelayEndpoint
 import com.celzero.bravedns.rpnproxy.RpnProxyManager
 import com.celzero.bravedns.ui.activity.AntiCensorshipActivity
 import com.celzero.bravedns.ui.bottomsheet.BlockFreeDnsModeBottomSheet
+import com.celzero.bravedns.ui.stats.StatsViewMode
 import com.celzero.bravedns.util.Constants
 import com.celzero.bravedns.util.Constants.Companion.INIT_TIME_MS
 import com.celzero.bravedns.util.Constants.Companion.INVALID_PORT
 import com.celzero.bravedns.util.FirebaseErrorReporting
 import com.celzero.bravedns.util.InternetProtocol
+import com.celzero.bravedns.util.LogLifespan
 import com.celzero.bravedns.util.PcapMode
 import com.celzero.bravedns.util.ResourceRecordTypes
 import com.celzero.bravedns.util.Utilities
@@ -42,6 +44,11 @@ import hu.autsoft.krate.stringPref
 import org.koin.core.component.KoinComponent
 
 class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
+
+    // constructor param promoted to a property so it is accessible from
+    // methods (SimpleKrate in krate 2.0.0 does not expose the context)
+    private val appContext: Context = context
+
     companion object {
         const val BRAVE_MODE = "brave_mode"
         const val BACKGROUND_MODE = "background_mode"
@@ -81,6 +88,7 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         const val TUN_NETWORK_POLICY = "tun_network_handling_policy"
         const val USE_MAX_MTU = "use_max_mtu"
         const val SET_VPN_BUILDER_TO_METERED = "set_vpn_builder_to_metered"
+        const val ALLOW_BYPASS = "allow_bypass"
 
         // SE Proxy for Anti-Censorship
         const val AUTO_PROXY_ENABLED = "auto_proxy_enabled"
@@ -96,6 +104,8 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
             "https_inspection_excluded_packages"
         const val HTTPS_INSPECTION_INCLUDED_PACKAGES =
             "https_inspection_included_packages"
+        // Global Plus kill-switch (Plus tab): one tap back to stock.
+        const val PLUS_MASTER_ENABLED = "plus_master_enabled"
 
         // RPN server-side DNS mode (0=Default, 1=AntiAd, 2=Parental, 3=Security)
         const val RPN_DNS_URL = "rpn_dns_mode"
@@ -104,12 +114,21 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         // e.g. "default", "privacy,family", "privacy,family,security"
         const val RPN_DNS_TUN_TYPES = "rpn_dns_tun_types"
 
-        const val ADV_SETTINGS_FORCE_PT_MODE = "adv_setting_force_pt_mode"
+        // -1 = no override; other values = ProtoTranslationMode.id override
+        const val ADV_SETTINGS_FORCE_PT_MODE_ID = "adv_setting_force_pt_mode_id"
 
         // Guided tour version bump this constant to re-show the tour after major UI changes.
         // Any stored version lower than this will cause the tour to re-trigger.
         // v2: added Rethink+ premium nav-item step (step 6) + fixed tour button text contrast.
-        const val GUIDED_TOUR_CURRENT_VERSION = 2
+        // v3: rewrote step copy; firewall step now targets the apps card; added Universal &
+        // Per-App Rules step targeting the firewall card.
+        const val GUIDED_TOUR_CURRENT_VERSION = 3
+
+        // RPN (ServerSelection) onboarding tour version. Bump to re-show the premium
+        // RPN onboarding to existing subscribers after a major dashboard UI change.
+        // v1: initial post-purchase onboarding (quick tiles, relay, bypass, per-app
+        // routing, stats, DNS-filter settings).
+        const val RPN_ONBOARDING_CURRENT_VERSION = 1
 
         const val FLOOD_WIREGUARD = "flood_wireguard"
 
@@ -118,8 +137,28 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         const val INCLUDE_FILE_TRACE = "include_file_trace"
 
         const val GO_MAX_MEMORY = "go_max_memory"
+        // Plus: Advanced Filter compiler watermark keys (Slice 2/3)
         const val ADVANCED_FILTER_GENERATION = "advanced_filter_generation"
         const val LAST_COMPILED_ENABLED_SET_HASH = "last_compiled_enabled_set_hash"
+
+        // SAF tree URI (content://...) of the directory chosen by the user to store
+        // memory-profile heap dumps. Empty when the user hasn't picked a location yet.
+        const val MEMORY_PROFILE_DIR_URI = "memory_profile_dir_uri"
+
+        // Default custom LAN IPs for the VPN tunnel (used with the withDefault{} values
+        // above and by restoreTunnelSettingsDefaults())
+        private const val DEFAULT_LAN_GATEWAY_IPV4 = "10.111.222.1/24"
+        private const val DEFAULT_LAN_GATEWAY_IPV6 = "fd66:f83a:c650::1/120"
+        private const val DEFAULT_LAN_ROUTER_IPV4 = "10.111.222.2/32"
+        private const val DEFAULT_LAN_ROUTER_IPV6 = "fd66:f83a:c650::2/128"
+        private const val DEFAULT_LAN_DNS_IPV4 = "10.111.222.3/32"
+        private const val DEFAULT_LAN_DNS_IPV6 = "fd66:f83a:c650::3/128"
+
+        // Default socket buffer size: 512 KB (512 * 1024)
+        private const val DEFAULT_SOCKET_BUFFER_SIZE_BYTES = 524288
+
+        // Default VPN builder network policy (0 = auto)
+        private const val DEFAULT_VPN_BUILDER_POLICY = 0
     }
 
     // when vpn is started by the user, this is set to true; set to false when user stops
@@ -225,6 +264,45 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // comma-separated list of hosts to bypass HTTPS inspection
     var httpsBypassHosts by stringPref("https_bypass_hosts").withDefault<String>("")
 
+    // comma-separated list of EXACT hosts auto-bypassed from HTTPS inspection
+    // after WAF-challenge/tarpit detection (WAF auto-bypass). Exact-match only,
+    // never suffix-matched; user-clearable from the Plus tab. Deliberately
+    // persisted across restarts (unlike httpsBypassHosts): a WAF verdict for a
+    // host+exit pair is stable, re-probing it on every restart just burns
+    // another 30s tarpit wait. See LocalHttpsProxy anti-cascade rule.
+    var httpsWafBypassHosts by stringPref("https_waf_bypass_hosts").withDefault<String>("")
+    // Master switch for WAF auto-bypass (Plus tab). OFF = fail closed: every
+    // connection goes through normal MITM evaluation even on challenged
+    // hosts (blank/timeout may return there). Default ON: matches the tested
+    // behavior (challenged news sites load opaque).
+    var wafBypassMasterEnabled by booleanPref("https_waf_bypass_master").withDefault<Boolean>(true)
+
+    // Global Plus kill-switch (Plus tab, top). When OFF, every Plus behavior
+    // is defeated and the app runs stock Rethink semantics: no MITM/proxy
+    // setup at establish, no WAF verdicts, no watchdog chain, no content
+    // filtering (DNS + firewall, the Rethink core, are untouched). This is
+    // the safety net for dogfood/beta: one tap returns to known-good stock
+    // behavior without uninstalling. Default ON (current tested behavior).
+    var plusMasterEnabled by booleanPref("plus_master_enabled").withDefault<Boolean>(true)
+
+    // Watchdog (Plus tab): restart protection killed by battery optimization.
+    // The alarm trigger is system-owned so checks survive process death; the
+    // receiver respawns the process and re-arms the chain. Interval is user
+    // seconds (default 15). State persists so a kill mid-span does not reset
+    // detection (worst case one extra span). See VpnWatchdog + scheduler.
+    var watchdogEnabled by booleanPref("watchdog_enabled").withDefault<Boolean>(false)
+    var watchdogIntervalSecs by intPref("watchdog_interval_secs").withDefault<Int>(15)
+    var watchdogStateRaw by stringPref("watchdog_state").withDefault<String>("")
+    var watchdogLastCheckMs by longPref("watchdog_last_check").withDefault<Long>(0)
+    var watchdogLastAction by stringPref("watchdog_last_action").withDefault<String>("")
+    // Explicit user-STOP marker: distinguishes "user turned protection off"
+    // (never resurrect) from "system killed it" (heal). Set ONLY on
+    // user-initiated stops, cleared ONLY on user-initiated starts; system
+    // paths (backup, go-crash monitor, heal, boot-auto) never touch it, and
+    // a graceful system kill (onDestroy runs, flag flips false) leaves it
+    // false — which is exactly how the watchdog tells the two apart.
+    var watchdogUserStopped by booleanPref("watchdog_user_stopped").withDefault<Boolean>(false)
+
     // user set among AppConfig.DnsType enum; RETHINK_REMOTE is default which is Rethink-DoH
     var dnsType by
         intPref("dns_type")
@@ -296,6 +374,10 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     var customDownloaderLastGeneratedId by
         longPref("custom_downloader_last_generated_id").withDefault<Long>(0)
 
+    // last download failure reason
+    var lastDownloadFailureReason by
+        stringPref("last_download_failure_reason").withDefault<String>("")
+
     // android download manager's active download ids (comma-separated)
     var androidDownloadManagerIds by
         stringPref("android_download_manager_ids").withDefault<String>("")
@@ -363,13 +445,16 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     var enableDnsCache by booleanPref("dns_cache").withDefault<Boolean>(true)
 
     // private ips, default false (route private ips to tunnel)
-    var privateIps by booleanPref("private_ips").withDefault<Boolean>(false)
+    var privateIps by booleanPref("private_ips").withDefault<Boolean>(Utilities.isPlayStoreFlavour())
 
     // biometric last auth time
     var biometricAuthTime by longPref("biometric_auth_time").withDefault<Long>(INIT_TIME_MS)
 
     // go logger level, default 3 -> info
     var goLoggerLevel by longPref("go_logger_level").withDefault<Long>(3)
+
+    // log lifespan, default 7 days
+    var logLifespan by longPref("log_lifespan").withDefault<Long>(LogLifespan.SEVEN_DAYS.id)
 
     // firewall bubble feature toggle
     var firewallBubbleEnabled by booleanPref("pref_firewall_bubble_enabled").withDefault<Boolean>(false)
@@ -455,21 +540,17 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     var appUpdateTimeTs by longPref("app_update_time_ts").withDefault<Long>(INIT_TIME_MS)
 
     // 0 - auto, 1 - relaxed, 2 - aggressive, 3 - fixed
-    var vpnBuilderPolicy by intPref("tun_network_handling_policy").withDefault<Int>(0)
-
-    // whether to use default dns for trusted ips and domains
-    // TODO: remove this variable as it should not be used, BlockFreeDnsMode should be used instead
-    //  to decide the dns bypass mode for trusted ips and domains
-    var useFallbackDnsToBypass by booleanPref("use_fallback_dns_to_bypass").withDefault<Boolean>(true)
+    var vpnBuilderPolicy by intPref("tun_network_handling_policy").withDefault<Int>(DEFAULT_VPN_BUILDER_POLICY)
 
     // Block-free DNS: stored as "TYPE::url" e.g. "DOH::https://dns.google/dns-query"
     // Empty string means no block-free DNS configured
     var blockFreeDns by stringPref("block_free_dns").withDefault<String>("")
 
     // DNS bypass mode for block-free DNS: 1=fallback, 2=global, 3=auto
-    // Default is 3 (auto) which means use dns will be decided based on other dns settings
+    // Default is FALLBACK on Android < 11 (API < 30), AUTO on Android 11+
     var blockFreeDnsMode by intPref("block_free_dns_mode").withDefault<Int>(
-        BlockFreeDnsModeBottomSheet.BlockFreeDnsMode.AUTO.mode)
+        if (isAtleastR()) BlockFreeDnsModeBottomSheet.BlockFreeDnsMode.AUTO.mode
+        else BlockFreeDnsModeBottomSheet.BlockFreeDnsMode.FALLBACK.mode)
 
     // Firebase error reporting enabled (only for play and website variants)
     var firebaseErrorReportingEnabled by booleanPref("firebase_error_reporting").withDefault<Boolean>(Utilities.isPlayStoreFlavour())
@@ -485,6 +566,10 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // Used on app restart to skip files already uploaded and to decide which files to delete.
     var lastReportedTombstoneFile by stringPref("last_reported_tombstone_file").withDefault("")
 
+    // Persisted SAF tree URI of the directory where memory-profile heap dumps are written.
+    // Empty string means the user has not yet chosen a location.
+    var memoryProfileDirUri by stringPref(MEMORY_PROFILE_DIR_URI).withDefault("")
+
     // experimental feature to use max mtu
     var useMaxMtu by booleanPref("use_max_mtu").withDefault<Boolean>(false)
 
@@ -497,16 +582,26 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // smart persistent keep alive for wireguard proxy
     var smartPersistentKeepalive by booleanPref("smart_persistent_keepalive").withDefault<Boolean>(false)
 
+    // true once the encrypted wireguard config files have been migrated to plain files
+    var wireguardPlainFileMigrationDone by booleanPref("wg_plain_file_migration_done").withDefault<Boolean>(false)
+
+    // RPN encrypted-file storage migration (external -> internal).
+    var rpnInternalStorageMigrationVersion by intPref("rpn_internal_storage_migration_version").withDefault<Int>(0)
+
     var appTestMode by booleanPref("app_test_mode").withDefault<Boolean>(false)
 
-    var advSettingForcePTMode by booleanPref("adv_setting_force_pt_mode").withDefault<Boolean>(false)
+    // -1 = no override; any other value is a ProtoTranslationMode.id to force in DEBUG mode
+    var advSettingForcePTModeId by intPref("adv_setting_force_pt_mode_id").withDefault<Int>(-1)
 
     var floodWireGuard by booleanPref("flood_wireguard").withDefault(false)
 
-    var socketBufferSizeBytes by intPref("socket_buffer_size_bytes").withDefault<Int>(524288) // 512 KB (512 * 1024)
+    var socketBufferSizeBytes by intPref("socket_buffer_size_bytes").withDefault<Int>(DEFAULT_SOCKET_BUFFER_SIZE_BYTES)
 
     // include file trace in logs
     var includeFileTrace by booleanPref(INCLUDE_FILE_TRACE).withDefault<Boolean>(false)
+
+    // stats screen presentation mode, see enum StatsViewMode (0 - list, 1 - insights)
+    var statsViewMode by intPref("stats_view_mode").withDefault<Int>(StatsViewMode.INSIGHTS.id)
 
     var orbotConnectionStatus: MutableLiveData<Boolean> = MutableLiveData()
     var vpnEnabledLiveData: MutableLiveData<Boolean> = MutableLiveData()
@@ -530,6 +625,11 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     fun setVpnEnabled(isOn: Boolean) {
         vpnEnabledLiveData.postValue(isOn)
         _vpnEnabled = isOn
+        // Push the quick-settings tile to re-bind and re-seed its state. Tile
+        // updates are dropped by SystemUI while the tile is not listening, so
+        // without this push the tile would keep showing its last-rendered
+        // state until the user next pulls down the shade.
+        QuickSettingsTileHelper.requestTileUpdate(appContext)
     }
 
     fun getVpnEnabled(): Boolean {
@@ -701,12 +801,13 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
      * @return true if the state was changed (i.e., it was newly enabled), false otherwise.
      */
     fun enableStabilityDependentSettings(): Boolean {
-        // Skip for fdroid flavor
-        if (Utilities.isFdroidFlavour()) {
+        // Stability program is backed by Firebase error reporting, which is
+        // available in the play flavour only; skip for website and fdroid.
+        if (!Utilities.isPlayStoreFlavour()) {
             return false
         }
 
-        // Enable Firebase error reporting for play and website variants
+        // Enable Firebase error reporting for the play variant
         if (!firebaseErrorReportingEnabled) {
             firebaseErrorReportingEnabled = true
             FirebaseErrorReporting.setEnabled(firebaseErrorReportingEnabled)
@@ -719,14 +820,7 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // Allowed DNS record types (stored as comma-separated enum names)
     // Default: A, AAAA, CNAME, HTTPS, SVCB, IPSECKEY
     internal var allowedDnsRecordTypesString by stringPref("allowed_dns_record_types")
-        .withDefault(setOf(
-            ResourceRecordTypes.A.name,
-            ResourceRecordTypes.AAAA.name,
-            ResourceRecordTypes.CNAME.name,
-            ResourceRecordTypes.HTTPS.name,
-            ResourceRecordTypes.SVCB.name,
-            ResourceRecordTypes.IPSECKEY.name
-        ).joinToString(","))
+        .withDefault(defaultAllowedDnsRecordTypes())
 
     // Auto mode for DNS record types - when enabled, all record types are allowed
     // Default: true (Auto mode ON)
@@ -764,7 +858,7 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
         }.toSet()
     }
 
-    // SE Proxy for Anti-Censorship
+    // Anti-censor: true when DialStrategies.TCP_PROXY and RetryStrategies.Retry is set to NEVER
     var autoProxyEnabled by booleanPref(AUTO_PROXY_ENABLED).withDefault<Boolean>(false)
 
     // Custom LAN IP configuration mode: 0 = AUTO (default), 1 = MANUAL
@@ -772,14 +866,14 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
 
     // Custom LAN IPs. Store IP and prefix together as a single value (e.g., "10.111.222.1/24").
     // Empty string means: use defaults.
-    var customLanGatewayIpv4 by stringPref("custom_lan_gateway_ipv4").withDefault<String>("10.111.222.1/24")
-    var customLanGatewayIpv6 by stringPref("custom_lan_gateway_ipv6").withDefault<String>("fd66:f83a:c650::1/120")
+    var customLanGatewayIpv4 by stringPref("custom_lan_gateway_ipv4").withDefault<String>(DEFAULT_LAN_GATEWAY_IPV4)
+    var customLanGatewayIpv6 by stringPref("custom_lan_gateway_ipv6").withDefault<String>(DEFAULT_LAN_GATEWAY_IPV6)
 
-    var customLanRouterIpv4 by stringPref("custom_lan_router_ipv4").withDefault<String>("10.111.222.2/32")
-    var customLanRouterIpv6 by stringPref("custom_lan_router_ipv6").withDefault<String>("fd66:f83a:c650::2/128")
+    var customLanRouterIpv4 by stringPref("custom_lan_router_ipv4").withDefault<String>(DEFAULT_LAN_ROUTER_IPV4)
+    var customLanRouterIpv6 by stringPref("custom_lan_router_ipv6").withDefault<String>(DEFAULT_LAN_ROUTER_IPV6)
 
-    var customLanDnsIpv4 by stringPref("custom_lan_dns_ipv4").withDefault<String>("10.111.222.3/32")
-    var customLanDnsIpv6 by stringPref("custom_lan_dns_ipv6").withDefault<String>("fd66:f83a:c650::3/128")
+    var customLanDnsIpv4 by stringPref("custom_lan_dns_ipv4").withDefault<String>(DEFAULT_LAN_DNS_IPV4)
+    var customLanDnsIpv6 by stringPref("custom_lan_dns_ipv6").withDefault<String>(DEFAULT_LAN_DNS_IPV6)
 
     var customModeOrIpChanged by booleanPref("custom_lan_mode_ip_changed").withDefault<Boolean>(false)
 
@@ -809,14 +903,24 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
     // timestamp of the last successful /g/device registration call.
     var deviceRegistrationTimestamp by longPref("device_registration_timestamp").withDefault<Long>(0L)
 
+    // monthly entitlement reconcile
+    var lastForcedReconcileTimestamp by longPref("last_forced_reconcile_timestamp").withDefault<Long>(0L)
+
     // whether the guided tour has been completed; false = show the tour
     var guidedTourCompleted by booleanPref("guided_tour_completed").withDefault<Boolean>(false)
 
     // the version of the guided tour that was last shown; used to re-trigger on UI changes
     var guidedTourVersion by intPref("guided_tour_version").withDefault<Int>(0)
 
-    // maximum memory the go engine can consume in bytes
-    var goMaxMemory by longPref(GO_MAX_MEMORY).withDefault<Long>(1024 * 1024 * 1024L)
+    // whether the RPN (ServerSelection) onboarding tour has been completed;
+    // false = show the premium onboarding on the next dashboard visit
+    var rpnOnboardingCompleted by booleanPref("rpn_onboarding_completed").withDefault<Boolean>(false)
+
+    // the version of the RPN onboarding tour that was last shown
+    var rpnOnboardingVersion by intPref("rpn_onboarding_version").withDefault<Int>(0)
+
+    // maximum memory the go engine can consume in bytes (ideally value*1024*1024)
+    var goMaxMemory by longPref(GO_MAX_MEMORY).withDefault<Long>(-1L)
 
     var blockDnsForUnknownApp by booleanPref("block_dns_for_unknown_app").withDefault<Boolean>(false)
 
@@ -844,5 +948,93 @@ class PersistentState(context: Context) : SimpleKrate(context), KoinComponent {
             putLong(ADVANCED_FILTER_GENERATION, nextGeneration)
             apply()
         }
+    }
+
+    var showRethinkBlockNotification by booleanPref("show_rethink_block_notification").withDefault<Boolean>(true)
+
+    private fun defaultAllowedDnsRecordTypes(): String {
+        return setOf(
+            ResourceRecordTypes.A.name,
+            ResourceRecordTypes.AAAA.name,
+            ResourceRecordTypes.CNAME.name,
+            ResourceRecordTypes.HTTPS.name,
+            ResourceRecordTypes.SVCB.name,
+            ResourceRecordTypes.IPSECKEY.name
+        ).joinToString(",")
+    }
+
+    /**
+     * Restores all settings shown on the DNS settings screen (DnsSettingsFragment)
+     * to their default values. Flavor (fdroid / play / website) and Android version
+     * dependent defaults (e.g., split DNS on Android R+, favicon on non-fdroid
+     * flavours, block-free DNS mode) are honored, mirroring the withDefault{} values
+     * of the respective properties.
+     */
+    fun restoreDnsSettingsDefaults() {
+        // flavour dependent: enabled on play / website, disabled on fdroid
+        fetchFavIcon = !Utilities.isFdroidFlavour()
+        enableDnsAlg = false
+        periodicallyCheckBlocklistUpdate = false
+        useCustomDownloadManager = true
+        enableDnsCache = true
+        useSystemDnsForUndelegatedDomains = false
+        blockDnsForUnknownApp = false
+        preventDnsLeaks = true
+        proxyDns = true
+        // android version dependent: split dns is default-on only on Android R and above
+        splitDns = isAtleastR()
+        // below Android R, split dns requires dns alg; keep both off (mirrors UI dependency)
+        if (!isAtleastR()) enableDnsAlg = false
+        blockFreeDns = ""
+        // android version dependent: AUTO on Android R+, FALLBACK below
+        blockFreeDnsMode = if (isAtleastR()) {
+            BlockFreeDnsModeBottomSheet.BlockFreeDnsMode.AUTO.mode
+        } else {
+            BlockFreeDnsModeBottomSheet.BlockFreeDnsMode.FALLBACK.mode
+        }
+        dnsRecordTypesAutoMode = true
+        allowedDnsRecordTypesString = defaultAllowedDnsRecordTypes()
+    }
+
+    /**
+     * Restores all settings shown on the tunnel settings screen (TunnelSettingsActivity)
+     * to their default values. Flavor (fdroid / play / website) dependent defaults
+     * (e.g., private IPs and connectivity checks on play-store builds) are honored,
+     * mirroring the withDefault{} values of the respective properties.
+     */
+    fun restoreTunnelSettingsDefaults() {
+        useMultipleNetworks = false
+        // flavour dependent: on by default only on play-store builds
+        privateIps = Utilities.isPlayStoreFlavour()
+        excludeAppsInProxy = true
+        protocolTranslationType = false
+        treatOnlyMobileNetworkAsMetered = false
+        stallOnNoNetwork = false
+        randomizeListenPort = true
+        wgGlobalLockdown = false
+        floodWireGuard = false
+        smartPersistentKeepalive = false
+        endpointIndependence = false
+        nwEngExperimentalFeatures = false
+        tcpKeepAlive = false
+        dialTimeoutSec = 0
+        socketBufferSizeBytes = DEFAULT_SOCKET_BUFFER_SIZE_BYTES
+        useMaxMtu = false
+        setVpnBuilderToMetered = false
+        vpnBuilderPolicy = DEFAULT_VPN_BUILDER_POLICY
+        internetProtocolType = InternetProtocol.IPv4.id
+        defaultDnsUrl = Constants.DEFAULT_DNS_LIST[1].url
+        // flavour dependent: on by default only on play-store builds
+        connectivityChecks = Utilities.isPlayStoreFlavour()
+        performAutoNetworkConnectivityChecks = true
+        routeRethinkInRethink = false
+        customLanIpMode = false
+        customModeOrIpChanged = false
+        customLanGatewayIpv4 = DEFAULT_LAN_GATEWAY_IPV4
+        customLanGatewayIpv6 = DEFAULT_LAN_GATEWAY_IPV6
+        customLanRouterIpv4 = DEFAULT_LAN_ROUTER_IPV4
+        customLanRouterIpv6 = DEFAULT_LAN_ROUTER_IPV6
+        customLanDnsIpv4 = DEFAULT_LAN_DNS_IPV4
+        customLanDnsIpv6 = DEFAULT_LAN_DNS_IPV6
     }
 }

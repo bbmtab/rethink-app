@@ -15,6 +15,8 @@
  */
 package com.celzero.bravedns.database
 
+import com.celzero.bravedns.sponsor.database.SponsorDao
+import com.celzero.bravedns.sponsor.repository.SponsorRepository
 import com.celzero.bravedns.iab.ServerOrderHistoryRepository
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.bind
@@ -51,6 +53,7 @@ object DatabaseModule {
         single { get<AppDatabase>().subscriptionStateHistoryDao() }
         single { get<AppDatabase>().countryConfigDAO() }
         single { get<AppDatabase>().filterSourceDao() }
+        single { get<AppDatabase>().smartDnsEndpointDao() }
 
         single { get<LogDatabase>().connectionTrackerDAO() }
         single { get<LogDatabase>().dnsLogDAO() }
@@ -60,6 +63,8 @@ object DatabaseModule {
         single { get<LogDatabase>().eventDao() }
 
         single { get<ConsoleLogDatabase>().consoleLogDAO() }
+
+        single { get<AppDatabase>().sponsorDao() }
 
     }
     private val repositoryModule = module {
@@ -91,6 +96,7 @@ object DatabaseModule {
         single { FilterSourceRepository(get(), get()) } bind FilterSourceCompilerRepository::class
         single { com.celzero.bravedns.core.filter.FilterSourceCompiler(get(), get()) }
         single { com.celzero.bravedns.download.FilterSourceDownloadManager(get()) }
+        single { get<AppDatabase>().smartDnsEndpointRepository() }
 
         single { get<LogDatabase>().rethinkConnectionLogRepository() }
         single { get<LogDatabase>().connectionTrackerRepository() }
@@ -99,6 +105,7 @@ object DatabaseModule {
 
         single { get<ConsoleLogDatabase>().consoleLogRepository() }
 
+        single { SponsorRepository(get()) }
         single { ServerOrderHistoryRepository(get()) }
     }
 

@@ -70,6 +70,55 @@
                     android:text="@string/premium_subtitle" />
             </LinearLayout>
 
+            <!-- Plus master kill-switch: ONE tap returns the app to stock
+                 Rethink behavior (no MITM, no WAF bypass, no watchdog, no
+                 content filtering). Safety net for dogfood/beta. -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardPlusMaster"
+                style="@style/Widget.Rethink.MaterialCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/plus_master_title"
+                            style="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="?attr/colorPrimary"
+                            android:layout_marginBottom="4dp"/>
+
+                        <TextView
+                            android:id="@+id/tvPlusMasterSubtitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/plus_master_desc_on"
+                            style="@style/TextAppearance.Material3.BodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant"/>
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchPlusMaster"
+                        style="@style/PlusMaterialSwitchFix"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
             <!-- HTTPS Inspection Section -->
             <androidx.cardview.widget.CardView
                 android:id="@+id/cardHttpsInspection"
@@ -139,6 +188,57 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:enabled="false"/>
+                    </LinearLayout>
+
+                    <!-- WAF auto-bypass row: exact hosts the edge challenged/
+                         tarpitted, now loading opaque (no decryption).
+                         User-visible + user-clearable per anti-cascade rule. -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="12dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvWafBypassTitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_waf_bypass_title"
+                                style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                            <TextView
+                                android:id="@+id/tvWafBypassSubtitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_waf_bypass_desc_none"
+                                style="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp"/>
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnWafBypassClear"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/plus_waf_bypass_clear"
+                            android:enabled="false"
+                            app:cornerRadius="8dp"
+                            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchWafBypassMaster"
+                            style="@style/PlusMaterialSwitchFix"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:contentDescription="@string/plus_waf_bypass_title"/>
                     </LinearLayout>
 
                     <!-- CA Status Card -->
@@ -398,6 +498,88 @@
                             android:textSize="13sp"
                             android:paddingStart="16dp"
                             android:paddingEnd="16dp"/>
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Watchdog Section: restart protection killed by battery
+                 optimization. Trigger is a system alarm chain (survives
+                 process death); the receiver respawns us and re-arms. -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardWatchdog"
+                style="@style/Widget.Rethink.MaterialCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                app:cardCornerRadius="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/plus_watchdog_title"
+                        style="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorPrimary"
+                        android:layout_marginBottom="4dp"/>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/plus_watchdog_desc"
+                        style="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:layout_marginBottom="16dp"/>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_watchdog_interval_label"
+                                style="@style/TextAppearance.Material3.BodyLarge"/>
+
+                            <TextView
+                                android:id="@+id/tvWatchdogStatus"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/plus_watchdog_status_off"
+                                style="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="2dp"/>
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/etWatchdogInterval"
+                            android:layout_width="72dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:gravity="center"
+                            android:imeOptions="actionDone"
+                            android:importantForAutofill="no"
+                            android:inputType="number"
+                            android:text="15"/>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchWatchdog"
+                            style="@style/PlusMaterialSwitchFix"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"/>
                     </LinearLayout>
 
                 </LinearLayout>

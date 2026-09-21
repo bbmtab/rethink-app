@@ -15,9 +15,9 @@
  */
 package com.celzero.bravedns.database
 
-import Logger
-import Logger.LOG_TAG_APP_DB
-import Logger.LOG_TAG_VPN
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_APP_DB
+import com.celzero.bravedns.util.Logger.LOG_TAG_VPN
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -26,6 +26,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.database.sqlite.SQLiteConstraintException
 import android.net.VpnService
 import android.os.Build
 import android.os.SystemClock
@@ -82,6 +83,7 @@ internal constructor(
         private const val NOTIF_BATCH_NEW_APPS_THRESHOLD = 5
         private val FULL_REFRESH_INTERVAL = TimeUnit.MINUTES.toMillis(1L)
         private const val NOTIF_ID_LOAD_RULES_FAIL = 103
+        const val NOTIF_ID_DB_CORRUPTION = 104
         private const val NOBODY = Constants.INVALID_UID
         private const val ACTION_BASE = 0
         const val ACTION_REFRESH_RESTORE = ACTION_BASE + 1
@@ -103,7 +105,13 @@ internal constructor(
     init {
         io("RefreshDatabase") {
             for (action in actions) {
-                process(action)
+                try {
+                    process(action)
+                } catch (e: Exception) {
+                    // an uncaught exception here crashes the app and all subsequent refresh
+                    // actions would be dropped.
+                    Logger.crash(LOG_TAG_APP_DB, "refresh action failed, action: $action", e)
+                }
             }
         }
     }
@@ -145,8 +153,9 @@ internal constructor(
             latestRefreshTime = current
             val pm = ctx.packageManager ?: return
 
-            // during restore action, re-encrypt wg config files from temp_wireguard/ before
-            // loading managers so that WireguardManager.load() finds the encrypted files.
+            // during restore action, move plain wg config files from temp_wireguard/ into
+            // the wireguard directory before loading managers so WireguardManager.load()
+            // finds the plaintext files.
             if (action == ACTION_REFRESH_RESTORE) {
                 WireguardManager.restoreProcessRetrieveWireGuardConfigs()
             }
@@ -210,7 +219,7 @@ internal constructor(
             printAll(packagesToDelete, "packagesToDelete")
             printAll(packagesToUpdate, "packagesToUpdate")
 
-            logEvent(Severity.LOW, "app refresh details", "sizes: rmv: ${packagesToDelete.size}; add: ${packagesToAdd.size}; update: ${packagesToUpdate.size}, tombstone: ${packagesToTombstone.size}, action: $action, tombstoneEnabled? $canTombstone")
+            logEvent(Severity.LOW, "app refresh details", "sizes: rmv: ${packagesToDelete.size}; add: ${packagesToAdd.size} [$packagesToAdd]; update: ${packagesToUpdate.size} [$packagesToUpdate], tombstone: ${packagesToTombstone.size} [$packagesToTombstone], action: $action, tombstoneEnabled? $canTombstone")
             Logger.i(
                 LOG_TAG_APP_DB,
                 "sizes: rmv: ${packagesToDelete.size}; add: ${packagesToAdd.size}; update: ${packagesToUpdate.size}, tombstone: ${packagesToTombstone.size}, action: $action, tombstoneEnabled? $canTombstone"
@@ -228,6 +237,9 @@ internal constructor(
             // must be called after updateExistingPackagesIfNeeded
             refreshDomainRules(packagesToUpdate)
             Logger.i(LOG_TAG_APP_DB, "refresh done")
+        } catch (e: SQLiteConstraintException) {
+            Logger.crash(LOG_TAG_APP_DB, "db constraint violation during refresh; notifying user", e)
+            showDatabaseCorruptionNotification()
         } catch (e: RuntimeException) {
             Logger.crash(LOG_TAG_APP_DB, e.message ?: "refresh err", e)
             throw e
@@ -344,7 +356,7 @@ internal constructor(
                 // delete the app from the database only if tombstone expiry time has elapsed
                 // or if restore is true or tombstone is disabled
                 val canDelete = !persistentState.tombstoneApps || restore || (appInfo.tombstoneTs > 0L && currentTime - appInfo.tombstoneTs > TOMBSTONE_EXPIRY_TIME_MS)
-                if (canDelete) {
+                if (canDelete && it.uid != Constants.UID_EVERYBODY) {
                     // remove all the rules related to the packages
                     IpRulesManager.deleteRulesByUid(it.uid)
                     DomainRulesManager.deleteRulesByUid(it.uid)
@@ -368,25 +380,33 @@ internal constructor(
         installedApps: Set<FirewallManager.AppInfoTuple>
     ) {
         // if a non-app appears installed-apps group, then upsert its db entry
-        // and give it a proper identity as retrieved from the package-manager
         val nonApps = trackedApps.filter { isNonApp(it.packageName) }.map { it.uid }.toSet()
-        installedApps.forEach { x ->
-            if (nonApps.contains(x.uid)) {
-                val prevPackageName =
-                    trackedApps.filter { i -> i.uid == x.uid }.map { it.packageName }
-                upsertNonApp(x, prevPackageName.firstOrNull())
+        installedApps.filter { nonApps.contains(it.uid) }
+            .groupBy { it.uid }
+            .forEach { (uid, installed) ->
+                // only the placeholder (no_package_<uid>) must be replaced
+                val placeholder =
+                    trackedApps.firstOrNull { it.uid == uid && isNonApp(it.packageName) }?.packageName
+                upsertNonApp(uid, installed, placeholder)
             }
-        }
     }
 
     private suspend fun upsertNonApp(
-        appTuple: FirewallManager.AppInfoTuple,
-        prevPackageName: String?
+        uid: Int,
+        installed: List<FirewallManager.AppInfoTuple>,
+        placeholderPackageName: String?
     ) {
-        val appInfo = fetchApplicationInfo(appTuple.uid) ?: return
         // TODO: implement upsert logic handling all the edge cases
-        deletePackage(appTuple.uid, prevPackageName)
-        insertApp(appInfo)
+        if (placeholderPackageName != null) {
+            deletePackage(uid, placeholderPackageName)
+        }
+        // insert every installed package sharing this uid; skip ones already tracked
+        installed.forEach { x ->
+            val known = FirewallManager.getAppInfoByUidAndPackage(x.uid, x.packageName)
+            if (known != null) return@forEach
+            val ai = Utilities.getApplicationInfo(ctx, x.packageName) ?: return@forEach
+            insertApp(ai)
+        }
     }
 
     private suspend fun addMissingPackages(apps: Set<FirewallManager.AppInfoTuple>) {
@@ -450,6 +470,7 @@ internal constructor(
         }
         val ai = maybeFetchAppInfo(uid)
         val pkg = ai?.packageName ?: ""
+
         val tombstone = FirewallManager.isTombstone(pkg)
         Logger.i(LOG_TAG_APP_DB, "insert app; uid: $uid, pkg: $pkg, tombstone? $tombstone")
         if (tombstone) {
@@ -514,6 +535,7 @@ internal constructor(
         packagesToDelete: Set<FirewallManager.AppInfoTuple>,
         restore: Boolean = false
     ) {
+
         // trackedApps is empty, the installed apps are yet to be added to the database; and so,
         // there's no need to refresh these mappings as apps tracked by FirewallManager is empty
         if (trackedApps.isEmpty()) {
@@ -527,7 +549,10 @@ internal constructor(
         // this will just sync the proxy mapping with the app info repository
         val pxm = ProxyManager.trackedApps()
 
-        val currentFwApps = FirewallManager.getAllApps()
+        // snapshot FirewallManager's AppInfo derive currentFwApps from it.
+        val fwSnapshot = FirewallManager.getAppInfoSnapshot()
+        val currentFwApps =
+            fwSnapshot.keys.map { FirewallManager.AppInfoTuple(it.first, it.second) }.toSet()
 
         val tombstoneApps = findPackagesToTombstone(pxm, currentFwApps, !restore && canTombstone)
         // apps which are tombstone, but not yet deleted will be deleted now
@@ -535,13 +560,15 @@ internal constructor(
         // Compare proxy state against current state so uid changes are detected correctly.
         val update = findPackagesToUpdate(pxm, currentFwApps, restore)
         val add =
-            findPackagesToAdd(pxm, currentFwApps).map {
-                val appInfo = FirewallManager.getAppInfoByPackage(it.packageName)
+            findPackagesToAdd(pxm, currentFwApps).mapNotNull {
+                // resolve from the snapshot; also uid-aware so that
+                // packages existing under multiple uids (work-profile / cloned apps) are each added.
+                val appInfo = fwSnapshot[it.uid to it.packageName]
                 if (appInfo == null) {
-                    Logger.w(LOG_TAG_APP_DB, "invalid app info for ${it.packageName}")
+                    Logger.w(LOG_TAG_APP_DB, "invalid app info for ${it.uid}, ${it.packageName}")
                 }
                 appInfo
-            }.filterNotNull()
+            }
         printAll(pxm, "px: tracked apps")
         printAll(packageToAdd, "px: add apps")
         printAll(update, "px: update apps")
@@ -584,9 +611,16 @@ internal constructor(
         }
 
         packageToAdd.forEach {
-            val appInfo = FirewallManager.getAppInfoByPackage(it.packageName)
+            // use the tuple's uid so sibling uids for the same package are each added
+            val appInfo = fwSnapshot[it.uid to it.packageName]
             if (appInfo != null) {
                 ProxyManager.addNewApp(appInfo)
+            } else {
+                // expected only when addMissingPackages() skipped this app (e.g. the package
+                // could not be resolved by PackageManager at insert time); no-op here keeps the
+                // proxy mapping consistent with FirewallManager. Logged for parity with the
+                // add-set above and to surface silent skips during diagnosis.
+                Logger.w(LOG_TAG_APP_DB, "skip proxy add: app not in fw snapshot; uid: ${it.uid}, pkg: ${it.packageName}")
             }
         }
 
@@ -612,7 +646,8 @@ internal constructor(
         newAppInfo.appCategory = ctx.getString(FirewallManager.CategoryConstants.NON_APP.nameResId)
         newAppInfo.uid = uid
 
-        if (persistentState.getBlockNewlyInstalledApp()) {
+        val isSystemComponent = newAppInfo.isSystemApp && !AndroidUidConfig.isUidAppRange(uid)
+        if (persistentState.getBlockNewlyInstalledApp() && !isSystemComponent) {
             newAppInfo.firewallStatus = FirewallManager.FirewallStatus.NONE.id
             newAppInfo.connectionStatus = FirewallManager.ConnectionStatus.BOTH.id
         }
@@ -637,6 +672,7 @@ internal constructor(
             ctx.getString(R.string.network_log_app_name_unnamed, ai.uid.toString())
         }
         val isSystemApp = isSystemApp(ai)
+        val isSystemComponent = isSystemComponent(ai)
         val entry = AppInfo(null)
 
         entry.appName = appName
@@ -648,7 +684,8 @@ internal constructor(
         entry.isSystemApp = isSystemApp
 
         // do not firewall app by default, if blockNewlyInstalledApp is set to false
-        if (persistentState.getBlockNewlyInstalledApp()) {
+        // skip blocking of system components
+        if (persistentState.getBlockNewlyInstalledApp() && !isSystemComponent) {
             entry.firewallStatus = FirewallManager.FirewallStatus.NONE.id
             entry.connectionStatus = FirewallManager.ConnectionStatus.BOTH.id
         } else {
@@ -897,6 +934,74 @@ internal constructor(
         builder.build()
         nm.notify(NOTIF_CHANNEL_ID_FIREWALL_ALERTS, NOTIF_ID_LOAD_RULES_FAIL, builder.build())
     }
+
+    private fun showDatabaseCorruptionNotification() {
+        val notificationManager =
+            ctx.getSystemService(VpnService.NOTIFICATION_SERVICE) as NotificationManager
+
+        val clearIntent =
+            makeVpnIntent(NOTIF_ID_DB_CORRUPTION, Constants.NOTIF_ACTION_DB_CORRUPTED_CLEAR)
+        val dismissIntent =
+            makeVpnIntent(NOTIF_ID_DB_CORRUPTION + 1, Constants.NOTIF_ACTION_DB_CORRUPTED_DISMISS)
+
+        val builder: NotificationCompat.Builder
+        if (isAtleastO()) {
+            val name: CharSequence = ctx.getString(R.string.notif_channel_firewall_alerts)
+            val description = ctx.resources.getString(R.string.notif_channel_desc_firewall_alerts)
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(NOTIF_CHANNEL_ID_FIREWALL_ALERTS, name, importance)
+            channel.description = description
+            notificationManager.createNotificationChannel(channel)
+            builder = NotificationCompat.Builder(ctx, NOTIF_CHANNEL_ID_FIREWALL_ALERTS)
+        } else {
+            builder = NotificationCompat.Builder(ctx, NOTIF_CHANNEL_ID_FIREWALL_ALERTS)
+        }
+
+        val contentTitle = ctx.resources.getString(R.string.db_corruption_notif_title)
+        val contentText = ctx.resources.getString(R.string.db_corruption_notif_desc)
+
+        builder
+            .setSmallIcon(R.drawable.ic_notification_icon)
+            .setContentTitle(contentTitle)
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setColor(ContextCompat.getColor(ctx, UIUtils.getAccentColor(persistentState.theme)))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+
+        val clearAction: NotificationCompat.Action =
+            NotificationCompat.Action(
+                0,
+                ctx.resources.getString(R.string.db_corruption_action_clear),
+                clearIntent
+            )
+        val dismissAction: NotificationCompat.Action =
+            NotificationCompat.Action(
+                0,
+                ctx.resources.getString(R.string.db_corruption_action_dismiss),
+                dismissIntent
+            )
+        builder.addAction(clearAction)
+        builder.addAction(dismissAction)
+
+        notificationManager.notify(
+            NOTIF_CHANNEL_ID_FIREWALL_ALERTS,
+            NOTIF_ID_DB_CORRUPTION,
+            builder.build()
+        )
+    }
+
+    suspend fun clearCoreTablesAndRebuild() {
+        Logger.i(LOG_TAG_APP_DB, "clearCoreTablesAndRebuild: clearing AppInfo and ProxyApplicationMapping")
+        try {
+            FirewallManager.clearAllApps()
+            ProxyManager.clear()
+        } catch (e: Exception) {
+            Logger.w(LOG_TAG_APP_DB, "clearCoreTablesAndRebuild: err clearing tables", e)
+        }
+        refresh(ACTION_REFRESH_FORCE)
+    }
+
     // keep in sync with BraveVPNServie#makeVpnIntent
     private fun makeVpnIntent(id: Int, extra: String): PendingIntent {
         val intent = Intent(ctx, NotificationActionReceiver::class.java)

@@ -1,22 +1,39 @@
 package com.celzero.bravedns.wireguard
 
-import Logger
-import Logger.LOG_TAG_PROXY
+import com.celzero.bravedns.util.Logger
+import com.celzero.bravedns.util.Logger.LOG_TAG_PROXY
 import com.celzero.bravedns.database.WgHopMap
 import com.celzero.bravedns.database.WgHopMapRepository
 import com.celzero.bravedns.service.ProxyManager.ID_WG_BASE
 import com.celzero.bravedns.service.VpnController
 import com.celzero.bravedns.service.WireguardManager
 import com.celzero.bravedns.service.WireguardManager.INVALID_CONF_ID
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.util.concurrent.CopyOnWriteArrayList
 
 object WgHopManager: KoinComponent {
 
+    private fun io(f: suspend () -> Unit) {
+        CoroutineScope(Dispatchers.IO).launch { f() }
+    }
+
     private val db: WgHopMapRepository by inject()
     private var maps: CopyOnWriteArrayList<WgHopMap> = CopyOnWriteArrayList()
     private const val TAG = "WgHopMgr"
+
+    init {
+        io {
+            try {
+                load(forceRefresh = false)
+            } catch (e: Exception) {
+                Logger.w(LOG_TAG_PROXY, "$TAG err loading hop maps during init: ${e.message}")
+            }
+        }
+    }
 
     suspend fun load(forceRefresh: Boolean): Int {
         if (!forceRefresh && maps.isNotEmpty()) {
