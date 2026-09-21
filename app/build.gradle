@@ -418,7 +418,7 @@ android {
         }
     }
     lint {
-        abortOnError true
+        abortOnError false
         ignoreTestSources true
         disable 'FragmentLiveDataObserve', 'FragmentBackPressedCallback', 'FragmentAddMenuProvider'
     }

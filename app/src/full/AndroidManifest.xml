@@ -116,12 +116,6 @@
             android:name=".ui.activity.CheckoutActivity"
             android:finishOnTaskLaunch="true" />
         <activity
-            android:name=".ui.activity.PurchaseHistoryActivity"
-            android:finishOnTaskLaunch="true" />
-        <activity
-            android:name=".ui.activity.ServerOrderHistoryActivity"
-            android:finishOnTaskLaunch="true" />
-        <activity
             android:name=".ui.activity.CustomerSupportActivity"
             android:finishOnTaskLaunch="true" />
         <activity
