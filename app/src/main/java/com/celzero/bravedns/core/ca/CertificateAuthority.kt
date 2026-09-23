@@ -450,14 +450,27 @@ object CertificateAuthority {
             .setProvider(BouncyCastleProvider())
             .getCertificate(holder)
 
-        // Store the key+cert in the keystore
-        if (isAndroidKeyStore) {
-            // Overwrite the existing KeyStore entry to associate the custom certificate with the private key.
-            // On Android KeyStore, we pass the private key reference and the certificate chain.
-            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, null, arrayOf(cert))
-        } else {
-            // Software keystore - store both key and cert
-            keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, "password".toCharArray(), arrayOf(cert))
+        // Persist the BC-built bytes FIRST (DECISION-022 fixup): the keystore
+        // setKeyEntry below is ROM-dependent — on some backends (field case:
+        // Redmi 9T MIUI) storing a keystore-native key reference throws or is
+        // ignored, which previously aborted init and left Save greyed out.
+        // The persisted file + in-memory cert survive regardless; the keystore
+        // remains the key holder (keygen already created its entry).
+        persistCaCert(cert)
+
+        // Store the key+cert in the keystore (best-effort on AndroidKeyStore).
+        try {
+            if (isAndroidKeyStore) {
+                // Overwrite the existing KeyStore entry to associate the custom certificate with the private key.
+                // On Android KeyStore, we pass the private key reference and the certificate chain.
+                keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, null, arrayOf(cert))
+            } else {
+                // Software keystore - store both key and cert
+                keyStore.setKeyEntry(ROOT_CA_ALIAS, keyPair.private, "password".toCharArray(), arrayOf(cert))
+            }
+        } catch (e: Exception) {
+            // ROM refused the overwrite — tolerated: memory + persisted file
+            // already carry the BC-built cert, key stays usable in keystore.
         }
 
         rootPrivateKey = keyPair.private
