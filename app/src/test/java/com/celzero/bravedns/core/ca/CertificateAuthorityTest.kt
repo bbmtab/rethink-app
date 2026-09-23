@@ -179,7 +179,6 @@ class CertificateAuthorityTest {
             .build(keyPair.private)
         return builder.build(signer).encoded
     }
-}
 
     @Test
     fun testIsRootCaUsable_acceptsGeneratedRootCA() {
