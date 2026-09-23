@@ -2469,3 +2469,30 @@ valid s/d 2108. Rotasi = file kunci baru + catatan eksplisit.
   reinstall sekali ke v0.5.13+; mulai v0.5.13 update stabil permanen.
 - Tag v0.5.13 HANYA boleh dipotong SETELAH perubahan ini merge ke main
   (build tag tanpa keystore = kunci acak baru lagi).
+
+## DECISION-020: RELEASE-SIGNED MAIN RELEASES (2026-09-23)
+
+**Status:** ACTIVE 2026-09-23. Supersedes DECISION-016 untuk build RILIS
+(016 tetap berlaku untuk build debug/PR/verify: satu debug key stabil).
+
+**Masalah**: semua rilis Plus (v0.5.6 s/d v0.5.13-debug) debug-signed dengan
+kunci berganti-ganti (Juni `F0:0F...`, v0.5.12 ephemeral hilang, v0.5.13 debug
+stabil) — update antar-rilis selalu gagal; user menetapkan rilis main tidak
+boleh versi debug.
+
+**Keputusan**:
+- Keystore rilis khusus (`CN=RethinkDNS Plus, O=bbmtab`, RSA-2048, SHA256
+  `AF:81:AD:D8:...:B9:C2`); file HANYA lokal, TIDAK di-commit; 4 secrets repo
+  (`KEYSTORE_BASE64/PASSWORD/ALIAS/KEY_PASSWORD`). Password di tangan user.
+- Build tag rilis = `assembleFdroidFullRelease` signed, BUKAN full
+  `assembleRelease`: varian play/tv hang ~6h di `compilePlayTvReleaseKotlin`
+  (run 35742738195, job timeout); artefak Plus selama ini fdroid-only.
+- `KEYSTORE_PATH` absolut (`${{ github.workspace }}/app/...`): path relatif
+  digandakan AGP menjadi `app/app/release.keystore` (run 35815299704,
+  `packageFdroidFullRelease` WorkValidationException).
+
+**Konsekuensi yang diterima**:
+- SEMUA versi lama (debug, v0.5.6-v0.5.13-debug) WAJIB uninstall sekali ke
+  v0.5.13+; mulai v0.5.13 update stabil permanen (satu release key).
+- v0.5.13-plus di re-cut 2x (debug -> signed); tag final di `e3519131b`
+  (Merge PR #7), run 35817571844 SUCCESS.
