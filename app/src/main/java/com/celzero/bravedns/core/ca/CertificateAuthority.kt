@@ -81,6 +81,29 @@ object CertificateAuthority {
     }
 
     /**
+     * Discipline gate (DECISION-021): a persisted Root CA is reusable ONLY when
+     * it is a currently-valid CA certificate — BasicConstraints CA:true plus
+     * keyCertSign usage. Stale entries (notably extension-less AndroidKeyStore
+     * system certs persisted by pre-fix builds) are unusable: Android 11+
+     * refuses to install them as a CA ("private key required" in every
+     * installer slot) and reusing them would preserve the breakage forever.
+     * Pure function of the certificate — no Android APIs, unit-testable on JVM.
+     */
+    fun isRootCaUsable(cert: X509Certificate): Boolean {
+        try {
+            cert.checkValidity()
+        } catch (e: Exception) {
+            return false
+        }
+        // basicConstraints < 0 means "not a CA" — the CA installer rejects it.
+        if (cert.basicConstraints < 0) return false
+        // keyCertSign is bit 5 of KeyUsage.
+        val keyUsage = cert.keyUsage ?: return false
+        if (keyUsage.size <= 5 || !keyUsage[5]) return false
+        return true
+    }
+
+    /**
      * Initializes the Root Certificate Authority.
      * Loads the existing Root CA from AndroidKeyStore, or generates a new one.
      * For unit tests (JVM), falls back to a software keystore since AndroidKeyStore is not available.
@@ -99,10 +122,20 @@ object CertificateAuthority {
             if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
                 val key = keyStore.getKey(ROOT_CA_ALIAS, null)
                 val cert = keyStore.getCertificate(ROOT_CA_ALIAS)
-                if (key is PrivateKey && cert is X509Certificate) {
+                if (key is PrivateKey && cert is X509Certificate && isRootCaUsable(cert)) {
                     rootPrivateKey = key
                     rootCertificate = cert
                     return
+                }
+                // Stale/unusable entry (DECISION-021): e.g. an extension-less
+                // AndroidKeyStore system cert persisted by a pre-fix build. It can
+                // never install as a CA (Android 11+ requires CA:TRUE), so drop it
+                // and fall through to generate a proper one below. Note: this
+                // changes identity — isCaInstalled() flips false and the existing
+                // UX flow prompts the user to re-install the CA.
+                try {
+                    keyStore.deleteEntry(ROOT_CA_ALIAS)
+                } catch (_: Exception) {
                 }
             }
 

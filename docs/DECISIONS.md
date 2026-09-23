@@ -2469,3 +2469,65 @@ valid s/d 2108. Rotasi = file kunci baru + catatan eksplisit.
   reinstall sekali ke v0.5.13+; mulai v0.5.13 update stabil permanen.
 - Tag v0.5.13 HANYA boleh dipotong SETELAH perubahan ini merge ke main
   (build tag tanpa keystore = kunci acak baru lagi).
+
+## DECISION-020: RELEASE-SIGNED MAIN RELEASES (2026-09-23)
+
+**Status:** ACTIVE 2026-09-23. Supersedes DECISION-016 untuk build RILIS
+(016 tetap berlaku untuk build debug/PR/verify: satu debug key stabil).
+
+**Masalah**: semua rilis Plus (v0.5.6 s/d v0.5.13-debug) debug-signed dengan
+kunci berganti-ganti (Juni `F0:0F...`, v0.5.12 ephemeral hilang, v0.5.13 debug
+stabil) — update antar-rilis selalu gagal; user menetapkan rilis main tidak
+boleh versi debug.
+
+**Keputusan**:
+- Keystore rilis khusus (`CN=RethinkDNS Plus, O=bbmtab`, RSA-2048, SHA256
+  `AF:81:AD:D8:...:B9:C2`); file HANYA lokal, TIDAK di-commit; 4 secrets repo
+  (`KEYSTORE_BASE64/PASSWORD/ALIAS/KEY_PASSWORD`). Password di tangan user.
+- Build tag rilis = `assembleFdroidFullRelease` signed, BUKAN full
+  `assembleRelease`: varian play/tv hang ~6h di `compilePlayTvReleaseKotlin`
+  (run 35742738195, job timeout); artefak Plus selama ini fdroid-only.
+- `KEYSTORE_PATH` absolut (`${{ github.workspace }}/app/...`): path relatif
+  digandakan AGP menjadi `app/app/release.keystore` (run 35815299704,
+  `packageFdroidFullRelease` WorkValidationException).
+
+**Konsekuensi yang diterima**:
+- SEMUA versi lama (debug, v0.5.6-v0.5.13-debug) WAJIB uninstall sekali ke
+  v0.5.13+; mulai v0.5.13 update stabil permanen (satu release key).
+- v0.5.13-plus di re-cut 2x (debug -> signed); tag final di `e3519131b`
+  (Merge PR #7), run 35817571844 SUCCESS.
+
+## DECISION-021: VALIDATE PERSISTED ROOT CA ON LOAD (2026-09-23)
+
+**Status:** ACTIVE 2026-09-23.
+
+**Kasus lapangan**: Redmi 9T MIUI (`562ae1730521`). Ketiga slot installer
+(CA / WiFi / VPN-user cert) semua menolak dengan "private key required".
+Dua file di-pull dari Downloads dan dibedah dengan keytool:
+- `rethinkdns_root_ca.crt` 805B (export v5.10): V3, `CA:TRUE` critical,
+  KU `keyCertSign+crlSign`, 10 thn, serial timestamp → INSTALLABLE.
+- `20260923_*_rethinkdns_root_ca.crt` 782B: V3, RSA-2048, serial 159-bit,
+  10 thn, **NOL extensions** → profil self-signed bawaan AndroidKeyStore
+  (efek samping `KeyGenParameterSpec`), BUKAN hasil builder BC kita →
+  DITOLAK installer Android 11+ di semua slot.
+
+**Mekanisme**: init reuse (`CertificateAuthority.kt`, blok
+`containsAlias` → `getKey/getCertificate` → `return`) memakai entry
+keystore APA ADANYA tanpa cek extensions/validity. Entry basi (system cert
+pra-fix, atau overwrite `setKeyEntry` yang tak menempel di ROM itu) dipakai
+selamanya; fix generator tak pernah teraplikasi di device tersebut. Fresh
+install selalu benar (Mi A1; v5.10 fresh 11:57) — konsisten dengan observasi.
+
+**Keputusan**: `isRootCaUsable()` (wajib `CA:true` + `keyCertSign` +
+`checkValidity`; pure function, JVM-testable); entry tak-layak →
+`deleteEntry` + regenerate. Ini mengganti identitas → `isCaInstalled()`
+flip false → alur UX yang sudah ada meminta user reinstall CA (bukan silent
+break). Sengaja TANPA `android.util.Log` (stub JVM melempar pada unit test;
+sinyal observabilitas = flip `isCaInstalled` + prompt reinstall).
+
+**Pelajaran disiplin**: material keamanan yang dipersist WAJIB divalidasi
+saat load — "generate benar" tidak cukup bila "reuse buta". Kasus ini tidak
+terjadi bila disiplin itu ditegakkan sejak generator diperbaiki.
+Test: `testIsRootCaUsable_acceptsGeneratedRootCA` +
+`testIsRootCaUsable_rejectsExtensionlessSystemStyleCert` (9/9 hijau lokal);
+gate CI ditambah `core.ca.*`.

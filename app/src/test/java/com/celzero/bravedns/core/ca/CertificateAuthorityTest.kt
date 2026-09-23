@@ -115,4 +115,39 @@ class CertificateAuthorityTest {
         assertNotNull("Root certificate should not be null", rootCert)
         assertTrue("Root certificate should have basicConstraints >= 0", rootCert.basicConstraints >= 0)
     }
+
+    @Test
+    fun testIsRootCaUsable_acceptsGeneratedRootCA() {
+        val rootCert = CertificateAuthority.getRootCertificate()
+        assertTrue("Generated Root CA must be reusable (CA:true + keyCertSign + valid)",
+            CertificateAuthority.isRootCaUsable(rootCert))
+    }
+
+    @Test
+    fun testIsRootCaUsable_rejectsExtensionlessSystemStyleCert() {
+        // Mimics an AndroidKeyStore system-generated self-signed cert: V3, valid
+        // dates, but zero extensions (no CA:TRUE) — the exact profile of the
+        // 782-byte field file the CA installer rejects (DECISION-021).
+        val kpg = java.security.KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val keyPair = kpg.generateKeyPair()
+        val dn = org.bouncycastle.asn1.x500.X500Name("CN=RethinkDNS Root CA, O=RethinkDNS, C=US")
+        val now = java.util.Date()
+        val builder = org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder(
+            dn,
+            java.math.BigInteger(159, java.security.SecureRandom()),
+            now,
+            java.util.Date(now.time + 10L * 365 * 24 * 60 * 60 * 1000),
+            dn,
+            keyPair.public
+        )
+        val signer = org.bouncycastle.operator.jcajce.JcaContentSignerBuilder("SHA256withRSA")
+            .build(keyPair.private)
+        val holder = builder.build(signer)
+        val factory = CertificateFactory.getInstance("X.509")
+        val cert = factory.generateCertificate(ByteArrayInputStream(holder.encoded)) as X509Certificate
+        assertEquals("System-style cert must carry no CA flag", -1, cert.basicConstraints)
+        assertFalse("Extension-less cert must be rejected for reuse",
+            CertificateAuthority.isRootCaUsable(cert))
+    }
 }
