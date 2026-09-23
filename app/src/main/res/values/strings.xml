@@ -3093,7 +3093,7 @@
     <string name="plus_exclusions_title">Exclusions</string>
     <string name="plus_exclusions_desc">Configure apps to exclude from HTTPS inspection</string>
 
-    <string name="plus_ca_install_success">CA certificate installed successfully</string>
+    <string name="plus_ca_generate_success">CA certificate generated — now tap Install or Save</string>
     <string name="plus_ca_install_error">Failed to install CA certificate: %s</string>
     <string name="plus_ca_export_error">Failed to export CA certificate: %s</string>
     <string name="plus_blocklist_bridge_status">Last sync: %s</string>
