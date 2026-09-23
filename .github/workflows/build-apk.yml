@@ -123,7 +123,11 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -f "app/release.keystore" ]; then
-            ./gradlew assembleRelease \
+            # Scoped to fdroidFullRelease only: full assembleRelease also builds
+            # play/tv variants and hangs ~6h in compilePlayTvReleaseKotlin on the
+            # hosted runner (run 35742738195), hitting the job timeout. Past Plus
+            # releases shipped fdroid-full APKs only, so no artifact is lost.
+            ./gradlew assembleFdroidFullRelease \
               -Pandroid.injected.signing.store.file=$KEYSTORE_PATH \
               -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
               -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
