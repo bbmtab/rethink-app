@@ -117,7 +117,9 @@ jobs:
       - name: Build Signed Release APK
         if: github.event_name != 'pull_request'
         env:
-          KEYSTORE_PATH: app/release.keystore
+          # Absolute path: AGP resolves a relative store.file against the app
+          # module dir, which doubled it to app/app/release.keystore (run 35815299704).
+          KEYSTORE_PATH: ${{ github.workspace }}/app/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
