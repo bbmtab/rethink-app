@@ -79,6 +79,7 @@ jobs:
           ./gradlew :app:testFdroidFullDebugUnitTest
           --tests "com.celzero.bravedns.core.proxy.policy.*"
           --tests "com.celzero.bravedns.core.filter.FilterSourceCompilerTest"
+          --tests "com.celzero.bravedns.core.ca.*"
           --tests "com.celzero.bravedns.database.*"
           --tests "com.celzero.bravedns.service.VpnWatchdogTest"
           --tests "com.celzero.bravedns.service.VpnWatchdogSchedulerTest"
