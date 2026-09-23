@@ -64,6 +64,15 @@ object CertificateAuthority {
     private var rootPrivateKey: PrivateKey? = null
     private var rootCertificate: X509Certificate? = null
 
+    /**
+     * App-private dir for persisting the BC-built Root CA bytes (DECISION-022).
+     * The keystore is the key holder; the persisted BC cert is the authority on
+     * WHAT the certificate is — keystore round-trips are ROM-dependent and have
+     * returned extension-less system certs. Null on JVM/tests → persistence off.
+     */
+    internal var persistedFilesDir: java.io.File? = null
+    internal const val PERSISTED_CA_FILENAME = "rethink_root_ca.der"
+
     init {
         // Register BouncyCastle provider if it is not already registered (critical for JVM unit tests and some devices)
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
@@ -77,6 +86,10 @@ object CertificateAuthority {
      */
     @Synchronized
     fun initializeCA(context: Context) {
+        try {
+            persistedFilesDir = context.applicationContext.filesDir
+        } catch (e: Exception) {
+        }
         initializeCA()
     }
 
@@ -119,30 +132,105 @@ object CertificateAuthority {
             }
             keyStore.load(null)
 
-            if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
-                val key = keyStore.getKey(ROOT_CA_ALIAS, null)
-                val cert = keyStore.getCertificate(ROOT_CA_ALIAS)
-                if (key is PrivateKey && cert is X509Certificate && isRootCaUsable(cert)) {
-                    rootPrivateKey = key
-                    rootCertificate = cert
-                    return
-                }
-                // Stale/unusable entry (DECISION-021): e.g. an extension-less
-                // AndroidKeyStore system cert persisted by a pre-fix build. It can
-                // never install as a CA (Android 11+ requires CA:TRUE), so drop it
-                // and fall through to generate a proper one below. Note: this
-                // changes identity — isCaInstalled() flips false and the existing
-                // UX flow prompts the user to re-install the CA.
-                try {
-                    keyStore.deleteEntry(ROOT_CA_ALIAS)
-                } catch (_: Exception) {
-                }
-            }
-
+            if (ensureAuthoritativeCert(keyStore)) return
             // No valid CA found — generate a new one and persist it in AndroidKeyStore
             generateAndStoreRootCA(keyStore)
+            // Persist the BC-built bytes independently (DECISION-022): the keystore
+            // round-trip is ROM-dependent and may hand back an extension-less
+            // system cert. The persisted BC cert is the authority from here on.
+            rootCertificate?.let { persistCaCert(it) }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    /**
+     * Resolves the authoritative Root CA into memory. Precedence
+     * (DECISION-022): in-memory usable cert → persisted BC-built cert paired to
+     * the keystore key → usable keystore entry itself (adopted + persisted).
+     * Anything else → false, caller regenerates. A persisted BC cert shares the
+     * keypair with the keystore entry, so adopting it never changes identity —
+     * no spurious CA-reinstall prompts.
+     */
+    private fun ensureAuthoritativeCert(keyStore: KeyStore): Boolean {
+        rootCertificate?.let { if (isRootCaUsable(it)) return true }
+
+        val key: Key?
+        val entryCert: java.security.cert.Certificate?
+        try {
+            if (!keyStore.containsAlias(ROOT_CA_ALIAS)) return false
+            key = keyStore.getKey(ROOT_CA_ALIAS, null)
+            entryCert = keyStore.getCertificate(ROOT_CA_ALIAS)
+        } catch (e: Exception) {
+            return false
+        }
+        if (key !is PrivateKey || entryCert !is X509Certificate) {
+            try {
+                keyStore.deleteEntry(ROOT_CA_ALIAS)
+            } catch (_: Exception) {
+            }
+            return false
+        }
+
+        // 1. Persisted BC-built cert paired to this exact keypair wins over
+        //    whatever bytes the keystore round-trip returns.
+        loadPersistedCaCert()?.let { persisted ->
+            if (persisted.publicKey == entryCert.publicKey && isRootCaUsable(persisted)) {
+                rootPrivateKey = key
+                rootCertificate = persisted
+                return true
+            }
+        }
+
+        // 2. Keystore entry itself usable → adopt it and persist its bytes.
+        if (isRootCaUsable(entryCert)) {
+            rootPrivateKey = key
+            rootCertificate = entryCert
+            persistCaCert(entryCert)
+            return true
+        }
+
+        // 3. Unusable (DECISION-021): drop so the caller regenerates.
+        try {
+            keyStore.deleteEntry(ROOT_CA_ALIAS)
+        } catch (_: Exception) {
+        }
+        return false
+    }
+
+    /**
+     * Reads the independently-persisted BC-built Root CA. Returns null when
+     * persistence is off (no filesDir), the file is absent, or its bytes do
+     * not parse / are not a usable CA — never trust persisted bytes blindly.
+     */
+    private fun loadPersistedCaCert(): X509Certificate? {
+        val dir = persistedFilesDir ?: return null
+        try {
+            val file = java.io.File(dir, PERSISTED_CA_FILENAME)
+            if (!file.isFile) return null
+            val bytes = file.readBytes()
+            if (bytes.isEmpty()) return null
+            val factory = java.security.cert.CertificateFactory.getInstance("X.509")
+            val cert = factory.generateCertificate(bytes.inputStream()) as? X509Certificate
+                ?: return null
+            if (!isRootCaUsable(cert)) return null
+            return cert
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    /**
+     * Persists BC-built Root CA bytes to app-private storage. Best-effort and
+     * silent: JVM/tests (no filesDir) and write failures simply skip — the
+     * keystore remains the key holder either way.
+     */
+    private fun persistCaCert(cert: X509Certificate) {
+        val dir = persistedFilesDir ?: return
+        try {
+            if (!dir.isDirectory && !dir.mkdirs()) return
+            java.io.File(dir, PERSISTED_CA_FILENAME).writeBytes(cert.encoded)
+        } catch (e: Exception) {
         }
     }
 
@@ -157,15 +245,8 @@ object CertificateAuthority {
             }
             keyStore.load(null)
 
-            if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
-                val key = keyStore.getKey(ROOT_CA_ALIAS, null)
-                val cert = keyStore.getCertificate(ROOT_CA_ALIAS)
-                if (key is PrivateKey && cert is X509Certificate) {
-                    rootPrivateKey = key
-                    rootCertificate = cert
-                    return true
-                }
-            }
+            // Authoritative resolution (DECISION-022), never raw keystore bytes.
+            return ensureAuthoritativeCert(keyStore)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -513,6 +594,13 @@ object CertificateAuthority {
             keyStore.load(null)
             if (keyStore.containsAlias(ROOT_CA_ALIAS)) {
                 keyStore.deleteEntry(ROOT_CA_ALIAS)
+            }
+            try {
+                persistedFilesDir?.let { dir ->
+                    val file = java.io.File(dir, PERSISTED_CA_FILENAME)
+                    if (file.isFile) file.delete()
+                }
+            } catch (_: Exception) {
             }
             rootPrivateKey = null
             rootCertificate = null

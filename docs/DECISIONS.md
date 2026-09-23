@@ -2531,3 +2531,30 @@ terjadi bila disiplin itu ditegakkan sejak generator diperbaiki.
 Test: `testIsRootCaUsable_acceptsGeneratedRootCA` +
 `testIsRootCaUsable_rejectsExtensionlessSystemStyleCert` (9/9 hijau lokal);
 gate CI ditambah `core.ca.*`.
+
+## DECISION-022: PERSIST BC-BUILT CA BYTES INDEPENDENTLY (2026-09-23)
+
+**Status:** ACTIVE 2026-09-23. Melengkapi 021 yang tak cukup di ROM ini.
+
+**Temuan lanjutan (Redmi 9T, bukti decisif)**: export FRESH v0.5.13 paska
+wipe total (14:15, serial/validity baru) TETAP 782B tanpa extensions.
+Code path sama persis dengan v5.10 yang di device SAMA menempel (serial
+timestamp 11:58 = bukti fresh-gen v5.10). Delta kode satu-satunya: skema
+serial (timestamp → 159-bit random) + SKID/AKID (`a81a42ec7`). Mana yang
+memicu backend keystore MIUI A12 tak bisa dipastikan tanpa instrumentasi —
+dan justru itu poinnya: **fidelity round-trip keystore beda tiap ROM,
+kode tidak boleh bergantung padanya.**
+
+**Keputusan**: keystore hanya pemegang kunci; bytes cert BC di-persist
+terpisah (`filesDir/rethink_root_ca.der`) dan menjadi otoritas.
+Preseden resolusi: memory usable → file BC terpairing keypair +
+usable → entry keystore usable (adopsi+persist) → selain itu regenerate.
+Pairing dicek via kesamaan publicKey, jadi adopsi tak pernah ganti
+identitas (tanpa prompt reinstall palsu). Export/chain/isCaInstalled
+semua membaca jalur otoritatif ini — rantai MITM tak bisa lagi menyajikan
+system cert. Tanpa `android.util.Log` (stub JVM). `resetCA()` ikut hapus
+file. Test: round-trip persist==export + poison-heal (11/11 target lokal);
+pairing-adopt dibuktikan on-device 9T.
+
+**Pelajaran disiplin**: jangan percaya round-trip storage bawaan OS untuk
+material keamanan — simpan dan verifikasi artefak yang dibangun sendiri.

@@ -117,6 +117,70 @@ class CertificateAuthorityTest {
     }
 
     @Test
+    fun testPersistedCaCert_roundTripMatchesExport() {
+        val tmp = java.nio.file.Files.createTempDirectory("ca-persist-test").toFile()
+        try {
+            CertificateAuthority.persistedFilesDir = tmp
+            CertificateAuthority.resetCA()
+            CertificateAuthority.initializeCA()
+            val files = tmp.listFiles { f -> f.isFile && f.name.endsWith(".der") }
+            assertNotNull("Persisted BC cert file must exist", files)
+            assertEquals("Exactly one persisted cert file expected", 1, files!!.size)
+            val factory = CertificateFactory.getInstance("X.509")
+            val persisted = factory.generateCertificate(ByteArrayInputStream(files[0].readBytes())) as X509Certificate
+            assertTrue("Persisted cert must be usable", CertificateAuthority.isRootCaUsable(persisted))
+            assertArrayEquals("Export must serve the persisted BC cert, not keystore round-trip bytes",
+                files[0].readBytes(), CertificateAuthority.exportCaCert())
+        } finally {
+            CertificateAuthority.persistedFilesDir = null
+            tmp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testPersistedCaCert_poisonBytesHealedOnInit() {
+        val tmp = java.nio.file.Files.createTempDirectory("ca-poison-test").toFile()
+        try {
+            CertificateAuthority.persistedFilesDir = tmp
+            CertificateAuthority.resetCA()
+            // Poison the persisted slot with an extension-less system-style cert.
+            java.io.File(tmp, CertificateAuthority.PERSISTED_CA_FILENAME)
+                .writeBytes(buildSystemStyleCertBytes())
+            CertificateAuthority.initializeCA()
+            val healed = CertificateAuthority.getRootCertificate()
+            assertTrue("Regenerated cert must be usable", CertificateAuthority.isRootCaUsable(healed))
+            val factory = CertificateFactory.getInstance("X.509")
+            val onDisk = factory.generateCertificate(ByteArrayInputStream(
+                java.io.File(tmp, CertificateAuthority.PERSISTED_CA_FILENAME).readBytes()
+            )) as X509Certificate
+            assertTrue("Poison file must be overwritten with a usable cert",
+                CertificateAuthority.isRootCaUsable(onDisk))
+        } finally {
+            CertificateAuthority.persistedFilesDir = null
+            tmp.deleteRecursively()
+        }
+    }
+
+    private fun buildSystemStyleCertBytes(): ByteArray {
+        val kpg = java.security.KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val keyPair = kpg.generateKeyPair()
+        val dn = org.bouncycastle.asn1.x500.X500Name("CN=RethinkDNS Root CA, O=RethinkDNS, C=US")
+        val now = java.util.Date()
+        val builder = org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder(
+            dn,
+            java.math.BigInteger(159, java.security.SecureRandom()),
+            now,
+            java.util.Date(now.time + 10L * 365 * 24 * 60 * 60 * 1000),
+            dn,
+            keyPair.public
+        )
+        val signer = org.bouncycastle.operator.jcajce.JcaContentSignerBuilder("SHA256withRSA")
+            .build(keyPair.private)
+        return builder.build(signer).encoded
+    }
+
+    @Test
     fun testIsRootCaUsable_acceptsGeneratedRootCA() {
         val rootCert = CertificateAuthority.getRootCertificate()
         assertTrue("Generated Root CA must be reusable (CA:true + keyCertSign + valid)",
