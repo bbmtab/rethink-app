@@ -346,7 +346,10 @@ class RethinkPlusFragment : Fragment(R.layout.fragment_rethink_plus) {
                     CertificateAuthority.initializeCA(requireContext())
                     withContext(Dispatchers.Main) {
                         b.progressGen.isVisible = false
-                        showToast(getString(R.string.plus_ca_install_success))
+                        // Truthful toast (was: install_success): generation only
+                        // creates the keypair/cert in app storage. System-trust
+                        // install happens via Install/Save + user confirmation.
+                        showToast(getString(R.string.plus_ca_generate_success))
                         updateCaStatusUi()
                     }
                 } catch (e: Exception) {
