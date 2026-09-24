@@ -2558,3 +2558,31 @@ pairing-adopt dibuktikan on-device 9T.
 
 **Pelajaran disiplin**: jangan percaya round-trip storage bawaan OS untuk
 material keamanan — simpan dan verifikasi artefak yang dibangun sendiri.
+
+## DECISION-023: RELEASE-KEY ROTATION AFTER LOSS + BACKUP RULE (2026-09-24)
+
+**Status:** ACTIVE 2026-09-24.
+
+**Insiden**: keystore rilis 2026-09-22 (`AF:81...`, dipakai v0.5.13/14)
+hilang seluruh direktori oleh cleanup-disk otomatis agen lain saat L:
+penuh — BUKAN oleh sesi ini. Pencarian (K:\, L:\Temp, user home) nihil.
+GitHub secrets tak bisa dibaca balik → private key tak terpulihkan.
+
+**Keputusan**:
+- Kunci BARU SHA256
+  `0E:DA:0C:BC:58:1C:69:DA:3C:39:BC:EA:79:FC:53:05:38:68:5F:A0:94:BA:19:D9:0F:51:F9:27:31:6A:8D:3C`
+  (RSA-2048, 10000 hari, alias `rethink-plus`), di
+  `K:\rethink-release-keys\` + file `DO-NOT-DELETE.txt`. 4 secrets
+  di-rotate (02:20Z). Password HANYA di tangan owner (transit dihapus;
+  satu insiden nyaris-hilang saat handover — password sempat tampil
+  length-only sebelum file dihapus — diperbaiki dengan regenerasi
+  + tampil eksplisit sebelum hapus transit).
+- Konsekuensi jujur: user v0.5.13/14 (kunci `AF:81`) WAJIB reinstall sekali
+  di rilis berkunci-baru berikutnya. Catat di notes rilis itu.
+
+**Aturan tetap**:
+- Material kunci TIDAK PERNAH hanya 1 kopi di scratch drive; backup ≥2
+  tempat off-machine. Direktori kunci EXCLUDED dari semua sweep cleanup
+  agen — kecelakaan ini tidak boleh terulang.
+- Handover password SELALU eksplisit di chat SEBELUM file transit dihapus;
+  verifikasi owner sudah simpan bila mungkin.
