@@ -2559,6 +2559,30 @@ pairing-adopt dibuktikan on-device 9T.
 **Pelajaran disiplin**: jangan percaya round-trip storage bawaan OS untuk
 material keamanan — simpan dan verifikasi artefak yang dibangun sendiri.
 
+**Fixup 2026-09-24 (PR #12, merged `2cb2b2aef`)**: v0.5.14 di 9T tetap
+Save grey-out — `setKeyEntry` yang refusal menggugurkan seluruh init
+(root null → export lempar). Kini: persist BC bytes DULU, store
+best-effort try/catch, memory selalu diisi hasil build. Di ROM normal
+nol perubahan perilaku.
+
+**Bukti lapangan 2026-09-24 (Redmi 9T, build PR #12 resigned kunci baru)**:
+fresh install → Generate → Save/Export → install sistem OK →
+`isCaInstalled` true ("CA certificate installed / HTTPS inspection is
+ready") → START → tun1 UP → `MITM_KNOWN_BROWSER` +
+`Established TLS MITM tunnel` (ot.www.cloudflare.com,
+firebaselogging.googleapis.com); play.googleapis.com tetap
+`BYPASS_DEFAULT` sesuai policy. Rantai CA→MITM TERBUKTI ujung-ke-ujung
+di ROM yang kemarin menolak. ("Read timed out" transient terpantau,
+pulih sendiri — observasi lama.)
+
+**Plus — toast sukses palsu (PR #11, merged `a74278180`)**: tombol
+Generate men-toast `plus_ca_install_success` padahal hanya `initializeCA`
+(generate, bukan install) — menutupi kegagalan installer nyata (kasus 9T:
+Save grey-out + toast sukses bersamaan). Kini `plus_ca_generate_success`
+yang jujur ("generated — now tap Install or Save"); string lama dihapus
+(1 ref). Pelajaran: toast sukses HANYA untuk efek yang terverifikasi,
+bukan untuk langkah perantara.
+
 ## DECISION-023: RELEASE-KEY ROTATION AFTER LOSS + BACKUP RULE (2026-09-24)
 
 **Status:** ACTIVE 2026-09-24.
