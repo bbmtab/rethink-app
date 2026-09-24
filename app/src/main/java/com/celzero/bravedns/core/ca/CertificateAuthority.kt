@@ -348,7 +348,6 @@ object CertificateAuthority {
 
         val holder = certBuilder.build(signer)
         val leafCert = JcaX509CertificateConverter()
-            .setProvider(BouncyCastleProvider())
             .getCertificate(holder)
 
         val keyAndCert = KeyAndCert(keyPair.private, leafCert)
@@ -447,7 +446,6 @@ object CertificateAuthority {
 
         val holder = certBuilder.build(signer)
         val cert = JcaX509CertificateConverter()
-            .setProvider(BouncyCastleProvider())
             .getCertificate(holder)
 
         // Persist the BC-built bytes FIRST (DECISION-022 fixup): the keystore
